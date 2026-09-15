@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Local controller">
+    <rect x="4" y="4" width="56" height="56" rx="12" fill="#1b5f7f"/>
+    <path d="M32 9 L20 27 h8 l-3 12 12-18 H30 z" fill="#ffffff"/>
+    <rect x="14" y="45" width="36" height="3.5" rx="1.75" fill="#ffffff" opacity="0.85"/>
+    <rect x="14" y="52" width="24" height="3.5" rx="1.75" fill="#ffffff" opacity="0.55"/>
+</svg>

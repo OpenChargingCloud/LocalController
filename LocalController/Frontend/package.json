@@ -1,0 +1,30 @@
+{
+  "name": "localcontroller-frontend",
+  "version": "0.1.0",
+  "description": "The web interface of the OpenChargingCloud LocalController: HTML, SCSS and TypeScript bundled by webpack, served by the Hermod HTTP/1.1 server.",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "webpack --mode production",
+    "watch": "webpack --mode development --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "css-loader": "^7.1.5",
+    "html-webpack-plugin": "^5.6.8",
+    "mini-css-extract-plugin": "^2.10.2",
+    "sass": "^1.104.0",
+    "sass-loader": "^17.0.1",
+    "terser-webpack-plugin": "^5.6.1",
+    "ts-loader": "^9.6.2",
+    "typescript": "^5.9.3",
+    "webpack": "^5.110.3",
+    "webpack-cli": "^7.2.3"
+  },
+  "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.3.1"
+  }
+}

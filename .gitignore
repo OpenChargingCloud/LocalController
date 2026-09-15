@@ -4,7 +4,13 @@ obj/
 
 # The frontend: what npm installs and what webpack emits
 node_modules/
-ChargingStation/Frontend/dist/
+LocalController/Frontend/dist/
 
-# The web login of a running station: a password hash, and nobody else's business
+# The web login of a running local controller: a password hash, and nobody
+# else's business
 web-login.json
+
+# What the local controller writes down about itself. Which name servers and
+# which time server a particular box uses is a property of where it stands,
+# not of this repository.
+configuration.json

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title><%= htmlWebpackPlugin.options.title %></title>
+
+    <meta name="description"       content="The web interface of an OpenChargingCloud local controller, served by the Hermod HTTP/1.1 server" />
+    <meta name="author"            content="Achim Friedland // GraphDefined GmbH" />
+
+    <!-- Runtime configuration for the bundle: read via document.querySelector,
+         so that no inline script is needed and the CSP can stay strict. -->
+    <meta name="api-base"          content="/api/v1" />
+    <meta name="frontend-version"  content="<%= htmlWebpackPlugin.options.version %>" />
+
+    <!-- {{...}} placeholders are replaced by the C# server when it serves this
+         stub; html-webpack-plugin leaves them untouched. -->
+    <meta name="server-version"    content="{{ServerVersion}}" />
+
+    <!-- html-webpack-plugin injects the hashed script and stylesheet tags. -->
+
+</head>
+
+<body>
+
+    <div id="app">
+        <noscript>This page needs JavaScript.</noscript>
+    </div>
+
+</body>
+
+</html>

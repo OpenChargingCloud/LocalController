@@ -4,6 +4,78 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <RootNamespace>cloud.charging.open.LocalController</RootNamespace>
+    <Version>0.1.0</Version>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\ChargyCore.NET\ChargyCore\ChargyCore.csproj" />
+    <ProjectReference Include="..\..\Hermod\Hermod\Hermod.csproj" />
+    <ProjectReference Include="..\..\Norn\Norn\Norn.csproj" />
+    <ProjectReference Include="..\..\Styx\Styx\Styx.csproj" />
+    <ProjectReference Include="..\..\WWCP_OCPP\WWCP_OCPPv2.1\WWCP_OCPPv2.1.csproj" />
+    <ProjectReference Include="..\..\WWCP_OCPP\WWCP_OCPPv2.1_LocalController\WWCP_OCPPv2.1_LocalController.csproj" />
+    <ProjectReference Include="..\..\WWCP_OCPP\WWCP_OCPP_Common\WWCP_OCPP_Common.csproj" />
+  </ItemGroup>
+
+  <!--
+    The web interface
+    =================
+
+    The frontend lives in Frontend/ (npm + webpack) and is built into
+    Frontend/dist. This project runs that build and embeds dist/ as manifest
+    resources named "<RootNamespace>.HTTPRoot.<dir>.<file>", e.g.
+    "cloud.charging.open.LocalController.HTTPRoot.assets.main.3f9c1a.js" -
+    which is what Hermod's EmbeddedContentSource reads and
+    MapSinglePageApplication serves.
+
+      dotnet build                            builds the frontend when its inputs changed
+      dotnet build -p:SkipFrontendBuild=true  backend only, reuses the existing dist/
+
+    Three separate targets on purpose:
+      - NpmInstall     runs "npm ci" only when node_modules is missing
+      - BuildFrontend  runs "npm run build" incrementally (Inputs/Outputs)
+      - EmbedFrontend  adds the EmbeddedResource items; it must NOT carry
+                       Inputs/Outputs, because a target skipped as up-to-date
+                       does not evaluate its item groups.
+    Static globs in the project body would not work: they are evaluated before
+    any target runs, i.e. before dist/ exists on a clean build.
+  -->
+
+  <PropertyGroup Label="Frontend">
+    <FrontendDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', 'Frontend'))</FrontendDir>
+    <FrontendDist>$([MSBuild]::NormalizeDirectory('$(FrontendDir)', 'dist'))</FrontendDist>
+    <FrontendResourcePrefix>$(RootNamespace).HTTPRoot.</FrontendResourcePrefix>
+    <FrontendBuildEnabled Condition="'$(SkipFrontendBuild)' != 'true' And '$(DesignTimeBuild)' != 'true'">true</FrontendBuildEnabled>
+  </PropertyGroup>
+
+  <ItemGroup Label="Frontend">
+    <FrontendInput Include="$(FrontendDir)src\**\*" />
+    <FrontendInput Include="$(FrontendDir)package.json;$(FrontendDir)package-lock.json;$(FrontendDir)tsconfig.json;$(FrontendDir)webpack.config.js" />
+  </ItemGroup>
+
+  <Target Name="NpmInstall" Condition="'$(FrontendBuildEnabled)' == 'true' And !Exists('$(FrontendDir)node_modules')">
+    <Message Importance="high" Text="Frontend: installing npm dependencies in '$(FrontendDir)' ..." />
+    <Exec Command="npm install" WorkingDirectory="$(FrontendDir)" Condition="!Exists('$(FrontendDir)package-lock.json')" />
+    <Exec Command="npm ci" WorkingDirectory="$(FrontendDir)" Condition="Exists('$(FrontendDir)package-lock.json')" />
+  </Target>
+
+  <Target Name="BuildFrontend" DependsOnTargets="NpmInstall" Inputs="@(FrontendInput)" Outputs="$(FrontendDist)index.html" Condition="'$(FrontendBuildEnabled)' == 'true'">
+    <Message Importance="high" Text="Frontend: running 'npm run build' in '$(FrontendDir)' ..." />
+    <Exec Command="npm run build" WorkingDirectory="$(FrontendDir)" />
+  </Target>
+
+  <Target Name="EmbedFrontend" DependsOnTargets="BuildFrontend" BeforeTargets="BeforeBuild" Condition="'$(DesignTimeBuild)' != 'true'">
+
+    <Error Condition="!Exists('$(FrontendDist)index.html')" Text="The frontend build output '$(FrontendDist)' is missing. Run 'npm run build' in '$(FrontendDir)', or build with -p:SkipFrontendBuild=true to leave the web interface out." />
+
+    <ItemGroup>
+      <_FrontendFile Include="$(FrontendDist)**\*" />
+      <EmbeddedResource Include="@(_FrontendFile)" LogicalName="$(FrontendResourcePrefix)$([System.String]::Copy('%(_FrontendFile.RecursiveDir)').Replace('\', '.').Replace('/', '.'))%(_FrontendFile.Filename)%(_FrontendFile.Extension)" WithCulture="false" />
+    </ItemGroup>
+
+    <Message Importance="high" Text="Frontend: embedding @(_FrontendFile-&gt;Count()) files from '$(FrontendDist)' as '$(FrontendResourcePrefix)*'." />
+
+  </Target>
 
 </Project>

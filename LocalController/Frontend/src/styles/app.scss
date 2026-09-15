@@ -1,0 +1,1003 @@
+// The web interface of a local controller: a menu on the left, a page on the
+// right, and a log that has to stay readable when a thousand lines an hour go
+// through it.
+
+// Design tokens
+$color-bg:           #f6f7f9;
+$color-surface:      #ffffff;
+$color-text:         #1f2933;
+$color-muted:        #616e7c;
+$color-accent:       #1b5f7f;
+$color-accent-dark:  #14495f;
+$color-ok:           #1e7f4f;
+$color-warn:         #c98a1b;
+$color-error:        #b42318;
+$color-error-bg:     #fde8e6;
+$color-warn-bg:      #fff7e6;
+$color-border:       #d9dee5;
+
+$color-sidebar:      #16202b;
+$color-sidebar-text: #c9d4df;
+$color-sidebar-hi:   #ffffff;
+
+$font-stack:         system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+$font-mono:          ui-monospace, "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+
+$radius:             8px;
+$sidebar-width:      15rem;
+
+@mixin panel {
+    background:     $color-surface;
+    border:         1px solid $color-border;
+    border-radius:  $radius;
+}
+
+
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+html, body {
+    margin:       0;
+    height:       100%;
+    background:   $color-bg;
+    color:        $color-text;
+    font-family:  $font-stack;
+    line-height:  1.45;
+}
+
+#app, .page {
+    height: 100%;
+}
+
+a {
+    color:            $color-accent;
+    text-decoration:  none;
+
+    &:hover {
+        text-decoration: underline;
+    }
+}
+
+code {
+    font-family:  $font-mono;
+    font-size:    0.9em;
+}
+
+h1, h2 {
+    font-weight: 600;
+}
+
+.muted {
+    color: $color-muted;
+}
+
+.small {
+    font-size: 0.85rem;
+}
+
+
+// Buttons and forms
+
+.btn {
+
+    display:         inline-flex;
+    align-items:     center;
+    gap:             0.4rem;
+    font:            inherit;
+    padding:         0.45rem 0.9rem;
+    border:          1px solid $color-border;
+    border-radius:   $radius;
+    background:      $color-surface;
+    color:           $color-text;
+    cursor:          pointer;
+    white-space:     nowrap;
+
+    &:hover {
+        border-color:  $color-accent;
+        color:         $color-accent;
+    }
+
+    &:disabled {
+        opacity:  0.6;
+        cursor:   default;
+    }
+
+    &.primary {
+        background:    $color-accent;
+        border-color:  $color-accent;
+        color:         #ffffff;
+
+        &:hover {
+            background:    $color-accent-dark;
+            border-color:  $color-accent-dark;
+            color:         #ffffff;
+        }
+
+        // The opacity of the rule above is not enough on a filled button: a
+        // disabled Save stayed green enough to look like a Save that works.
+        &:disabled,
+        &:disabled:hover {
+            background:    $color-border;
+            border-color:  $color-border;
+            color:         $color-muted;
+        }
+
+    }
+
+    &.small {
+        padding:    0.3rem 0.6rem;
+        font-size:  0.85rem;
+    }
+
+    &.danger:hover {
+        border-color:  $color-error;
+        color:         $color-error;
+    }
+
+}
+
+input, textarea, select {
+
+    font:           inherit;
+    color:          $color-text;
+    padding:        0.5rem 0.7rem;
+    border:         1px solid $color-border;
+    border-radius:  $radius;
+    background:     $color-surface;
+
+    &:focus {
+        outline:       2px solid rgba($color-accent, 0.35);
+        border-color:  $color-accent;
+    }
+
+    // A field somebody may not change should not look like one they may: a
+    // page is read by whoever has the browser open, and that is not always
+    // whoever may act on it, so the difference has to be visible rather than
+    // discovered by clicking.
+    &:disabled {
+        background:  $color-bg;
+        color:       $color-muted;
+        cursor:      not-allowed;
+    }
+
+}
+
+.form-stack {
+
+    display:         flex;
+    flex-direction:  column;
+    gap:             0.85rem;
+
+    label {
+        display:         flex;
+        flex-direction:  column;
+        gap:             0.3rem;
+        font-size:       0.85rem;
+        color:           $color-muted;
+    }
+
+    .form-actions {
+        display:      flex;
+        align-items:  center;
+        gap:          0.75rem;
+        flex-wrap:    wrap;
+        margin-top:   0.25rem;
+    }
+
+}
+
+// A checkbox with its label beside it rather than under it, and room for a
+// line of explanation below both.
+.form-stack label.checkbox {
+
+    flex-direction:  row;
+    flex-wrap:       wrap;
+    align-items:     baseline;
+    gap:             0.15rem 0.5rem;
+    color:           $color-text;
+    font-size:       0.9rem;
+
+    input {
+        flex: none;
+    }
+
+    .hint {
+        flex-basis: 100%;
+    }
+
+}
+
+.hint {
+    color:        $color-muted;
+    font-size:    0.8rem;
+    font-weight:  400;
+}
+
+.form-notice {
+    color:      $color-ok;
+    font-size:  0.9rem;
+
+    &:empty {
+        display: none;
+    }
+}
+
+.form-error {
+
+    color:      $color-error;
+    font-size:  0.9rem;
+
+    &:empty {
+        display: none;
+    }
+
+}
+
+.error-box {
+    @include panel;
+    border-color:  $color-error;
+    background:    $color-error-bg;
+    color:         $color-error;
+    padding:       0.75rem 1rem;
+    margin:        1rem 0;
+}
+
+.loading {
+    color:    $color-muted;
+    padding:  1rem 0;
+}
+
+
+// Sign-in
+
+.login {
+
+    @include panel;
+
+    max-width:  24rem;
+    margin:     10vh auto 2rem;
+    padding:    1.5rem 1.75rem;
+
+    h1 {
+        font-size:   1.35rem;
+        margin-top:  0;
+
+        .fa-solid {
+            color:         $color-accent;
+            margin-right:  0.25rem;
+        }
+    }
+
+    .login-hint {
+        margin-top:     1.25rem;
+        padding-top:    1rem;
+        border-top:     1px solid $color-border;
+    }
+
+}
+
+
+// The frame: menu on the left, page on the right
+
+.shell {
+    display:                grid;
+    grid-template-columns:  $sidebar-width 1fr;
+    height:                 100%;
+    overflow:               hidden;
+}
+
+.sidebar {
+
+    display:         flex;
+    flex-direction:  column;
+    min-height:      0;
+    background:      $color-sidebar;
+    color:           $color-sidebar-text;
+
+    .brand {
+        display:        flex;
+        align-items:    center;
+        gap:            0.55rem;
+        padding:        1rem 1.1rem;
+        font-weight:    600;
+        color:          $color-sidebar-hi;
+        border-bottom:  1px solid rgba(#ffffff, 0.08);
+
+        .fa-solid {
+            color: $color-accent;
+        }
+    }
+
+    .menu {
+
+        list-style:  none;
+        margin:      0.5rem 0 0;
+        padding:     0;
+        flex:        1;
+        overflow-y:  auto;
+
+        a {
+
+            display:      flex;
+            align-items:  center;
+            gap:          0.65rem;
+            padding:      0.6rem 1.1rem;
+            color:        $color-sidebar-text;
+
+            &:hover {
+                background:       rgba(#ffffff, 0.06);
+                color:            $color-sidebar-hi;
+                text-decoration:  none;
+            }
+
+            &.active {
+                background:   rgba($color-accent, 0.22);
+                color:        $color-sidebar-hi;
+                box-shadow:   inset 3px 0 0 $color-accent;
+            }
+
+            .fa-solid {
+                width:      1rem;
+                text-align: center;
+            }
+
+        }
+
+    }
+
+    .submenu {
+
+        list-style:  none;
+        margin:      0 0 0.35rem;
+        padding:     0;
+
+        a {
+            padding-left:  2.6rem;
+            font-size:     0.88rem;
+
+            &.active {
+                box-shadow: inset 3px 0 0 $color-accent;
+            }
+
+            .fa-solid {
+                font-size: 0.8em;
+                opacity:   0.75;
+            }
+        }
+
+    }
+
+    .sidebar-foot {
+
+        padding:     0.9rem 1.1rem;
+        border-top:  1px solid rgba(#ffffff, 0.08);
+        display:     flex;
+        flex-direction: column;
+        gap:         0.5rem;
+
+        .who {
+            display:        flex;
+            align-items:    center;
+            gap:            0.5rem;
+            color:          $color-sidebar-hi;
+            overflow:       hidden;
+            text-overflow:  ellipsis;
+            white-space:    nowrap;
+        }
+
+        .btn {
+            background:    transparent;
+            border-color:  rgba(#ffffff, 0.25);
+            color:         $color-sidebar-text;
+            justify-content: center;
+
+            &:hover {
+                border-color:  #ffffff;
+                color:         #ffffff;
+            }
+        }
+
+        .versions {
+            color:      rgba($color-sidebar-text, 0.65);
+            font-size:  0.75rem;
+        }
+
+    }
+
+}
+
+.content {
+    display:         flex;
+    flex-direction:  column;
+    min-width:       0;
+    min-height:      0;
+    overflow:        hidden;
+}
+
+.page-head {
+
+    display:        flex;
+    align-items:    flex-start;
+    justify-content: space-between;
+    gap:            1rem;
+    flex-wrap:      wrap;
+    padding:        1.1rem 1.5rem 0.9rem;
+    border-bottom:  1px solid $color-border;
+    background:     $color-surface;
+
+    h1 {
+        margin:     0;
+        font-size:  1.35rem;
+    }
+
+    p {
+        margin:     0.15rem 0 0;
+        font-size:  0.9rem;
+    }
+
+    .page-actions {
+        display:      flex;
+        align-items:  center;
+        gap:          0.6rem;
+    }
+
+}
+
+.content-body {
+    flex:       1;
+    min-height: 0;
+    overflow:   auto;
+    padding:    1.25rem 1.5rem 2rem;
+    display:    flex;
+    flex-direction: column;
+}
+
+.not-found {
+    padding: 1rem 0;
+}
+
+
+// Configuration
+
+.cards {
+    display:                grid;
+    grid-template-columns:  repeat(auto-fill, minmax(22rem, 1fr));
+    gap:                    1rem;
+    align-items:            start;
+}
+
+.card {
+
+    @include panel;
+
+    padding: 1rem 1.2rem 1.1rem;
+
+    h2 {
+        margin:      0 0 0.75rem;
+        font-size:   1rem;
+        display:     flex;
+        align-items: center;
+        gap:         0.5rem;
+
+        .fa-solid {
+            color: $color-accent;
+        }
+
+        // A state of the thing the card is about, said next to its name
+        // rather than buried in the rows below it.
+        .chip {
+            margin-left: auto;
+        }
+    }
+
+}
+
+.card.wide {
+    grid-column: 1 / -1;
+}
+
+.kv-list {
+    display:         flex;
+    flex-direction:  column;
+    gap:             0.35rem;
+}
+
+.kv {
+
+    display:                grid;
+    grid-template-columns:  minmax(7rem, 38%) 1fr;
+    gap:                    0.75rem;
+    align-items:            baseline;
+    font-size:              0.9rem;
+
+    .k, dt {
+        color: $color-muted;
+    }
+
+    .v {
+        word-break:  break-word;
+        font-family: $font-mono;
+        font-size:   0.85rem;
+    }
+
+    dt, dd {
+        margin: 0;
+    }
+
+    dd {
+        word-break: break-word;
+    }
+
+}
+
+.kv-nested {
+
+    > .k {
+        display:     block;
+        color:       $color-muted;
+        font-size:   0.9rem;
+        margin-top:  0.4rem;
+    }
+
+    .nested {
+        display:         flex;
+        flex-direction:  column;
+        gap:             0.5rem;
+        margin-top:      0.35rem;
+    }
+
+    .nested-item {
+        border-left:   2px solid $color-border;
+        padding-left:  0.7rem;
+    }
+
+}
+
+
+// Something the controller wants read before it is acted on, but that is not an
+// error - most often: this page is showing you something you may not change.
+.notice {
+    @include panel;
+    background:    $color-warn-bg;
+    border-color:  #f3d9a4;
+    padding:       0.75rem 1rem;
+    margin-bottom: 1rem;
+    font-size:     0.9rem;
+}
+
+
+// Switching a whole subsystem on or off. Bigger than the checkboxes in a form
+// below it, because it decides whether that form matters at all.
+.switch {
+
+    display:      flex;
+    align-items:  center;
+    gap:          0.55rem;
+    font-weight:  600;
+
+    input {
+        width:   1.15rem;
+        height:  1.15rem;
+        accent-color: $color-accent;
+    }
+
+}
+
+// One name server: address, port, transport, and a way to take it away.
+.server-list {
+    display:         flex;
+    flex-direction:  column;
+    gap:             0.4rem;
+}
+
+.server-row {
+
+    display:      flex;
+    gap:          0.4rem;
+    align-items:  center;
+
+    input, select {
+        padding:        0.35rem 0.5rem;
+        border:         1px solid $color-border;
+        border-radius:  6px;
+        background:     $color-surface;
+        color:          $color-text;
+        font:           inherit;
+        font-size:      0.9rem;
+        min-width:      0;
+    }
+
+    input[data-field="address"] {
+        flex: 1 1 10rem;
+    }
+
+    input.port {
+        width: 5.5rem;
+    }
+
+}
+
+// Asking a name server something, and what it said.
+.query-form {
+
+    display:         flex;
+    flex-direction:  column;
+    gap:             0.75rem;
+
+    input[type="text"] {
+        padding:        0.45rem 0.6rem;
+        border:         1px solid $color-border;
+        border-radius:  6px;
+        background:     $color-surface;
+        color:          $color-text;
+        font:           inherit;
+        width:          100%;
+        max-width:      28rem;
+    }
+
+    label {
+        display:         flex;
+        flex-direction:  column;
+        gap:             0.3rem;
+        font-size:       0.9rem;
+    }
+
+    .record-types {
+
+        display:         flex;
+        flex-direction:  column;
+        gap:             0.35rem;
+
+        > .k {
+            color:      $color-muted;
+            font-size:  0.85rem;
+        }
+
+    }
+
+}
+
+.chips {
+    display:    flex;
+    flex-wrap:  wrap;
+    gap:        0.3rem;
+}
+
+.query-result {
+
+    @include panel;
+
+    margin-top:  1rem;
+    padding:     0.85rem 1rem;
+
+    &.ok   { border-left: 3px solid $color-ok;    }
+    &.bad  { border-left: 3px solid $color-error; }
+
+    h3 {
+        margin:     1rem 0 0.4rem;
+        font-size:  0.9rem;
+        color:      $color-muted;
+    }
+
+}
+
+// A table that is wider than the card it sits in scrolls inside the card
+// rather than pushing the whole page sideways.
+.table-scroll {
+    overflow-x:  auto;
+    margin-top:  0.75rem;
+}
+
+table.records {
+
+    border-collapse:  collapse;
+    width:            100%;
+    font-size:        0.85rem;
+
+    th, td {
+        text-align:     left;
+        padding:        0.3rem 0.6rem 0.3rem 0;
+        border-bottom:  1px solid $color-border;
+        white-space:    nowrap;
+    }
+
+    th {
+        color:       $color-muted;
+        font-weight: 600;
+    }
+
+    td.value {
+        white-space:  normal;
+        font-family:  ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        word-break:   break-all;
+    }
+
+    th.right, td.right {
+        text-align:    right;
+        padding-right: 0;
+    }
+
+    tr.total td {
+        font-weight:    600;
+        border-bottom:  none;
+    }
+
+}
+
+
+// Logs
+
+.log-filters {
+
+    display:      flex;
+    align-items:  center;
+    gap:          0.9rem;
+    flex-wrap:    wrap;
+    margin-bottom: 0.6rem;
+
+    .filter-search {
+
+        position:  relative;
+        flex:      1;
+        min-width: 14rem;
+
+        .fa-solid {
+            position:        absolute;
+            left:            0.7rem;
+            top:             50%;
+            transform:       translateY(-50%);
+            color:           $color-muted;
+            pointer-events:  none;
+            font-size:       0.85rem;
+        }
+
+        input {
+            width:         100%;
+            padding-left:  2.1rem;
+        }
+
+    }
+
+    .filter-level,
+    .filter-follow {
+        display:      flex;
+        align-items:  center;
+        gap:          0.4rem;
+        font-size:    0.85rem;
+        color:        $color-muted;
+        white-space:  nowrap;
+    }
+
+    .filter-level select {
+        padding: 0.35rem 0.5rem;
+    }
+
+}
+
+.tag-filters {
+    display:        flex;
+    flex-wrap:      wrap;
+    gap:            0.35rem;
+    margin-bottom:  0.6rem;
+}
+
+// The little rounded labels: the level of an entry, its tags, and the buttons
+// above the list that switch those tags on and off.
+.chip {
+
+    display:         inline-block;
+    padding:         0.05rem 0.45rem;
+    border-radius:   999px;
+    border:          1px solid $color-border;
+    background:      $color-bg;
+    color:           $color-muted;
+    font-size:       0.72rem;
+    font-family:     $font-stack;
+    line-height:     1.5;
+    white-space:     nowrap;
+
+    &.level {
+        font-weight:     600;
+        text-transform:  uppercase;
+        letter-spacing:  0.02em;
+    }
+
+    &.ok    { color: $color-ok;    border-color: #a7f3d0; background: #ecfdf5;        }
+    &.warn  { color: #92400e;      border-color: #fde68a; background: $color-warn-bg;  }
+    &.bad   { color: $color-error; border-color: #fecaca; background: $color-error-bg; }
+
+    // One colour per level, used by the chip in a line and by the line itself.
+    &.level.debug     { color: #64748b; border-color: #cbd5e1; background: #f1f5f9; }
+    &.level.info      { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
+    &.level.notice    { color: #0f766e; border-color: #99f6e4; background: #f0fdfa; }
+    &.level.warning   { color: #92400e; border-color: #fde68a; background: $color-warn-bg; }
+    &.level.error     { color: $color-error; border-color: #fecaca; background: $color-error-bg; }
+    &.level.critical  { color: #ffffff; border-color: #7f1d1d; background: #b91c1c; }
+
+}
+
+.tag-button {
+
+    cursor: pointer;
+    font:   inherit;
+    font-size: 0.72rem;
+    padding: 0.1rem 0.55rem;
+
+    &:hover {
+        border-color:  $color-accent;
+        color:         $color-accent;
+    }
+
+    &.on {
+        background:    $color-accent;
+        border-color:  $color-accent;
+        color:         #ffffff;
+    }
+
+    &.clear-tags {
+        border-style: dashed;
+    }
+
+}
+
+.log {
+
+    @include panel;
+
+    flex:        1;
+    min-height:  12rem;
+    overflow-y:  auto;
+    overflow-x:  hidden;
+    padding:     0.35rem 0;
+    font-family: $font-mono;
+    font-size:   0.82rem;
+    line-height: 1.55;
+
+    .log-empty {
+        padding:      1rem;
+        color:        $color-muted;
+        font-family:  $font-stack;
+        font-size:    0.9rem;
+    }
+
+}
+
+.line {
+
+    display:        flex;
+    align-items:    baseline;
+    flex-wrap:      wrap;
+    gap:            0.4rem;
+    padding:        0.1rem 0.8rem;
+    border-left:    3px solid transparent;
+
+    &:hover {
+        background: rgba($color-accent, 0.05);
+    }
+
+    time {
+        color:        $color-muted;
+        white-space:  nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .message {
+        flex:        1;
+        min-width:   12rem;
+        word-break:  break-word;
+        white-space: pre-wrap;
+    }
+
+    &.warning   { border-left-color: $color-warn; }
+    &.error     { border-left-color: $color-error; background: rgba($color-error, 0.04); }
+    &.critical  { border-left-color: #b91c1c;     background: rgba($color-error, 0.09); }
+
+    &.debug .message {
+        color: $color-muted;
+    }
+
+}
+
+.log-foot {
+    display:      flex;
+    align-items:  center;
+    justify-content: space-between;
+    gap:          1rem;
+    padding-top:  0.5rem;
+}
+
+// Whether the event stream is up: the one thing on the Logs page that says
+// whether what is on screen is still the present.
+.stream-state {
+
+    display:         inline-flex;
+    align-items:     center;
+    gap:             0.4rem;
+    font-size:       0.78rem;
+    text-transform:  uppercase;
+    letter-spacing:  0.04em;
+    color:           $color-muted;
+
+    &::before {
+        content:        "";
+        width:          0.55rem;
+        height:         0.55rem;
+        border-radius:  50%;
+        background:     $color-muted;
+    }
+
+    &.live::before {
+        background:  $color-ok;
+        box-shadow:  0 0 0 3px rgba($color-ok, 0.18);
+    }
+
+    &.down {
+        color: $color-warn;
+
+        &::before {
+            background: $color-warn;
+        }
+    }
+
+}
+
+
+// Narrow windows: the menu becomes a strip along the top.
+
+@media (max-width: 52rem) {
+
+    .shell {
+        grid-template-columns:  1fr;
+        grid-template-rows:     auto 1fr;
+    }
+
+    .sidebar {
+
+        flex-direction:  row;
+        align-items:     center;
+        flex-wrap:       wrap;
+        gap:             0.5rem;
+        padding:         0 0.75rem;
+
+        .brand {
+            border-bottom: none;
+            padding:       0.6rem 0.5rem 0.6rem 0;
+        }
+
+        .menu {
+            display:  flex;
+            flex:     1;
+            margin:   0;
+
+            a {
+                padding: 0.5rem 0.8rem;
+
+                &.active {
+                    box-shadow: inset 0 -3px 0 $color-accent;
+                }
+            }
+        }
+
+        .sidebar-foot {
+            flex-direction:  row;
+            align-items:     center;
+            border-top:      none;
+            padding:         0.4rem 0;
+
+            .versions {
+                display: none;
+            }
+        }
+
+    }
+
+    .content-body {
+        padding: 1rem;
+    }
+
+    .cards {
+        grid-template-columns: 1fr;
+    }
+
+}
