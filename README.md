@@ -94,6 +94,29 @@ directory `npm run watch` writes into: a reload in the browser then shows the
 change, without rebuilding the C# side.
 
 
+## The tests
+
+```
+dotnet test libs/LocalController/LocalControllerTests
+```
+
+They start real controllers and talk to them over HTTP the way the browser
+does: the bundle is served, the sign-in works, a change to the name servers
+reaches both the shared DNS client and the file, the log filters, the event
+stream delivers, and a controller that is told to stop stops.
+
+Each test gets a controller of its own, on a port the operating system has
+just confirmed is free and with its own directory for the two files a
+controller writes - so they neither fight with each other nor with a
+controller somebody has running on 2350 while they work.
+
+**They never touch the network.** The configuration written before each
+controller is built switches the time client off, which is what stops the
+clock check from being scheduled at all, and the DNS client is only ever asked
+what it is configured as. A test suite that needs a name server to answer is a
+test suite that fails on a train.
+
+
 ## The clock
 
 `LocalController` takes a `TimeProvider` as its last constructor parameter and
