@@ -1,0 +1,10 @@
+# Build output
+bin/
+obj/
+
+# The frontend: what npm installs and what webpack emits
+node_modules/
+ChargingStation/Frontend/dist/
+
+# The web login of a running station: a password hash, and nobody else's business
+web-login.json
