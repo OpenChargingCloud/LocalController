@@ -41,6 +41,14 @@ namespace cloud.charging.open.LocalController.Tests
         /// </summary>
         public static readonly TimeSpan  Timeout = TimeSpan.FromSeconds(20);
 
+        /// <summary>
+        /// How long the handler is left undisturbed to reach the end of what
+        /// it had cached. Generous: the cache is a few dozen entries, and the
+        /// cost of being wrong here is a test that passes against a broken
+        /// server.
+        /// </summary>
+        private static readonly TimeSpan  Draining = TimeSpan.FromMilliseconds(500);
+
         private readonly HttpResponseMessage  response;
         private readonly StreamReader         reader;
         private readonly StringBuilder        read = new ();
@@ -97,16 +105,24 @@ namespace cloud.charging.open.LocalController.Tests
         /// still writing, where a closed socket ends it by itself, and would
         /// therefore pass against a controller that cannot shut down at all.
         ///
-        /// Waiting for an entry to arrive is what makes the difference: once
-        /// one has, the handler has drained everything it had and is waiting
-        /// for the next one, which is the state worth testing.
+        /// So this settles in two steps, and the second one is the one that
+        /// proves anything.
         ///
-        /// The entry is written over and over rather than once, and that is not
-        /// belt and braces. The handler writes out the events that were already
-        /// cached and subscribes to new ones only afterwards, so an entry
-        /// logged in the window between the two reaches that client at all -
-        /// and a test waiting for exactly that entry would wait for ever.
-        /// Repeating costs a few log lines and removes the race.
+        /// First it knocks - writes an entry over and over until one comes
+        /// back - which says the stream carries entries at all. Written
+        /// repeatedly rather than once because the handler subscribes only
+        /// after it has drained what was cached, and an entry written into
+        /// that window never reaches that client; a test waiting for exactly
+        /// that one entry would wait for ever.
+        ///
+        /// But arriving is not yet proof of parking: an entry written while
+        /// the handler is still draining is delivered out of the cache, and
+        /// the handler is then still writing rather than waiting. So the
+        /// knocking stops, nothing is written for a moment - long enough for
+        /// the handler to run out of cached entries and subscribe - and then
+        /// one last entry goes in. That one has no cache to be delivered from.
+        /// Its arrival means the handler was waiting for it, which is the
+        /// state the bug was about.
         /// </remarks>
         public static async Task<EventStream> OpenAndSettle(LocalController  Controller,
                                                             HttpClient       HTTP)
@@ -118,12 +134,15 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var settled = new CancellationTokenSource();
 
+            void Write(String Text)
+                => Controller.Log.Debug(Text, "test");
+
             var knocking = Task.Run(async () => {
                                try
                                {
                                    while (!settled.IsCancellationRequested)
                                    {
-                                       Controller.Log.Debug(marker, "test");
+                                       Write(marker);
                                        await Task.Delay(TimeSpan.FromMilliseconds(100), settled.Token);
                                    }
                                }
@@ -138,6 +157,18 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.That(arrived, Is.True,
                         $"Nothing arrived over the event stream within {Timeout.TotalSeconds} seconds, so it never became live.");
+
+            // The quiet moment, so that the handler reaches the end of what it
+            // had cached and subscribes.
+            await Task.Delay(Draining);
+
+            var parked = $"The stream is parked: {Guid.NewGuid()}";
+
+            Write(parked);
+
+            Assert.That(await stream.ReadUntil(parked), Is.True,
+                        $"Nothing arrived over the event stream in the {Timeout.TotalSeconds} seconds after it went quiet, " +
+                        "so the handler never started waiting for new entries.");
 
             return stream;
 

@@ -45,6 +45,15 @@ namespace cloud.charging.open.LocalController.Tests
     ///
     /// Each builds its own controller and stops it, so neither can use the one
     /// the fixture base would have started and taken away again.
+    ///
+    /// One caveat, found by taking the fix out again and watching what these
+    /// do. A stop that never returns cannot be cancelled, so a failing test
+    /// here leaves it running and moves on - and a later test in the same run
+    /// then sometimes stops in milliseconds where on its own it hangs. So when
+    /// one of these fails, read the first failure and do not trust the tests
+    /// after it; run them one at a time to see which of them really pass.
+    /// Against a controller that stops properly there is nothing left running and
+    /// nothing to interfere, which is why the green run is the stable one.
     /// </remarks>
     public class ShutdownTests
     {
