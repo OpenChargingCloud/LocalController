@@ -28,8 +28,11 @@ export const menu: MenuEntry[] = [
         label:     'Configuration',
         icon:      'fa-sliders',
         children:  [
-            { path: '/configuration/dns',  label: 'DNS client',  icon: 'fa-magnifying-glass-location' },
-            { path: '/configuration/nts',  label: 'NTS client',  icon: 'fa-clock'                     }
+            { path: '/configuration/dns',                        label: 'DNS client',          icon: 'fa-magnifying-glass-location' },
+            { path: '/configuration/nts',                        label: 'NTS client',          icon: 'fa-clock'                     },
+            { path: '/configuration/ocpp-server',                label: 'Charging stations',   icon: 'fa-charging-station'          },
+            { path: '/configuration/ocpp-server/certificates',   label: 'Server certificates', icon: 'fa-certificate'               },
+            { path: '/configuration/ocpp-server/trust',          label: 'Accepted chains',     icon: 'fa-user-shield'               }
         ]
     },
     { path: '/logs', label: 'Logs', icon: 'fa-list-ul' }

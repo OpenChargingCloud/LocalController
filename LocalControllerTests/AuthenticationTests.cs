@@ -175,7 +175,9 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(roles,       Is.EquivalentTo(new[] { "systemadmin" }));
                 Assert.That(permissions, Is.EquivalentTo(new[] { "readConfiguration",
                                                                  "changeNetworkSettings",
-                                                                 "runDiagnostics" }));
+                                                                 "runDiagnostics",
+                                                                 "changeStationSettings",
+                                                                 "manageCertificates" }));
             });
 
         }

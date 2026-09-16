@@ -945,6 +945,251 @@ table.records {
 
 // Narrow windows: the menu becomes a strip along the top.
 
+// The charging station server: certificates, accepted chains, station logins.
+//
+// These pages are lists of things that each have a state worth seeing at a
+// glance - a certificate that is not valid yet, a chain that is switched off, a
+// station that may not sign in - so an entry carries its state as a badge and
+// the ones that are not in play are dimmed rather than hidden. Hiding them is
+// how somebody spends an afternoon wondering where a certificate went.
+
+// A notice that is good news, or one that is worse than the default.
+.notice {
+
+    &.ok {
+        background:    #ecfdf5;
+        border-color:  #a7f3d0;
+    }
+
+    &.warn {
+        background:    $color-warn-bg;
+        border-color:  #f3d9a4;
+    }
+
+    ul {
+        margin:        0.35rem 0 0;
+        padding-left:  1.1rem;
+    }
+
+}
+
+// One key, one accepted chain: a heading with what it is and what may be done
+// to it, the details under it.
+.entry {
+
+    @include panel;
+    padding:        0.9rem 1rem;
+    margin-bottom:  0.9rem;
+
+    // The one being presented right now, which is the question this page is
+    // most often opened to answer.
+    &.in-use {
+        border-color:  $color-accent;
+        box-shadow:    inset 3px 0 0 $color-accent;
+    }
+
+    &.dimmed {
+        opacity: 0.6;
+    }
+
+    &:last-child {
+        margin-bottom: 0;
+    }
+
+}
+
+.entry-head {
+
+    display:          flex;
+    flex-wrap:        wrap;
+    gap:              0.6rem;
+    align-items:      center;
+    justify-content:  space-between;
+    margin-bottom:    0.6rem;
+
+    > div:first-child {
+        display:      flex;
+        flex-wrap:    wrap;
+        gap:          0.4rem;
+        align-items:  center;
+    }
+
+}
+
+.entry-actions {
+    display:      flex;
+    gap:          0.5rem;
+    align-items:  center;
+}
+
+// A word about what something is, next to its name.
+.badge {
+
+    display:        inline-block;
+    padding:        0.1rem 0.45rem;
+    border:         1px solid $color-border;
+    border-radius:  999px;
+    font-size:      0.75rem;
+    color:          $color-muted;
+    background:     $color-bg;
+    white-space:    nowrap;
+
+    &.ok    { color: $color-ok;   border-color: #a7f3d0; background: #ecfdf5;       }
+    &.warn  { color: #92400e;     border-color: #fde68a; background: $color-warn-bg; }
+
+}
+
+// A certificate or a signing request, as it is written down. Scrollable rather
+// than wrapped: PEM is meant to be copied in one piece.
+.pem {
+    @include panel;
+    background:   $color-bg;
+    padding:      0.6rem 0.8rem;
+    margin:       0.6rem 0 0;
+    max-height:   14rem;
+    overflow:     auto;
+    font-family:  $font-mono;
+    font-size:    0.75rem;
+    white-space:  pre;
+}
+
+// A password that is shown once and never again.
+code.password {
+    display:        inline-block;
+    padding:        0.15rem 0.4rem;
+    border:         1px solid $color-border;
+    border-radius:  4px;
+    background:     $color-surface;
+    font-size:      1rem;
+    user-select:    all;
+}
+
+// A plain list of rows - the charging stations that may sign in.
+table.table {
+
+    border-collapse:  collapse;
+    width:            100%;
+    font-size:        0.85rem;
+    margin-top:       0.75rem;
+
+    th, td {
+        text-align:     left;
+        padding:        0.4rem 0.6rem 0.4rem 0;
+        border-bottom:  1px solid $color-border;
+        vertical-align: middle;
+    }
+
+    th {
+        color:        $color-muted;
+        font-weight:  600;
+    }
+
+    th.right, td.right {
+        text-align:     right;
+        padding-right:  0;
+    }
+
+    tr.dimmed td {
+        opacity: 0.55;
+    }
+
+}
+
+// Several boxes that belong to one question: which OCPP versions, which
+// security profiles.
+fieldset.checks {
+
+    border:         1px solid $color-border;
+    border-radius:  $radius;
+    padding:        0.6rem 0.8rem;
+    margin:         0;
+
+    legend {
+        padding:      0 0.35rem;
+        color:        $color-muted;
+        font-size:    0.85rem;
+    }
+
+}
+
+.check {
+
+    display:      flex;
+    gap:          0.5rem;
+    align-items:  baseline;
+    font-size:    0.9rem;
+    margin:       0.3rem 0;
+
+    input {
+        accent-color: $color-accent;
+        flex:         0 0 auto;
+    }
+
+}
+
+// A form that reads as one line until the window is too narrow for it.
+.form-row {
+
+    display:    flex;
+    flex-wrap:  wrap;
+    gap:        0.75rem;
+    align-items: flex-end;
+    margin-top: 0.9rem;
+
+    label {
+        display:         flex;
+        flex-direction:  column;
+        gap:             0.25rem;
+        font-size:       0.85rem;
+        color:           $color-muted;
+        flex:            1 1 10rem;
+    }
+
+    input {
+        font:  inherit;
+        padding:        0.35rem 0.5rem;
+        border:         1px solid $color-border;
+        border-radius:  6px;
+    }
+
+    .form-actions {
+        display:      flex;
+        gap:          0.6rem;
+        align-items:  center;
+    }
+
+}
+
+// The switch beside one row of a list, rather than over a whole subsystem.
+.switch.small {
+
+    font-weight:  400;
+    font-size:    0.85rem;
+    gap:          0.35rem;
+
+    input {
+        width:   1rem;
+        height:  1rem;
+    }
+
+}
+
+// What a value says about itself, in a definition list.
+.kv dd {
+
+    &.ok    { color: $color-ok;    }
+    &.warn  { color: $color-warn;  }
+
+}
+
+.form-stack hr {
+    border:      0;
+    border-top:  1px solid $color-border;
+    margin:      0.4rem 0;
+    width:       100%;
+}
+
+
 @media (max-width: 52rem) {
 
     .shell {

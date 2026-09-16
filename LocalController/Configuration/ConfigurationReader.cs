@@ -204,6 +204,193 @@ namespace cloud.charging.open.LocalController.Configuration
 
         #endregion
 
+        #region TryReadUInt32 (JSON, Name, Path, Minimum, Maximum, out Value, out Error)
+
+        /// <summary>
+        /// An optional whole number within a range.
+        /// </summary>
+        public static Boolean TryReadUInt32(JObject                           JSON,
+                                            String                            Name,
+                                            String?                           Path,
+                                            UInt32                            Minimum,
+                                            UInt32                            Maximum,
+                                            out UInt32?                       Value,
+                                            [NotNullWhen(false)] out String?  Error)
+        {
+
+            Value  = null;
+            Error  = null;
+
+            if (!JSON.TryGetValue(Name, out var token) || token.Type == JTokenType.Null)
+                return true;
+
+            if (token.Type != JTokenType.Integer)
+            {
+                Error = $"'{Where(Path, Name)}' must be a whole number.";
+                return false;
+            }
+
+            var number = token.Value<Int64>();
+
+            if (number < Minimum || number > Maximum)
+            {
+                Error = $"'{Where(Path, Name)}' must be between {Minimum} and {Maximum}.";
+                return false;
+            }
+
+            Value = (UInt32) number;
+            return true;
+
+        }
+
+        #endregion
+
+        #region TryReadStrings(JSON, Name, Path, MaxItems, MaxLength, out Value, out Error)
+
+        /// <summary>
+        /// An optional list of pieces of text, each trimmed, with the blank
+        /// ones left out.
+        /// </summary>
+        /// <remarks>
+        /// An empty list is a list, and not the same as a missing one: a form
+        /// that offers a list and was emptied says "none of them", while a form
+        /// that never mentioned it says nothing at all. Whether "none" is an
+        /// acceptable answer is for the section to decide, not for this.
+        /// </remarks>
+        public static Boolean TryReadStrings(JObject                           JSON,
+                                             String                            Name,
+                                             String?                           Path,
+                                             Int32                             MaxItems,
+                                             Int32                             MaxLength,
+                                             out IReadOnlyList<String>?        Value,
+                                             [NotNullWhen(false)] out String?  Error)
+        {
+
+            Value  = null;
+            Error  = null;
+
+            if (!JSON.TryGetValue(Name, out var token) || token.Type == JTokenType.Null)
+                return true;
+
+            if (token is not JArray array)
+            {
+                Error = $"'{Where(Path, Name)}' must be an array.";
+                return false;
+            }
+
+            if (array.Count > MaxItems)
+            {
+                Error = $"'{Where(Path, Name)}' may have at most {MaxItems} entries.";
+                return false;
+            }
+
+            var items = new List<String>();
+
+            foreach (var item in array)
+            {
+
+                if (item.Type != JTokenType.String)
+                {
+                    Error = $"'{Where(Path, Name)}' must contain nothing but strings.";
+                    return false;
+                }
+
+                var text = item.Value<String>()?.Trim() ?? "";
+
+                if (text.Length == 0)
+                    continue;
+
+                if (text.Length > MaxLength)
+                {
+                    Error = $"'{Where(Path, Name)}' may contain nothing longer than {MaxLength} characters.";
+                    return false;
+                }
+
+                items.Add(text);
+
+            }
+
+            Value = items;
+            return true;
+
+        }
+
+        #endregion
+
+        #region TryReadTimestamp(JSON, Name, Path, out Value, out Error)
+
+        /// <summary>
+        /// An optional moment in time, written the one way a moment should be
+        /// written down: ISO 8601 with its offset.
+        /// </summary>
+        public static Boolean TryReadTimestamp(JObject                           JSON,
+                                               String                            Name,
+                                               String?                           Path,
+                                               out DateTimeOffset?               Value,
+                                               [NotNullWhen(false)] out String?  Error)
+        {
+
+            Value  = null;
+            Error  = null;
+
+            if (!JSON.TryGetValue(Name, out var token) || token.Type == JTokenType.Null)
+                return true;
+
+            // Newtonsoft parses what looks like a date into a date of its own
+            // accord, so both a string and an already-parsed date arrive here.
+            //
+            // And what it parsed it into is a DateTime and not a
+            // DateTimeOffset - reading it as the latter throws rather than
+            // converting. Which of the two turns up depends on whether the
+            // document was parsed from text or built in memory, so a value that
+            // works when a test hands it over directly fails when it arrives
+            // through a request body.
+            if (token.Type == JTokenType.Date)
+            {
+
+                Value = (token as JValue)?.Value switch {
+                            DateTimeOffset offset    => offset,
+                            DateTime       dateTime  => new DateTimeOffset(dateTime.ToUniversalTime(), TimeSpan.Zero),
+                            _                        => null
+                        };
+
+                if (!Value.HasValue)
+                {
+                    Error = $"'{Where(Path, Name)}' must be a timestamp, e.g. \"2026-09-16T10:30:00Z\".";
+                    return false;
+                }
+
+                return true;
+
+            }
+
+            if (token.Type != JTokenType.String)
+            {
+                Error = $"'{Where(Path, Name)}' must be a timestamp, e.g. \"2026-09-16T10:30:00Z\".";
+                return false;
+            }
+
+            var text = token.Value<String>()?.Trim() ?? "";
+
+            if (text.Length == 0)
+                return true;
+
+            if (!DateTimeOffset.TryParse(text,
+                                         System.Globalization.CultureInfo.InvariantCulture,
+                                         System.Globalization.DateTimeStyles.RoundtripKind,
+                                         out var timestamp))
+            {
+                Error = $"'{Where(Path, Name)}' must be a timestamp, e.g. \"2026-09-16T10:30:00Z\".";
+                return false;
+            }
+
+            Value = timestamp;
+            return true;
+
+        }
+
+        #endregion
+
         #region TryReadString (JSON, Name, Path, MaxLength, out Value, out Error)
 
         /// <summary>

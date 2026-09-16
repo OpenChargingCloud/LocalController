@@ -34,10 +34,10 @@ namespace cloud.charging.open.LocalController.Web
     ///
     /// Only what this local controller actually enforces is named here. A
     /// permission with nothing behind it is a promise made to whoever reads the
-    /// login file and not kept: the day this controller can be told which CSMS
-    /// to call and which charging stations may call it, those become
-    /// permissions of their own rather than arriving quietly inside one that
-    /// already exists.
+    /// login file and not kept - so these arrived one at a time, as the things
+    /// they guard did: which charging stations may call this controller is its
+    /// own permission rather than something that grew quietly inside one that
+    /// already existed, and so is the trust the controller extends.
     /// </remarks>
     [Flags]
     public enum Permissions : UInt32
@@ -75,7 +75,36 @@ namespace cloud.charging.open.LocalController.Web
         /// traffic from this controller to a host somebody named, which is more
         /// than it sounds like to hand to everybody who may look at a page.
         /// </remarks>
-        RunDiagnostics         = 4
+        RunDiagnostics         = 4,
+
+        /// <summary>
+        /// Change the server the charging stations connect to, and which of
+        /// them may: its port, the security profiles it accepts, what it logs,
+        /// and the list of charging station logins.
+        /// </summary>
+        /// <remarks>
+        /// Day-to-day work on a site: a charging station is installed and needs
+        /// a login, another is taken out of service. It is a bigger thing than
+        /// changing a name server, because being wrong here is quiet - a
+        /// station that cannot sign in says so to nobody but itself - so it is
+        /// a permission of its own rather than part of
+        /// <see cref="ChangeNetworkSettings"/>.
+        /// </remarks>
+        ChangeStationSettings  = 8,
+
+        /// <summary>
+        /// Generate the keys this local controller authenticates with, take in
+        /// the certificates that answer them, and decide which certificate
+        /// authorities a charging station may be vouched for by.
+        /// </summary>
+        /// <remarks>
+        /// The highest of these, and deliberately not part of running the
+        /// station server. Everything else here is about what this controller
+        /// does; this is about who it is and whom it believes. Somebody who can
+        /// add a trust anchor can let in a charging station that nobody issued
+        /// a password to, and no other permission here reaches that far.
+        /// </remarks>
+        ManageCertificates     = 16
 
     }
 
@@ -113,23 +142,27 @@ namespace cloud.charging.open.LocalController.Web
         /// it, and a name server that moved is their problem to fix.
         /// </remarks>
         public static readonly UserRole  CPO          = new ("cpo",
-                                                             Permissions.ReadConfiguration     |
-                                                             Permissions.ChangeNetworkSettings |
-                                                             Permissions.RunDiagnostics);
+                                                             Permissions.ReadConfiguration      |
+                                                             Permissions.ChangeNetworkSettings  |
+                                                             Permissions.RunDiagnostics         |
+                                                             Permissions.ChangeStationSettings);
 
         /// <summary>
         /// Everything this local controller can be told, by whoever is trusted
         /// with all of it at once.
         /// </summary>
         /// <remarks>
-        /// The same as the CPO today, and not the same role: what this
-        /// controller may be told will grow - which CSMS it calls, which
-        /// charging stations may call it - and those belong here first.
+        /// What separates it from the CPO is the keys and the trust: whoever
+        /// runs a site adds and removes charging stations all day, and whoever
+        /// decides which certificate authority this controller believes does it
+        /// twice in the life of the box.
         /// </remarks>
         public static readonly UserRole  SystemAdmin  = new ("systemadmin",
-                                                             Permissions.ReadConfiguration     |
-                                                             Permissions.ChangeNetworkSettings |
-                                                             Permissions.RunDiagnostics);
+                                                             Permissions.ReadConfiguration      |
+                                                             Permissions.ChangeNetworkSettings  |
+                                                             Permissions.RunDiagnostics         |
+                                                             Permissions.ChangeStationSettings  |
+                                                             Permissions.ManageCertificates);
 
         /// <summary>
         /// Every role this local controller knows.

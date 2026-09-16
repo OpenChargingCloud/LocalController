@@ -563,6 +563,15 @@ namespace cloud.charging.open.LocalController
 
             #endregion
 
+            #region The server the charging stations connect to
+
+            // After the node, because it is attached to it, and after the
+            // configuration file, because what it listens on is written there.
+            // Nothing listens yet: Start() does.
+            BuildOCPPServer(configuration?.OCPPServer);
+
+            #endregion
+
         }
 
         #endregion
@@ -580,6 +589,8 @@ namespace cloud.charging.open.LocalController
                 return;
 
             await httpServer.Start();
+
+            await StartOCPPServer();
 
             StartCheckingTheClock();
 
@@ -614,6 +625,8 @@ namespace cloud.charging.open.LocalController
             // server waits for every request it started. Closing the sockets
             // does not wake those, so they are ended here first.
             API.CloseEventStreams();
+
+            await StopOCPPServer();
 
             await httpServer.Stop();
 
@@ -688,6 +701,17 @@ namespace cloud.charging.open.LocalController
                        new JProperty("serialNumber",     lc01.SerialNumber),
                        new JProperty("softwareVersion",  lc01.SoftwareVersion),
                        new JProperty("file",             ConfigFile.Path)
+                   )),
+
+                   new JProperty("stationServer", new JObject(
+                       new JProperty("enabled",          OCPPServerEnabled),
+                       new JProperty("running",          ocppServerStarted),
+                       new JProperty("tls",              ocppServerTLS),
+                       new JProperty("url",              OCPPServerURL),
+                       new JProperty("securityProfiles", new JArray((ocppServerSettings.SecurityProfiles ?? []).Select(profile => (Int32) profile))),
+                       new JProperty("stationLogins",    StationLogins.EnabledCount),
+                       new JProperty("trustedChains",    ClientTrust.EnabledCount),
+                       new JProperty("certificates",     ServerCertificates.Entries.Count)
                    )),
 
                    new JProperty("assemblies", new JArray(
@@ -785,6 +809,9 @@ namespace cloud.charging.open.LocalController
 
             traceBridge?.Dispose();
             consoleLog? .Dispose();
+
+            ServerCertificates?.Dispose();
+            ClientTrust?       .Dispose();
 
             reconfigureLock.Dispose();
 

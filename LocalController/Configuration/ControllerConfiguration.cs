@@ -46,9 +46,11 @@ namespace cloud.charging.open.LocalController.Configuration
     /// <param name="DNS">How this local controller resolves names.</param>
     /// <param name="NTS">Where this local controller reads the time.</param>
     /// <param name="OCPP">Who this local controller says it is when it speaks OCPP.</param>
-    public sealed record ControllerConfiguration(DNSConfiguration?   DNS    = null,
-                                                 NTSConfiguration?   NTS    = null,
-                                                 OCPPConfiguration?  OCPP   = null)
+    /// <param name="OCPPServer">The server the charging stations below it connect to.</param>
+    public sealed record ControllerConfiguration(DNSConfiguration?         DNS          = null,
+                                                 NTSConfiguration?         NTS          = null,
+                                                 OCPPConfiguration?        OCPP         = null,
+                                                 OCPPServerConfiguration?  OCPPServer   = null)
     {
 
         #region Properties
@@ -57,7 +59,7 @@ namespace cloud.charging.open.LocalController.Configuration
         /// Whether this document says anything at all.
         /// </summary>
         public Boolean IsEmpty
-            => DNS is null && NTS is null && OCPP is null;
+            => DNS is null && NTS is null && OCPP is null && OCPPServer is null;
 
         #endregion
 
@@ -146,7 +148,27 @@ namespace cloud.charging.open.LocalController.Configuration
 
             #endregion
 
-            Configuration = new ControllerConfiguration(dns, nts, ocpp);
+            #region OCPP server
+
+            OCPPServerConfiguration? ocppServer = null;
+
+            if (JSON[OCPPServerConfiguration.SectionName] is JToken ocppServerToken && ocppServerToken.Type != JTokenType.Null)
+            {
+
+                if (ocppServerToken is not JObject ocppServerJSON)
+                {
+                    Error = $"'{OCPPServerConfiguration.SectionName}' must be a JSON object.";
+                    return false;
+                }
+
+                if (!OCPPServerConfiguration.TryParse(ocppServerJSON, out ocppServer, out Error))
+                    return false;
+
+            }
+
+            #endregion
+
+            Configuration = new ControllerConfiguration(dns, nts, ocpp, ocppServer);
             return true;
 
         }
@@ -172,6 +194,9 @@ namespace cloud.charging.open.LocalController.Configuration
             if (OCPP is not null)
                 json.Add(OCPPConfiguration.SectionName,  OCPP.ToJSON());
 
+            if (OCPPServer is not null)
+                json.Add(OCPPServerConfiguration.SectionName, OCPPServer.ToJSON());
+
             return json;
 
         }
@@ -186,9 +211,10 @@ namespace cloud.charging.open.LocalController.Configuration
                    ? "nothing configured"
                    : String.Join(", ",
                          new[] {
-                             DNS  is not null ? "DNS"            : null,
-                             NTS  is not null ? "NTS"            : null,
-                             OCPP is not null ? OCPP.ToString()  : null
+                             DNS        is not null ? "DNS"                  : null,
+                             NTS        is not null ? "NTS"                  : null,
+                             OCPP       is not null ? OCPP.ToString()        : null,
+                             OCPPServer is not null ? OCPPServer.ToString()  : null
                          }.Where(section => section is not null));
 
         #endregion

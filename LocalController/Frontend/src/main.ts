@@ -10,12 +10,15 @@ import { html, must, render } from './html';
 import { logs } from './logs/store';
 import { Router } from './router';
 
-import { configurationPage } from './pages/configuration';
-import { dnsPage }           from './pages/dns';
-import { ntsPage }           from './pages/nts';
-import { loginPage }         from './pages/login';
-import { logsPage }          from './pages/logs';
-import { notFoundPage }      from './pages/notFound';
+import { configurationPage }      from './pages/configuration';
+import { dnsPage }                from './pages/dns';
+import { ntsPage }                from './pages/nts';
+import { ocppServerPage }         from './pages/ocppServer';
+import { serverCertificatesPage } from './pages/serverCertificates';
+import { clientTrustPage }        from './pages/clientTrust';
+import { loginPage }              from './pages/login';
+import { logsPage }               from './pages/logs';
+import { notFoundPage }           from './pages/notFound';
 
 
 const root = document.getElementById('app');
@@ -35,6 +38,11 @@ const router = new Router({
         { path: '/configuration',       page: configurationPage,  guard: auth.requireSignIn },
         { path: '/configuration/dns',   page: dnsPage,            guard: auth.requireSignIn },
         { path: '/configuration/nts',   page: ntsPage,            guard: auth.requireSignIn },
+
+        { path: '/configuration/ocpp-server',               page: ocppServerPage,         guard: auth.requireSignIn },
+        { path: '/configuration/ocpp-server/certificates',  page: serverCertificatesPage, guard: auth.requireSignIn },
+        { path: '/configuration/ocpp-server/trust',         page: clientTrustPage,        guard: auth.requireSignIn },
+
         { path: '/logs',                page: logsPage,           guard: auth.requireSignIn },
         { path: '/login',               page: loginPage }
     ],

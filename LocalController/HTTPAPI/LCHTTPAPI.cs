@@ -48,7 +48,7 @@ namespace cloud.charging.open.LocalController
     /// cookie - the event stream included, which is why the stream is opened
     /// here by hand rather than through Hermod's MapEventSource.
     /// </remarks>
-    public class LCHTTPAPI : HTTPAPI
+    public partial class LCHTTPAPI : HTTPAPI
     {
 
         #region Data
@@ -204,6 +204,11 @@ namespace cloud.charging.open.LocalController
             AddHandler(HTTPPath.Root + "v1/configuration/nts/sync",   PostNTSSync,           HTTPMethod.POST);
 
             AddHandler(HTTPPath.Root + "v1/configuration/time",       GetClock,              HTTPMethod.GET);
+
+            // The charging station server, its certificates, the chains it
+            // accepts and the stations that may sign in; see
+            // LCHTTPAPI.OCPPServer.cs.
+            RegisterOCPPServerRoutes();
 
             AddHandler(HTTPPath.Root + "v1/logs",          GetLogs,           HTTPMethod.GET);
 

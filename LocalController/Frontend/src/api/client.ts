@@ -43,7 +43,9 @@ export interface LogPage {
  */
 export type Permission = 'readConfiguration'
                        | 'changeNetworkSettings'
-                       | 'runDiagnostics';
+                       | 'runDiagnostics'
+                       | 'changeStationSettings'
+                       | 'manageCertificates';
 
 /** Who is signed in to the web interface. */
 export interface Me {
@@ -246,6 +248,167 @@ export interface Clock {
 }
 
 
+/** What of the charging station server ends up in the event log. */
+export interface OCPPServerLogging {
+    connections:     boolean;
+    authentication:  boolean;
+    messages:        boolean;
+    payloads:        boolean;
+    /** When the contents stop being logged again; null while they are not. */
+    payloadsUntil:   string | null;
+    /** Whether they are being logged at this moment - the switch and the window together. */
+    payloadsNow:     boolean;
+    pings:           boolean;
+}
+
+/** The server the charging stations below this local controller connect to. */
+export interface OCPPServerConfiguration {
+    enabled:                     boolean;
+    address:                     string | null;
+    port:                        number;
+    /** 1, 2 and 3 - the OCPP security profiles a station may connect with. */
+    securityProfiles:            number[];
+    subprotocols:                string[];
+    /** The names and addresses the stations dial; what a certificate must cover. */
+    reachableAs:                 string[];
+    minTLSVersion:               string;
+    checkCertificateRevocation:  boolean;
+    maxConnections:              number;
+    pingEverySeconds:            number;
+    logging:                     OCPPServerLogging;
+    state: {
+        running:            boolean;
+        tls:                boolean;
+        url:                string;
+        connections:        number;
+        stationLogins:      number;
+        trustedChains:      number;
+        hasCertificate:     boolean;
+        /**
+         * The fields that were changed but are not in effect: the socket is
+         * decided when the server is built. Empty when everything saved is
+         * already doing something.
+         */
+        waitingForARestart: string[];
+    };
+    limits: {
+        subprotocols:                   string[];
+        securityProfiles:               number[];
+        tlsVersions:                    string[];
+        maxConnections:                 number;
+        maxReachableAs:                 number;
+        suggestedPayloadWindowSeconds:  number;
+    };
+    file:  string;
+}
+
+/** What a PUT to the charging station server may carry; everything is optional. */
+export interface OCPPServerUpdate {
+    enabled?:                     boolean;
+    address?:                     string;
+    port?:                        number;
+    securityProfiles?:            number[];
+    subprotocols?:                string[];
+    reachableAs?:                 string[];
+    minTLSVersion?:               string;
+    checkCertificateRevocation?:  boolean;
+    maxConnections?:              number;
+    pingEverySeconds?:            number;
+    logging?: {
+        connections?:     boolean;
+        authentication?:  boolean;
+        messages?:        boolean;
+        payloads?:        boolean;
+        payloadsUntil?:   string | null;
+        pings?:           boolean;
+    };
+}
+
+/** One key of this local controller, and the certificate it was given. */
+export interface ServerCertificate {
+    /** Where the public key hashes to; what the signing request is filed under. */
+    id:              string;
+    algorithm:       string;
+    createdAt:       string;
+    subject:         string;
+    hasCertificate:  boolean;
+    /** Whether this is the one being presented to the charging stations. */
+    inUse:           boolean;
+    warnings:        string[];
+    certificate?: {
+        subject:          string;
+        issuer:           string;
+        serialNumber:     string;
+        thumbprint:       string;
+        notBefore:        string;
+        notAfter:         string;
+        subjectAltNames:  string[];
+        intermediates:    number;
+        /** "pending" before its window, "valid" inside it, "expired" after. */
+        state:            'pending' | 'valid' | 'expired';
+        daysRemaining:    number;
+    };
+}
+
+/** The keys and certificates this local controller presents. */
+export interface ServerCertificates {
+    directory:             string;
+    /** By the controller's own clock, which is what decides the windows below. */
+    now:                   string;
+    servedId:              string | null;
+    entries:               ServerCertificate[];
+    algorithms:            { id: string; name: string }[];
+    /** Always false, and said out loud: a private key is made here and never arrives. */
+    canImportPrivateKeys:  boolean;
+}
+
+/** One chain a charging station's certificate may lead to. */
+export interface TrustedChain {
+    id:             string;
+    name:           string;
+    addedAt:        string;
+    enabled:        boolean;
+    subject:        string;
+    issuer:         string;
+    serialNumber:   string;
+    thumbprint:     string;
+    notBefore:      string;
+    notAfter:       string;
+    /** Whether it can vouch for others at all, or only for itself. */
+    isCA:           boolean;
+    intermediates:  number;
+    warnings:       string[];
+    state:          'pending' | 'valid' | 'expired';
+    daysRemaining:  number;
+}
+
+/** Which chains a charging station's own certificate may lead to. */
+export interface ClientTrust {
+    directory:   string;
+    now:         string;
+    enabled:     number;
+    maxEntries:  number;
+    entries:     TrustedChain[];
+}
+
+/** One charging station that may sign in. */
+export interface StationLogin {
+    id:       string;
+    enabled:  boolean;
+    addedAt:  string;
+    note?:    string;
+}
+
+/** Which charging stations may sign in, and with what. */
+export interface StationLogins {
+    file:               string;
+    enabled:            number;
+    maxStations:        number;
+    minPasswordLength:  number;
+    stations:           StationLogin[];
+}
+
+
 export class ApiError extends Error {
 
     constructor(public readonly status:  number,
@@ -352,6 +515,77 @@ export const api = {
         save:  (update: NTSUpdate)   => request<NTSConfiguration>('PUT', '/configuration/nts', update),
         /** One key exchange and one authenticated NTP request, with every step in the log. */
         sync:  ()                    => request<NTSConfiguration>('POST', '/configuration/nts/sync', {})
+    },
+
+    /**
+     * The charging station server: its socket, the certificates it presents,
+     * the chains it accepts and the stations that may sign in.
+     */
+    ocppServer: {
+
+        get:   ()                          => request<OCPPServerConfiguration>('GET', '/configuration/ocpp-server'),
+        /** Only the fields given are changed; the answer is the whole thing as it now stands. */
+        save:  (update: OCPPServerUpdate)  => request<OCPPServerConfiguration>('PUT', '/configuration/ocpp-server', update),
+
+        certificates: {
+
+            get:     ()  => request<ServerCertificates>('GET', '/configuration/ocpp-server/certificates'),
+
+            /** Generate a key and the signing request that goes with it; the key never leaves. */
+            create:  (subject: string, algorithm: string) =>
+                         request<{ id: string; csr: string }>('POST', '/configuration/ocpp-server/certificates',
+                                                              { subject, algorithm }),
+
+            /** Where the signing request can be downloaded; a plain file, not JSON. */
+            csrURL:  (id: string) => `${config.apiBase}/configuration/ocpp-server/certificates/${encodeURIComponent(id)}/csr`,
+
+            /** Take in the certificate that answers a request, with its intermediates. */
+            upload:  (id: string, pem: string) =>
+                         request<{ id: string; warnings: string[] }>('PUT',
+                             `/configuration/ocpp-server/certificates/${encodeURIComponent(id)}`, { pem }),
+
+            remove:  (id: string) =>
+                         request<ServerCertificates>('DELETE',
+                             `/configuration/ocpp-server/certificates/${encodeURIComponent(id)}`)
+
+        },
+
+        trust: {
+
+            get:      ()  => request<ClientTrust>('GET', '/configuration/ocpp-server/trust'),
+
+            add:      (pem: string, name: string) =>
+                          request<{ id: string; warnings: string[] }>('POST', '/configuration/ocpp-server/trust', { pem, name }),
+
+            update:   (id: string, change: { enabled?: boolean; name?: string }) =>
+                          request<ClientTrust>('PUT', `/configuration/ocpp-server/trust/${encodeURIComponent(id)}`, change),
+
+            remove:   (id: string) =>
+                          request<ClientTrust>('DELETE', `/configuration/ocpp-server/trust/${encodeURIComponent(id)}`)
+
+        },
+
+        stations: {
+
+            get:      ()  => request<StationLogins>('GET', '/configuration/ocpp-server/stations'),
+
+            /**
+             * Add a station or give one a new password. An empty password means
+             * "make one up", and the made-up one comes back here and nowhere
+             * else: it is kept only as a hash.
+             */
+            save:     (id: string, password: string, note: string) =>
+                          request<{ id: string; password?: string; stations: StationLogins }>(
+                              'POST', '/configuration/ocpp-server/stations', { id, password, note }),
+
+            enable:   (id: string, enabled: boolean) =>
+                          request<StationLogins>('PUT', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}`, { enabled }),
+
+            remove:   (id: string) =>
+                          request<StationLogins>('DELETE', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}`)
+
+        }
+
     },
 
     /**
