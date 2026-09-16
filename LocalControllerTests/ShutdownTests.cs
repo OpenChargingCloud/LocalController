@@ -46,14 +46,15 @@ namespace cloud.charging.open.LocalController.Tests
     /// Each builds its own controller and stops it, so neither can use the one
     /// the fixture base would have started and taken away again.
     ///
-    /// One caveat, found by taking the fix out again and watching what these
-    /// do. A stop that never returns cannot be cancelled, so a failing test
-    /// here leaves it running and moves on - and a later test in the same run
-    /// then sometimes stops in milliseconds where on its own it hangs. So when
-    /// one of these fails, read the first failure and do not trust the tests
-    /// after it; run them one at a time to see which of them really pass.
-    /// Against a controller that stops properly there is nothing left running and
-    /// nothing to interfere, which is why the green run is the stable one.
+    /// One thing cannot be undone once it happens: a stop that never returns
+    /// cannot be cancelled, so a test that hits it leaves it running. A later
+    /// test in the same run can then stop in milliseconds where on its own it
+    /// hangs, which would report a pass nobody earned.
+    ///
+    /// So the first such test poisons the rest: every test after one that was
+    /// left waiting is reported inconclusive rather than passed. The run still
+    /// shows the real failure, and shows plainly that it cannot vouch for what
+    /// came after it - run them one at a time to see the rest.
     /// </remarks>
     public class ShutdownTests
     {
@@ -70,6 +71,16 @@ namespace cloud.charging.open.LocalController.Tests
         /// </remarks>
         private static readonly TimeSpan  MustStopWithin = TimeSpan.FromSeconds(30);
 
+        /// <summary>
+        /// Whether a stop in this run was given up on and left running.
+        /// </summary>
+        /// <remarks>
+        /// Static, and deliberately never reset: the abandoned stop is still
+        /// there for the rest of the process, so every test after it is
+        /// suspect for the rest of the process.
+        /// </remarks>
+        private static Boolean  aStopWasLeftRunning;
+
         private String directory = default!;
 
         #endregion
@@ -79,6 +90,14 @@ namespace cloud.charging.open.LocalController.Tests
         [SetUp]
         public void MakeADirectory()
         {
+
+            if (aStopWasLeftRunning)
+                Assert.Inconclusive(
+                    "An earlier test in this fixture was left waiting for a stop that never returned, and " +
+                    "that stop is still running. Whatever this test would report cannot be trusted - run it " +
+                    "on its own."
+                );
+
             directory = TestControllers.TemporaryDirectory("shutdown");
             Directory.CreateDirectory(directory);
         }
@@ -294,9 +313,11 @@ namespace cloud.charging.open.LocalController.Tests
                 return clock.Elapsed;
             }
 
-            // Left running on purpose: the process is about to end anyway, and
-            // awaiting the stop that did not finish is exactly the hang this is
-            // here to report instead of.
+            // Left running, because there is no way not to: awaiting the stop
+            // that did not finish is exactly the hang this is here to report
+            // instead of. What can be done is to stop trusting what comes next.
+            aStopWasLeftRunning = true;
+
             return MustStopWithin + TimeSpan.FromSeconds(1);
 
         }

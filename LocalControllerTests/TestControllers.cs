@@ -44,7 +44,7 @@ namespace cloud.charging.open.LocalController.Tests
     internal static class TestControllers
     {
 
-        #region New(Directory, Configuration = null)
+        #region New(Directory, Configuration = null, Clock = null)
 
         /// <summary>
         /// A local controller, built and not started.
@@ -57,8 +57,10 @@ namespace cloud.charging.open.LocalController.Tests
         /// </remarks>
         /// <param name="Directory">Where its web login and its configuration go; created when it does not exist.</param>
         /// <param name="Configuration">What its configuration file says, or null for a controller nobody has configured.</param>
-        public static LocalController New(String    Directory,
-                                          JObject?  Configuration   = null)
+        /// <param name="Clock">Where it reads the time, for a test that needs to decide what time it is.</param>
+        public static LocalController New(String         Directory,
+                                          JObject?       Configuration   = null,
+                                          TimeProvider?  Clock           = null)
         {
 
             System.IO.Directory.CreateDirectory(Directory);
@@ -73,7 +75,8 @@ namespace cloud.charging.open.LocalController.Tests
                        LoginFile:        new WebLoginFile        (Path.Combine(Directory, "web-login.json")),
                        ConfigFile:       new ControllerConfigFile(configFile),
                        LogToConsole:     false,
-                       BridgeDebugLog:   false
+                       BridgeDebugLog:   false,
+                       TimeProvider:     Clock
                    );
 
         }

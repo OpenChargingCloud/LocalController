@@ -78,6 +78,32 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region What this controller is made of
+
+        /// <summary>
+        /// What its configuration file says before it is built.
+        /// </summary>
+        /// <remarks>
+        /// Overridden by a fixture that needs a controller with something on
+        /// it. The time client stays switched off in all of them, which is what
+        /// keeps a test run off the network.
+        /// </remarks>
+        protected virtual JObject Configuration
+            => TestControllers.Offline;
+
+        /// <summary>
+        /// Where it reads the time, or null for the system clock.
+        /// </summary>
+        /// <remarks>
+        /// Overridden by a fixture that has to decide what time it is. A
+        /// session expires twelve hours after it was last used, and a test that
+        /// waited for that would be a test nobody runs.
+        /// </remarks>
+        protected virtual TimeProvider? Clock
+            => null;
+
+        #endregion
+
         #region SetUp / TearDown
 
         [SetUp]
@@ -86,7 +112,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Directory   = TestControllers.TemporaryDirectory("tests");
 
-            Controller  = TestControllers.New(Directory, TestControllers.Offline);
+            Controller  = TestControllers.New(Directory, Configuration, Clock);
 
             // Null would mean the login came from a file, and there was no file.
             Password    = Controller.GeneratedPassword
