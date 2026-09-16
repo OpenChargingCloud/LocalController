@@ -408,62 +408,17 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 try
                 {
-
-                    var extensions = new X509ExtensionsGenerator();
-
-                    #region What this controller is reachable as
-
-                    extensions.AddExtension(
-                        X509Extensions.SubjectAlternativeName,
-                        false,
-                        new GeneralNames([
-                            .. names.Select(name =>
-                                   System.Net.IPAddress.TryParse(name, out _)
-                                       ? new GeneralName(GeneralName.IPAddress, name)
-                                       : new GeneralName(GeneralName.DnsName,   name))
-                        ])
-                    );
-
-                    #endregion
-
-                    #region What this certificate is for
-
-                    // Said in the request rather than hoped for in the answer:
-                    // a certificate authority that is handed a request without
-                    // them frequently issues something that is not a server
-                    // certificate.
-                    extensions.AddExtension(
-                        X509Extensions.BasicConstraints,
-                        true,
-                        new BasicConstraints(false)
-                    );
-
-                    extensions.AddExtension(
-                        X509Extensions.KeyUsage,
-                        true,
-                        new KeyUsage(KeyUsage.DigitalSignature | KeyUsage.KeyEncipherment)
-                    );
-
-                    extensions.AddExtension(
-                        X509Extensions.ExtendedKeyUsage,
-                        false,
-                        new ExtendedKeyUsage(KeyPurposeID.id_kp_serverAuth)
-                    );
-
-                    #endregion
-
-                    csr = new Pkcs10CertificationRequest(
-                              new Asn1SignatureFactory(algorithm.SignatureAlgorithm, pair.Private),
+                    // Built by Hermod, which knows every algorithm in the list
+                    // above and what each one of them may honestly claim for
+                    // itself - an Ed448 or an ML-DSA key asking to be allowed
+                    // to encipher is a request a strict certificate authority
+                    // is entitled to refuse.
+                    csr = PKIFactory.GenerateCertificateSigningRequest(
+                              pair,
                               subjectName,
-                              pair.Public,
-                              new DerSet(
-                                  new AttributePkcs(
-                                      PkcsObjectIdentifiers.Pkcs9AtExtensionRequest,
-                                      new DerSet(extensions.Generate())
-                                  )
-                              )
+                              algorithm,
+                              names
                           ).ToPEM();
-
                 }
                 catch (Exception e)
                 {

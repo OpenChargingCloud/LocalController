@@ -26,6 +26,8 @@ using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.OpenSsl;
 using Org.BouncyCastle.Pkcs;
 
+using org.GraphDefined.Vanaheimr.Hermod.PKI;
+
 using cloud.charging.open.LocalController.OCPP;
 
 #endregion
