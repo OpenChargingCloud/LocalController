@@ -51,9 +51,8 @@ namespace cloud.charging.open.LocalController.Tests
                                                  TimeSpan?  MaximumLifetime   = null)
         {
 
-            WebLoginSettings.TryCreate("root", ThePassword, null, out var login, out var error);
-
-            Assert.That(login, Is.Not.Null, error);
+            if (!WebLoginSettings.TryCreate("root", ThePassword, null, out var login, out var error))
+                throw new InvalidOperationException($"The login settings of the test itself were refused: {error}");
 
             return new WebSessions(
                        login,
@@ -245,9 +244,10 @@ namespace cloud.charging.open.LocalController.Tests
             var clock    = TestClock.At(2026, 1, 1);
             var sessions = ASessionStore(clock);
 
-            sessions.TryLogin("root", ThePassword, out var session);
+            if (!sessions.TryLogin("root", ThePassword, out var session))
+                throw new InvalidOperationException("The right password did not start a session.");
 
-            var cookie = sessions.SessionCookie(session!).ToString();
+            var cookie = sessions.SessionCookie(session).ToString();
 
             Assert.Multiple(() => {
                 Assert.That(cookie, Does.Contain("HttpOnly"));
