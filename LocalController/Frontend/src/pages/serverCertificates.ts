@@ -86,17 +86,28 @@ export const serverCertificatesPage: Page = {
                             </label>
 
                             <label>Key
-                                <select name="algorithm" ${mayManage ? '' : html`disabled`}>
+                                <select name="algorithm" id="algorithm" ${mayManage ? '' : html`disabled`}>
                                     ${certificates.algorithms.map(algorithm => html`
-                                        <option value="${algorithm.id}">${algorithm.name}</option>
+                                        <option value="${algorithm.id}"
+                                                ${algorithm.id === 'ecdsa-p256' ? html`selected` : ''}>
+                                            ${algorithm.name}${algorithm.presentable === false ? ' - not servable here' : ''}
+                                        </option>
                                     `)}
                                 </select>
                             </label>
 
-                            <span class="hint">
-                                An elliptic curve is what a charging station with a small processor handles best;
-                                RSA is there because some certificate authorities still issue nothing else.
+                            <span class="hint" id="algorithm-remark">
+                                ${certificates.algorithms.find(algorithm => algorithm.id === 'ecdsa-p256')?.remark ?? ''}
                             </span>
+
+                            <div class="notice">
+                                <strong>Making a key and serving it are two questions.</strong> Every kind here can be
+                                generated and made into a signing request. Whether this machine can then hold the
+                                certificate up to a charging station depends on its TLS stack - Ed25519, Ed448, P-521
+                                and the post-quantum kinds are refused by some platforms and served by others. This
+                                local controller finds out by trying, and says so beside the certificate rather than
+                                letting a handshake fail.
+                            </div>
 
                             <p class="hint">
                                 The request will be made out for
@@ -171,6 +182,7 @@ export const serverCertificatesPage: Page = {
                             ${entry.inUse ? html`<span class="badge ok">being presented</span>` : ''}
                             ${certificate ? html`<span class="badge ${stateClass(certificate.state)}">${certificate.state}</span>` : ''}
                             ${certificate ? '' : html`<span class="badge warn">waiting for a certificate</span>`}
+                            ${entry.canBePresented ? '' : html`<span class="badge warn">not servable here</span>`}
                         </div>
                         <div class="entry-actions">
                             <a class="btn small" href="${api.ocppServer.certificates.csrURL(entry.id)}" download>
@@ -256,6 +268,14 @@ export const serverCertificatesPage: Page = {
 
             if (!mayManage)
                 return;
+
+            const chooser = content.querySelector<HTMLSelectElement>('#algorithm');
+            const remark  = content.querySelector<HTMLElement>('#algorithm-remark');
+
+            chooser?.addEventListener('change', () => {
+                if (remark)
+                    remark.textContent = store?.algorithms.find(algorithm => algorithm.id === chooser.value)?.remark ?? '';
+            });
 
             must<HTMLFormElement>(content, '#create-form').addEventListener('submit', event => {
 

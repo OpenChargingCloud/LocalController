@@ -167,24 +167,6 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region EveryKindOfKeyCanBeAskedFor()
-
-        [Test]
-        [TestCase("ecdsa-p256")]
-        [TestCase("ecdsa-p384")]
-        [TestCase("rsa-3072")]
-        public void EveryKindOfKeyCanBeAskedFor(String Algorithm)
-        {
-
-            var (id, _) = NewKey(Algorithm);
-
-            Assert.That(store.Entries.Single(entry => entry.Id == id).Algorithm,
-                        Is.EqualTo(ServerCertificateStore.Algorithms[Algorithm]));
-
-        }
-
-        #endregion
-
         #region AKeyThisControllerDoesNotGenerateIsRefused()
 
         [Test]

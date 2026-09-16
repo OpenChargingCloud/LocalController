@@ -324,6 +324,21 @@ export interface OCPPServerUpdate {
     };
 }
 
+/** A kind of key this local controller will make for itself. */
+export interface KeyAlgorithm {
+    id:           string;
+    name:         string;
+    /** What somebody choosing it should know. */
+    remark:       string;
+    /**
+     * Whether this platform is known to be able to present a certificate with
+     * such a key, or absent while nobody has tried. Found out by doing a TLS
+     * handshake, not from a list - it depends on the operating system, the
+     * runtime and the year.
+     */
+    presentable?: boolean;
+}
+
 /** One key of this local controller, and the certificate it was given. */
 export interface ServerCertificate {
     /** Where the public key hashes to; what the signing request is filed under. */
@@ -332,6 +347,13 @@ export interface ServerCertificate {
     createdAt:       string;
     subject:         string;
     hasCertificate:  boolean;
+    /**
+     * Whether this machine can hold this certificate up to a charging station
+     * during a TLS handshake. A different question from whether the certificate
+     * is any good: an Ed448 or an ML-DSA key makes a perfectly valid one that
+     * this platform's TLS stack will not serve.
+     */
+    canBePresented:  boolean;
     /** Whether this is the one being presented to the charging stations. */
     inUse:           boolean;
     warnings:        string[];
@@ -357,7 +379,7 @@ export interface ServerCertificates {
     now:                   string;
     servedId:              string | null;
     entries:               ServerCertificate[];
-    algorithms:            { id: string; name: string }[];
+    algorithms:            KeyAlgorithm[];
     /** Always false, and said out loud: a private key is made here and never arrives. */
     canImportPrivateKeys:  boolean;
 }

@@ -20,6 +20,19 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
+using Org.BouncyCastle.Asn1;
+using Org.BouncyCastle.Asn1.X509;
+using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Operators;
+using Org.BouncyCastle.Math;
+using Org.BouncyCastle.OpenSsl;
+using Org.BouncyCastle.Pkcs;
+using Org.BouncyCastle.X509;
+
+using org.GraphDefined.Vanaheimr.Hermod.PKI;
+
+using BCx509 = Org.BouncyCastle.X509;
+
 #endregion
 
 namespace cloud.charging.open.LocalController.Tests
@@ -30,6 +43,13 @@ namespace cloud.charging.open.LocalController.Tests
     /// requests, and it can be made to answer them for any day at all.
     /// </summary>
     /// <remarks>
+    /// <b>Bouncy Castle throughout, like the store it is testing.</b> .NET can
+    /// only sign a request whose key is the same kind as the issuer's, and has
+    /// never heard of an Ed448 or an ML-DSA one at all - so a test authority
+    /// built on it could only ever answer requests for the two algorithms .NET
+    /// knows, and every test about the others would fail for a reason that has
+    /// nothing to do with what is being tested.
+    ///
     /// The whole point of the certificate store is what it does with dates -
     /// one certificate taking over from another, one that is not valid yet, one
     /// that has run out. None of that can be tested against a real authority,
@@ -41,6 +61,18 @@ namespace cloud.charging.open.LocalController.Tests
     /// </remarks>
     internal sealed class TestCA : IDisposable
     {
+
+        #region Data
+
+        /// <summary>
+        /// The key of whichever certificate signs: the intermediate where there
+        /// is one, the root otherwise.
+        /// </summary>
+        private readonly AsymmetricKeyParameter  issuerKey;
+
+        private readonly BCx509.X509Certificate  issuer;
+
+        #endregion
 
         #region Properties
 
@@ -56,22 +88,19 @@ namespace cloud.charging.open.LocalController.Tests
         /// </summary>
         public X509Certificate2? Intermediate   { get; }
 
-        /// <summary>
-        /// What is actually used for signing: the intermediate where there is
-        /// one, the root otherwise.
-        /// </summary>
-        public X509Certificate2  Issuer
-            => Intermediate ?? Certificate;
-
         #endregion
 
         #region Constructor(s)
 
-        private TestCA(X509Certificate2   Certificate,
-                       X509Certificate2?  Intermediate)
+        private TestCA(X509Certificate2        Certificate,
+                       X509Certificate2?       Intermediate,
+                       BCx509.X509Certificate  Issuer,
+                       AsymmetricKeyParameter  IssuerKey)
         {
             this.Certificate   = Certificate;
             this.Intermediate  = Intermediate;
+            this.issuer        = Issuer;
+            this.issuerKey     = IssuerKey;
         }
 
         #endregion
@@ -93,38 +122,61 @@ namespace cloud.charging.open.LocalController.Tests
             // validity, and these tests deliberately issue certificates for
             // days long past and far ahead. A narrow authority would turn every
             // one of those tests into an error about the authority.
-            var notBefore  = NotBefore ?? new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
-            var notAfter   = NotAfter  ?? new DateTimeOffset(2100, 1, 1, 0, 0, 0, TimeSpan.Zero);
+            var notBefore  = (NotBefore ?? new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero)).UtcDateTime;
+            var notAfter   = (NotAfter  ?? new DateTimeOffset(2100, 1, 1, 0, 0, 0, TimeSpan.Zero)).UtcDateTime;
 
-            using var rootKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            #region A root, signing itself
 
-            var rootRequest   = new CertificateRequest($"CN={Name}", rootKey, HashAlgorithmName.SHA256);
+            var rootPair = PKIFactory.GenerateECCKeyPair("secp256r1");
 
-            rootRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
-            rootRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
-            rootRequest.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(rootRequest.PublicKey, false));
+            var root     = Authority($"CN={Name}", rootPair.Public, rootPair, notBefore, notAfter, null);
 
-            var root = rootRequest.CreateSelfSigned(notBefore, notAfter);
+            #endregion
 
             if (!WithIntermediate)
-                return new TestCA(Reload(root), null);
+                return new TestCA(ToDotNet(root), null, root, rootPair.Private);
 
-            using var intermediateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            #region An intermediate, signed by the root
 
-            var intermediateRequest   = new CertificateRequest($"CN={Name} Issuing CA", intermediateKey, HashAlgorithmName.SHA256);
+            var intermediatePair = PKIFactory.GenerateECCKeyPair("secp256r1");
 
-            intermediateRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
-            intermediateRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
-            intermediateRequest.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(intermediateRequest.PublicKey, false));
+            var intermediate     = Authority($"CN={Name} Issuing CA",
+                                             intermediatePair.Public,
+                                             rootPair,
+                                             notBefore,
+                                             notAfter,
+                                             root.SubjectDN);
 
-            var intermediate = intermediateRequest.Create(
-                                   root,
-                                   notBefore,
-                                   notAfter,
-                                   RandomNumberGenerator.GetBytes(16)
-                               ).CopyWithPrivateKey(intermediateKey);
+            #endregion
 
-            return new TestCA(Reload(root), Reload(intermediate));
+            return new TestCA(ToDotNet(root), ToDotNet(intermediate), intermediate, intermediatePair.Private);
+
+        }
+
+        /// <summary>
+        /// One certificate authority certificate, self-signed or not.
+        /// </summary>
+        private static BCx509.X509Certificate Authority(String                   Subject,
+                                                        AsymmetricKeyParameter   PublicKey,
+                                                        AsymmetricCipherKeyPair  Signer,
+                                                        DateTime                 NotBefore,
+                                                        DateTime                 NotAfter,
+                                                        X509Name?                Issuer)
+        {
+
+            var generator = new X509V3CertificateGenerator();
+
+            generator.SetSerialNumber(Serial());
+            generator.SetIssuerDN    (Issuer ?? new X509Name(Subject));
+            generator.SetSubjectDN   (new X509Name(Subject));
+            generator.SetNotBefore   (NotBefore);
+            generator.SetNotAfter    (NotAfter);
+            generator.SetPublicKey   (PublicKey);
+
+            generator.AddExtension(X509Extensions.BasicConstraints, true,  new BasicConstraints(true));
+            generator.AddExtension(X509Extensions.KeyUsage,         true,  new KeyUsage(KeyUsage.KeyCertSign | KeyUsage.CrlSign));
+
+            return generator.Generate(new Asn1SignatureFactory("SHA256withECDSA", Signer.Private));
 
         }
 
@@ -147,26 +199,43 @@ namespace cloud.charging.open.LocalController.Tests
                                      Boolean         ClientAuthentication = false)
         {
 
-            var request = CertificateRequest.LoadSigningRequestPem(
-                              CSR,
-                              HashAlgorithmName.SHA256,
-                              CertificateRequestLoadOptions.UnsafeLoadCertificateExtensions,
-                              RSASignaturePadding.Pkcs1
-                          );
+            var request   = (Pkcs10CertificationRequest) new PemReader(new StringReader(CSR)).ReadObject();
+            var info      = request.GetCertificationRequestInfo();
+
+            var generator = new X509V3CertificateGenerator();
+
+            generator.SetSerialNumber(Serial());
+            generator.SetIssuerDN    (issuer.SubjectDN);
+            generator.SetSubjectDN   (info.Subject);
+            generator.SetNotBefore   (NotBefore.UtcDateTime);
+            generator.SetNotAfter    (NotAfter. UtcDateTime);
+            generator.SetPublicKey   (request.GetPublicKey());
+
+            #region Whatever the request asked for
+
+            var requested = request.GetRequestedExtensions();
+
+            if (requested is not null)
+                foreach (DerObjectIdentifier oid in requested.ExtensionOids)
+                {
+
+                    // Replaced below where the test wants something else.
+                    if (ClientAuthentication && oid.Equals(X509Extensions.ExtendedKeyUsage))
+                        continue;
+
+                    var extension = requested.GetExtension(oid);
+
+                    generator.AddExtension(oid, extension.IsCritical, extension.GetParsedValue());
+
+                }
 
             if (ClientAuthentication)
-                request.CertificateExtensions.Add(
-                    new X509EnhancedKeyUsageExtension([ new Oid("1.3.6.1.5.5.7.3.2", "TLS Web Client Authentication") ], false)
-                );
+                generator.AddExtension(X509Extensions.ExtendedKeyUsage, false,
+                                       new ExtendedKeyUsage(KeyPurposeID.id_kp_clientAuth));
 
-            return Reload(
-                       request.Create(
-                           Issuer,
-                           NotBefore,
-                           NotAfter,
-                           RandomNumberGenerator.GetBytes(16)
-                       )
-                   );
+            #endregion
+
+            return ToDotNet(generator.Generate(new Asn1SignatureFactory("SHA256withECDSA", issuerKey)));
 
         }
 
@@ -185,34 +254,35 @@ namespace cloud.charging.open.LocalController.Tests
                                         Boolean         WithoutAnyKeyUsage     = false)
         {
 
-            using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            var pair      = PKIFactory.GenerateECCKeyPair("secp256r1");
 
-            var request   = new CertificateRequest($"CN={Subject}", key, HashAlgorithmName.SHA256);
+            var generator = new X509V3CertificateGenerator();
 
-            request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+            generator.SetSerialNumber(Serial());
+            generator.SetIssuerDN    (issuer.SubjectDN);
+            generator.SetSubjectDN   (new X509Name($"CN={Subject}"));
+            generator.SetNotBefore   (NotBefore.UtcDateTime);
+            generator.SetNotAfter    (NotAfter. UtcDateTime);
+            generator.SetPublicKey   (pair.Public);
+
+            generator.AddExtension(X509Extensions.BasicConstraints, true, new BasicConstraints(false));
 
             if (!WithoutAnyKeyUsage)
-                request.CertificateExtensions.Add(
-                    new X509EnhancedKeyUsageExtension(
-                        [ new Oid(ClientAuthentication ? "1.3.6.1.5.5.7.3.2" : "1.3.6.1.5.5.7.3.1") ],
-                        false
-                    )
+                generator.AddExtension(
+                    X509Extensions.ExtendedKeyUsage,
+                    false,
+                    new ExtendedKeyUsage(ClientAuthentication
+                                             ? KeyPurposeID.id_kp_clientAuth
+                                             : KeyPurposeID.id_kp_serverAuth)
                 );
 
-            return Reload(
-                       request.Create(
-                           Issuer,
-                           NotBefore,
-                           NotAfter,
-                           RandomNumberGenerator.GetBytes(16)
-                       )
-                   );
+            return ToDotNet(generator.Generate(new Asn1SignatureFactory("SHA256withECDSA", issuerKey)));
 
         }
 
         #endregion
 
-        #region ToPEM(Certificates)
+        #region ToPEM(Certificates) / ChainPEM(Certificate)
 
         /// <summary>
         /// Certificates the way they arrive from an authority: one PEM block
@@ -237,21 +307,17 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region (private static) Reload(Certificate)
+        #region (private static) ToDotNet(Certificate) / Serial()
 
         /// <summary>
-        /// A certificate detached from whatever key object made it, so that a
-        /// "using" on that key cannot pull the ground out from under it.
+        /// The certificate alone, without a private key: nothing here is ever
+        /// presented over TLS, it is only held up to be checked.
         /// </summary>
-        private static X509Certificate2 Reload(X509Certificate2 Certificate)
+        private static X509Certificate2 ToDotNet(BCx509.X509Certificate Certificate)
+            => X509CertificateLoader.LoadCertificate(Certificate.GetEncoded());
 
-            => Certificate.HasPrivateKey
-                   ? X509CertificateLoader.LoadPkcs12(
-                         Certificate.Export(X509ContentType.Pkcs12, "test"),
-                         "test",
-                         X509KeyStorageFlags.Exportable
-                     )
-                   : X509CertificateLoader.LoadCertificate(Certificate.RawData);
+        private static BigInteger Serial()
+            => new (1, RandomNumberGenerator.GetBytes(16));
 
         #endregion
 

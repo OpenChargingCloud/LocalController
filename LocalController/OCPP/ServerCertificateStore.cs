@@ -24,7 +24,22 @@ using System.Security.Cryptography.X509Certificates;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
+using Org.BouncyCastle.Asn1;
+using Org.BouncyCastle.Asn1.Pkcs;
+using Org.BouncyCastle.Asn1.X509;
+using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.EC;
+using Org.BouncyCastle.Crypto.Operators;
+using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Math.EC.Multiplier;
+using Org.BouncyCastle.Pkcs;
+using Org.BouncyCastle.Security;
+using Org.BouncyCastle.X509;
+
+using BCx509 = Org.BouncyCastle.X509;
+
 using org.GraphDefined.Vanaheimr.Hermod;
+using org.GraphDefined.Vanaheimr.Hermod.PKI;
 
 using cloud.charging.open.LocalController.Logging;
 using cloud.charging.open.LocalController.Web;
@@ -69,24 +84,17 @@ namespace cloud.charging.open.LocalController.OCPP
         public const String  DefaultDirectoryName  = "ocpp-server-keys";
 
         /// <summary>
-        /// The key algorithms that may be asked for, and what they mean.
+        /// The key algorithms that may be asked for - see
+        /// <see cref="KeyAlgorithm"/>, which is where they and their several
+        /// awkwardnesses live.
         /// </summary>
-        /// <remarks>
-        /// An elliptic curve first because it is what a charging station with a
-        /// small processor handles best, and RSA beside it because some
-        /// certificate authorities still issue nothing else.
-        /// </remarks>
-        public static readonly IReadOnlyDictionary<String, String> Algorithms = new Dictionary<String, String> {
-            { "ecdsa-p256",  "ECDSA P-256" },
-            { "ecdsa-p384",  "ECDSA P-384" },
-            { "rsa-3072",    "RSA 3072"    },
-            { "rsa-4096",    "RSA 4096"    }
-        };
+        public static IReadOnlyList<KeyAlgorithm> Algorithms
+            => KeyAlgorithm.All;
 
         /// <summary>
         /// The algorithm a key is generated with when nothing says otherwise.
         /// </summary>
-        public const String  DefaultAlgorithm      = "ecdsa-p256";
+        public const String  DefaultAlgorithm      = KeyAlgorithm.DefaultId;
 
         /// <summary>
         /// How long before a certificate expires this store starts saying so.
@@ -160,7 +168,8 @@ namespace cloud.charging.open.LocalController.OCPP
             get
             {
                 lock (updateLock)
-                    return entries.Values.Any(entry => entry.Certificate is not null);
+                    return entries.Values.Any(entry => entry.Certificate is not null &&
+                                                       entry.CanBePresented);
             }
         }
 
@@ -305,11 +314,11 @@ namespace cloud.charging.open.LocalController.OCPP
 
             #region What was asked for
 
-            var algorithm = (Algorithm ?? DefaultAlgorithm).Trim().ToLowerInvariant();
+            var algorithm = KeyAlgorithm.Find(Algorithm ?? DefaultAlgorithm);
 
-            if (!Algorithms.ContainsKey(algorithm))
+            if (algorithm is null)
             {
-                Error = $"'{algorithm}' is not a key this local controller generates ({String.Join(", ", Algorithms.Keys)}).";
+                Error = $"'{Algorithm}' is not a key this local controller generates ({String.Join(", ", KeyAlgorithm.All.Select(one => one.Id))}).";
                 return false;
             }
 
@@ -333,11 +342,19 @@ namespace cloud.charging.open.LocalController.OCPP
                                         ? subject
                                         : $"CN={subject.Replace("\\", "\\\\").Replace(",", "\\,").Replace("=", "\\=")}";
 
-            X500DistinguishedName x500;
+            X509Name subjectName;
+            String   subjectText;
 
             try
             {
-                x500 = new X500DistinguishedName(distinguishedName);
+                // Read by .NET first because it is stricter about what somebody
+                // may type, then handed on in the form Bouncy Castle signs
+                // with - so the message about a bad subject is the readable one
+                // and the request is still built by the half that knows every
+                // algorithm.
+                var x500     = new X500DistinguishedName(distinguishedName);
+                subjectText  = x500.Name;
+                subjectName  = new X509Name(x500.Name);
             }
             catch (Exception e)
             {
@@ -359,9 +376,19 @@ namespace cloud.charging.open.LocalController.OCPP
 
             #endregion
 
-            using var key = CreateKey(algorithm);
+            AsymmetricCipherKeyPair pair;
 
-            var publicKey  = key.ExportSubjectPublicKeyInfo();
+            try
+            {
+                pair = algorithm.Generate();
+            }
+            catch (Exception e)
+            {
+                Error = $"A {algorithm.Name} key could not be generated: {e.Message}";
+                return false;
+            }
+
+            var publicKey  = SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(pair.Public).GetDerEncoded();
             var id         = KeyId(publicKey);
 
             lock (updateLock)
@@ -382,31 +409,60 @@ namespace cloud.charging.open.LocalController.OCPP
                 try
                 {
 
-                    var request = key is ECDsa ecdsa
-                                      ? new CertificateRequest(x500, ecdsa, HashAlgorithmName.SHA256)
-                                      : new CertificateRequest(x500, (RSA) key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                    var extensions = new X509ExtensionsGenerator();
 
-                    var sanBuilder = new SubjectAlternativeNameBuilder();
+                    #region What this controller is reachable as
 
-                    foreach (var name in names)
-                    {
-                        if (System.Net.IPAddress.TryParse(name, out var ipAddress))
-                            sanBuilder.AddIpAddress(ipAddress);
-                        else
-                            sanBuilder.AddDnsName(name);
-                    }
+                    extensions.AddExtension(
+                        X509Extensions.SubjectAlternativeName,
+                        false,
+                        new GeneralNames([
+                            .. names.Select(name =>
+                                   System.Net.IPAddress.TryParse(name, out _)
+                                       ? new GeneralName(GeneralName.IPAddress, name)
+                                       : new GeneralName(GeneralName.DnsName,   name))
+                        ])
+                    );
 
-                    request.CertificateExtensions.Add(sanBuilder.Build());
+                    #endregion
 
-                    // What this certificate is for, said in the request rather
-                    // than hoped for in the answer: a certificate authority
-                    // that is handed a request without them frequently issues
-                    // something that is not a server certificate.
-                    request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
-                    request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, true));
-                    request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([ new Oid("1.3.6.1.5.5.7.3.1", "TLS Web Server Authentication") ], false));
+                    #region What this certificate is for
 
-                    csr = request.CreateSigningRequestPem();
+                    // Said in the request rather than hoped for in the answer:
+                    // a certificate authority that is handed a request without
+                    // them frequently issues something that is not a server
+                    // certificate.
+                    extensions.AddExtension(
+                        X509Extensions.BasicConstraints,
+                        true,
+                        new BasicConstraints(false)
+                    );
+
+                    extensions.AddExtension(
+                        X509Extensions.KeyUsage,
+                        true,
+                        new KeyUsage(KeyUsage.DigitalSignature | KeyUsage.KeyEncipherment)
+                    );
+
+                    extensions.AddExtension(
+                        X509Extensions.ExtendedKeyUsage,
+                        false,
+                        new ExtendedKeyUsage(KeyPurposeID.id_kp_serverAuth)
+                    );
+
+                    #endregion
+
+                    csr = new Pkcs10CertificationRequest(
+                              new Asn1SignatureFactory(algorithm.SignatureAlgorithm, pair.Private),
+                              subjectName,
+                              pair.Public,
+                              new DerSet(
+                                  new AttributePkcs(
+                                      PkcsObjectIdentifiers.Pkcs9AtExtensionRequest,
+                                      new DerSet(extensions.Generate())
+                                  )
+                              )
+                          ).ToPEM();
 
                 }
                 catch (Exception e)
@@ -426,7 +482,13 @@ namespace cloud.charging.open.LocalController.OCPP
 
                     CreateDirectory();
 
-                    OwnerOnlyFile.Write(FilePath(id, "key.pem"), key.ExportPkcs8PrivateKeyPem() + Environment.NewLine);
+                    OwnerOnlyFile.Write(
+                        FilePath(id, "key.pem"),
+                        PemEncoding.WriteString(
+                            "PRIVATE KEY",
+                            PrivateKeyInfoFactory.CreatePrivateKeyInfo(pair.Private).GetDerEncoded()
+                        ) + Environment.NewLine
+                    );
 
                     File.WriteAllText(FilePath(id, "csr.pem"), csr);
 
@@ -434,9 +496,9 @@ namespace cloud.charging.open.LocalController.OCPP
                         FilePath(id, "json"),
                         new JObject(
                             new JProperty("id",         id),
-                            new JProperty("algorithm",  algorithm),
+                            new JProperty("algorithm",  algorithm.Id),
                             new JProperty("createdAt",  createdAt.ToString("o")),
-                            new JProperty("subject",    x500.Name),
+                            new JProperty("subject",    subjectText),
                             new JProperty("reachableAs", new JArray(names))
                         ).ToString(Formatting.Indented) + Environment.NewLine
                     );
@@ -450,7 +512,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 #endregion
 
-                var entry = new ServerCertificateEntry(id, Algorithms[algorithm], createdAt, x500.Name);
+                var entry = new ServerCertificateEntry(id, algorithm.Name, createdAt, subjectText);
 
                 entries   [id] = entry;
                 publicKeys[id] = publicKey;
@@ -460,7 +522,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
             }
 
-            OnNotice?.Invoke(LogLevel.Notice, $"A new {Algorithms[algorithm]} key '{id}' was generated and a signing request for {String.Join(", ", names)} is waiting to be collected.");
+            OnNotice?.Invoke(LogLevel.Notice, $"A new {algorithm.Name} key '{id}' was generated and a signing request for {String.Join(", ", names)} is waiting to be collected.");
 
             return true;
 
@@ -776,7 +838,11 @@ namespace cloud.charging.open.LocalController.OCPP
             lock (updateLock)
             {
 
-                var usable = entries.Values.Where(entry => entry.Certificate is not null).ToArray();
+                // Not merely "has a certificate": one this machine cannot
+                // present would turn every handshake into a failure, which is
+                // worse than the expired certificate below.
+                var usable = entries.Values.Where(entry => entry.Certificate is not null &&
+                                                           entry.CanBePresented).ToArray();
 
                 if (usable.Length == 0)
                     return null;
@@ -926,10 +992,7 @@ namespace cloud.charging.open.LocalController.OCPP
                     )),
 
                     new JProperty("algorithms",  new JArray(
-                        Algorithms.Select(algorithm => new JObject(
-                            new JProperty("id",    algorithm.Key),
-                            new JProperty("name",  algorithm.Value)
-                        ))
+                        Algorithms.Select(algorithm => algorithm.ToJSON())
                     )),
 
                     // No import, and the page should say so rather than leave
@@ -990,7 +1053,9 @@ namespace cloud.charging.open.LocalController.OCPP
                 }
             }
 
-            if (!Algorithms.ContainsKey(algorithm))
+            var kind = KeyAlgorithm.Find(algorithm);
+
+            if (kind is null)
             {
                 Error = $"'{algorithm}' is not a key algorithm this local controller knows.";
                 return false;
@@ -1012,23 +1077,32 @@ namespace cloud.charging.open.LocalController.OCPP
                 return false;
             }
 
-            using var key = CreateEmptyKey(algorithm);
+            AsymmetricKeyParameter  privateKey;
+            Byte[]                  publicKey;
 
             try
             {
-                key.ImportFromPem(keyPEM);
+
+                // Whatever kind it is - the encoding says so, so nothing here
+                // has to be told which of a dozen algorithms to expect.
+                privateKey  = PrivateKeyFactory.CreateKey(PemEncoding.Find(keyPEM) is PemFields fields
+                                                              ? Convert.FromBase64String(keyPEM[fields.Base64Data])
+                                                              : throw new FormatException("this is not a PEM private key"));
+
+                publicKey   = SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(
+                                  PublicKeyOf(privateKey)
+                              ).GetDerEncoded();
+
             }
             catch (Exception e)
             {
-                Error = $"the private key is not a usable {Algorithms[algorithm]} key: {e.Message}";
+                Error = $"the private key is not a usable {kind.Name} key: {e.Message}";
                 return false;
             }
 
-            var publicKey = key.ExportSubjectPublicKeyInfo();
-
             PublicKey = publicKey;
 
-            var entry = new ServerCertificateEntry(Id, Algorithms[algorithm], createdAt, subject);
+            var entry = new ServerCertificateEntry(Id, kind.Name, createdAt, subject);
 
             #endregion
 
@@ -1070,12 +1144,34 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 try
                 {
-                    entry.Certificate = WithPrivateKey(leaf, key);
+                    entry.Certificate = WithPrivateKey(leaf, privateKey);
                 }
                 catch (Exception e)
                 {
-                    Error = $"the private key and '{certificatePath}' do not go together: {e.Message}";
-                    return false;
+
+                    // Not a reason to refuse the certificate: it is a perfectly
+                    // good one, and the platform underneath is what cannot hold
+                    // it. Kept, said out loud, and passed over when the server
+                    // chooses what to present - because the day this runs
+                    // somewhere else, or on a newer runtime, it may work.
+                    entry.CanBePresented      = false;
+                    entry.PresentationProblem = $"This machine cannot make a usable TLS certificate out of a {kind.Name} key: {e.Message} " +
+                                                 "The certificate is kept, but it cannot be presented to a charging station from here.";
+
+                }
+
+                // Loading it is only half the question. A P-521 or an ML-DSA
+                // certificate loads perfectly well and then finds no TLS stack
+                // willing to negotiate with it, which is something only a
+                // handshake finds out - so one is done, once per kind of key.
+                if (entry.Certificate is not null &&
+                    !KeyAlgorithm.CanBePresented(kind.Id, entry.Certificate))
+                {
+
+                    entry.CanBePresented      = false;
+                    entry.PresentationProblem = $"A {kind.Name} certificate cannot be presented over TLS by this machine - the handshake fails. " +
+                                                 "It is kept, and will be used the day the platform underneath can serve it.";
+
                 }
 
                 foreach (var intermediate in OrderTowardsTheRoot(
@@ -1109,6 +1205,14 @@ namespace cloud.charging.open.LocalController.OCPP
         {
 
             Entry.Warnings.Clear();
+
+            // First, and before the check below that there is a certificate at
+            // all: where the platform cannot hold this kind of key, there is no
+            // .NET certificate to look at - so a check that began by returning
+            // on a missing one would swallow the only sentence that explains
+            // why it is missing.
+            if (Entry.PresentationProblem is not null)
+                Entry.Warnings.Add(Entry.PresentationProblem);
 
             if (Entry.Certificate is null)
                 return;
@@ -1243,30 +1347,39 @@ namespace cloud.charging.open.LocalController.OCPP
         #region (private static) WithPrivateKey(Certificate, Key)
 
         /// <summary>
-        /// A certificate with its private key attached, in a form that can
-        /// actually be used for TLS.
+        /// A certificate with its private key attached, in a form the platform
+        /// can actually present.
         /// </summary>
         /// <remarks>
-        /// The round trip through PKCS#12 is not decoration: on Windows a
-        /// certificate whose key was attached in memory is handed to SChannel
-        /// without one, and the handshake fails with an error that says nothing
-        /// about keys. Loading it back from a PKCS#12 blob gives the key a
-        /// handle the platform will use.
+        /// Through PKCS#12, and built by Bouncy Castle rather than by .NET: a
+        /// certificate whose key was attached in memory is handed to the
+        /// platform's TLS stack without one, and .NET has no key object at all
+        /// for an Ed448 or an ML-DSA key to attach. Bouncy Castle can write
+        /// every one of them into a PKCS#12 blob, and loading that back is the
+        /// one door every kind of key goes through.
+        ///
+        /// It throws where the platform will not take the result - which is
+        /// information and not a fault: see the caller.
         /// </remarks>
-        private static X509Certificate2 WithPrivateKey(X509Certificate2      Certificate,
-                                                       AsymmetricAlgorithm   Key)
+        private static X509Certificate2 WithPrivateKey(X509Certificate2        Certificate,
+                                                       AsymmetricKeyParameter  PrivateKey)
         {
 
-            using var withKey = Key switch {
-                                    ECDsa ecdsa  => Certificate.CopyWithPrivateKey(ecdsa),
-                                    RSA   rsa    => Certificate.CopyWithPrivateKey(rsa),
-                                    _            => throw new NotSupportedException($"{Key.GetType().Name} is not a key this local controller can present.")
-                                };
+            var store       = new Pkcs12StoreBuilder().Build();
+            var bouncy      = new BCx509.X509CertificateParser().ReadCertificate(Certificate.RawData);
+            var entry       = new X509CertificateEntry(bouncy);
 
-            var password = Guid.NewGuid().ToString("N");
+            store.SetCertificateEntry(bouncy.SubjectDN.ToString(), entry);
+            store.SetKeyEntry        (bouncy.SubjectDN.ToString(), new AsymmetricKeyEntry(PrivateKey), [ entry ]);
+
+            using var blob  = new MemoryStream();
+
+            var password    = Guid.NewGuid().ToString("N");
+
+            store.Save(blob, password.ToCharArray(), new SecureRandom());
 
             return X509CertificateLoader.LoadPkcs12(
-                       withKey.Export(X509ContentType.Pkcs12, password),
+                       blob.ToArray(),
                        password,
                        X509KeyStorageFlags.Exportable
                    );
@@ -1275,29 +1388,40 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region (private static) CreateKey / CreateEmptyKey / KeyId
+        #region (private static) PublicKeyOf(PrivateKey) / KeyId
 
         /// <summary>
-        /// A new key pair of the given kind.
+        /// The public half of a private key, whatever kind it is.
         /// </summary>
-        private static AsymmetricAlgorithm CreateKey(String Algorithm)
+        /// <remarks>
+        /// Bouncy Castle has no one method for this: an RSA private key carries
+        /// the modulus and exponent that make up the public one, an elliptic
+        /// curve key is a scalar that has to be multiplied by the generator,
+        /// and the newer kinds simply hand theirs over. So one branch each,
+        /// and a sentence rather than a silent null for anything else.
+        /// </remarks>
+        private static AsymmetricKeyParameter PublicKeyOf(AsymmetricKeyParameter PrivateKey)
 
-            => Algorithm switch {
-                   "ecdsa-p256"  => ECDsa.Create(ECCurve.NamedCurves.nistP256),
-                   "ecdsa-p384"  => ECDsa.Create(ECCurve.NamedCurves.nistP384),
-                   "rsa-3072"    => RSA.  Create(3072),
-                   "rsa-4096"    => RSA.  Create(4096),
-                   _             => throw new NotSupportedException($"'{Algorithm}' is not a key this local controller generates.")
+            => PrivateKey switch {
+
+                   RsaPrivateCrtKeyParameters rsa
+                       => new RsaKeyParameters(false, rsa.Modulus, rsa.PublicExponent),
+
+                   ECPrivateKeyParameters ec
+                       => new ECPublicKeyParameters(
+                              ec.AlgorithmName,
+                              new FixedPointCombMultiplier().Multiply(ec.Parameters.G, ec.D),
+                              ec.Parameters
+                          ),
+
+                   Ed25519PrivateKeyParameters ed25519  => ed25519.GeneratePublicKey(),
+                   Ed448PrivateKeyParameters   ed448    => ed448.  GeneratePublicKey(),
+                   MLDsaPrivateKeyParameters   mldsa    => mldsa.  GetPublicKey(),
+                   SlhDsaPrivateKeyParameters  slhdsa   => slhdsa. GetPublicKey(),
+
+                   _ => throw new NotSupportedException($"{PrivateKey.GetType().Name} is not a private key this local controller knows how to read.")
+
                };
-
-        /// <summary>
-        /// An empty key of the right kind, to import a stored one into.
-        /// </summary>
-        private static AsymmetricAlgorithm CreateEmptyKey(String Algorithm)
-
-            => Algorithm.StartsWith("ecdsa", StringComparison.Ordinal)
-                   ? ECDsa.Create()
-                   : RSA.  Create();
 
         /// <summary>
         /// What a key is called: where its public key hashes to.

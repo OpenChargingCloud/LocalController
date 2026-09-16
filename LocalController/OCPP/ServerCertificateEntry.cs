@@ -75,6 +75,31 @@ namespace cloud.charging.open.LocalController.OCPP
         public X509Certificate2Collection   Intermediates    { get; } = [];
 
         /// <summary>
+        /// Whether this machine can hold this certificate up to a charging
+        /// station during a TLS handshake.
+        /// </summary>
+        /// <remarks>
+        /// A different question from whether the certificate is any good, and
+        /// the answer is about the platform rather than about the certificate:
+        /// an Ed448 or an ML-DSA key makes a perfectly valid certificate that
+        /// this operating system's TLS stack will not serve, and it may serve
+        /// it after the next update. So such a certificate is kept and passed
+        /// over, not refused.
+        /// </remarks>
+        public Boolean                      CanBePresented   { get; internal set; } = true;
+
+        /// <summary>
+        /// Why it cannot be presented, when it cannot.
+        /// </summary>
+        /// <remarks>
+        /// Kept beside <see cref="Warnings"/> rather than in it, because that
+        /// list is emptied and rebuilt whenever anything looks at this entry -
+        /// and this is the one thing about it that is found out once, at the
+        /// cost of a TLS handshake, rather than recomputed.
+        /// </remarks>
+        public String?                      PresentationProblem { get; internal set; }
+
+        /// <summary>
         /// What is not wrong enough to refuse the certificate but is worth
         /// saying - a chain that does not verify here, names it is not valid
         /// for, intermediates that were not sent along.
@@ -129,6 +154,7 @@ namespace cloud.charging.open.LocalController.OCPP
         public Boolean IsValidAt(DateTimeOffset Now)
 
             => Certificate is not null &&
+               CanBePresented          &&
                NotBefore <= Now        &&
                Now       <= NotAfter;
 
@@ -156,6 +182,7 @@ namespace cloud.charging.open.LocalController.OCPP
                            new JProperty("createdAt",      CreatedAt.ToString("o")),
                            new JProperty("subject",        Subject),
                            new JProperty("hasCertificate", Certificate is not null),
+                           new JProperty("canBePresented", CanBePresented),
                            new JProperty("inUse",          InUse),
                            new JProperty("warnings",       new JArray(Warnings))
                        );
