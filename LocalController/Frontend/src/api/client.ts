@@ -413,12 +413,46 @@ export interface ClientTrust {
     entries:     TrustedChain[];
 }
 
+/** A way a charging station can prove who it is. */
+export type AuthMethod = 'basic' | 'totp' | 'certificate';
+
+/**
+ * What a charging station needs in order to be let in with a one-time token.
+ *
+ * The shared secret is never in here: it is the one credential the controller
+ * has to keep readable, so it is handed out once when it is set and never put
+ * into the list this page reads.
+ */
+export interface TOTPSettings {
+    validitySeconds:  number;
+    length:           number;
+    alphabet:         string;
+    hashAlgorithm:    'SHA256' | 'SHA384' | 'SHA512';
+}
+
 /** One charging station that may sign in. */
 export interface StationLogin {
-    id:       string;
-    enabled:  boolean;
-    addedAt:  string;
-    note?:    string;
+    id:           string;
+    group:        string;
+    enabled:      boolean;
+    addedAt:      string;
+    hasPassword:  boolean;
+    hasTOTP:      boolean;
+    totp?:        TOTPSettings;
+    note?:        string;
+}
+
+/** A group of logins, and what its members are allowed to do. */
+export interface LoginGroup {
+    id:                string;
+    name:              string;
+    enabled:           boolean;
+    builtIn:           boolean;
+    addedAt:           string;
+    authMethods:       AuthMethod[];
+    securityProfiles:  number[];
+    members:           number;
+    note?:             string;
 }
 
 /** Which charging stations may sign in, and with what. */
@@ -426,8 +460,33 @@ export interface StationLogins {
     file:               string;
     enabled:            number;
     maxStations:        number;
+    maxGroups:          number;
     minPasswordLength:  number;
+    minSecretLength:    number;
+    defaultGroup:       string;
+    groups:             LoginGroup[];
     stations:           StationLogin[];
+}
+
+/** What a group may be changed to. */
+export interface LoginGroupUpdate {
+    id?:               string;
+    name:              string;
+    enabled:           boolean;
+    authMethods:       AuthMethod[];
+    securityProfiles:  number[];
+    note?:             string;
+}
+
+/** What a one-time token may be set to. */
+export interface TOTPUpdate {
+    sharedSecret?:     string;
+    validitySeconds?:  number;
+    length?:           number;
+    alphabet?:         string;
+    hashAlgorithm?:    string;
+    group?:            string;
+    note?:             string;
 }
 
 
@@ -596,15 +655,46 @@ export const api = {
              * "make one up", and the made-up one comes back here and nowhere
              * else: it is kept only as a hash.
              */
-            save:     (id: string, password: string, note: string) =>
+            save:     (id: string, password: string, group: string, note: string) =>
                           request<{ id: string; password?: string; stations: StationLogins }>(
-                              'POST', '/configuration/ocpp-server/stations', { id, password, note }),
+                              'POST', '/configuration/ocpp-server/stations', { id, password, group, note }),
 
             enable:   (id: string, enabled: boolean) =>
                           request<StationLogins>('PUT', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}`, { enabled }),
 
+            move:     (id: string, group: string) =>
+                          request<StationLogins>('PUT', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}`, { group }),
+
             remove:   (id: string) =>
-                          request<StationLogins>('DELETE', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}`)
+                          request<StationLogins>('DELETE', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}`),
+
+            /**
+             * Give a station what it needs to be let in with a one-time token.
+             * An empty shared secret means "make one up", and it comes back
+             * here - the only place it is ever handed out.
+             */
+            saveTOTP: (id: string, update: TOTPUpdate) =>
+                          request<{ id: string; sharedSecret?: string; stations: StationLogins }>(
+                              'PUT', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/totp`, update),
+
+            removeTOTP:     (id: string) =>
+                          request<StationLogins>('DELETE', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/totp`),
+
+            removePassword: (id: string) =>
+                          request<StationLogins>('DELETE', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/password`)
+
+        },
+
+        groups: {
+
+            /** Everything about the group is replaced, not merged. */
+            save:     (update: LoginGroupUpdate) =>
+                          update.id === undefined
+                              ? request<StationLogins>('POST', '/configuration/ocpp-server/groups', update)
+                              : request<StationLogins>('PUT',  `/configuration/ocpp-server/groups/${encodeURIComponent(update.id)}`, update),
+
+            remove:   (id: string) =>
+                          request<StationLogins>('DELETE', `/configuration/ocpp-server/groups/${encodeURIComponent(id)}`)
 
         }
 

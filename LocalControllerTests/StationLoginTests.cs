@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2014-2026 GraphDefined GmbH <achim.friedland@graphdefined.com>
  * This file is part of LocalController <https://github.com/OpenChargingCloud/LocalController>
  *
@@ -116,7 +116,7 @@ namespace cloud.charging.open.LocalController.Tests
         public void APasswordIsMadeUpAndComesBackExactlyOnce()
         {
 
-            Assert.That(logins.TrySetPassword("cs001", null, "Ladepunkt 1", out var generated, out var error), Is.True, error);
+            Assert.That(logins.TrySetPassword("cs001", null, null, "Ladepunkt 1", out var generated, out var error), Is.True, error);
 
             Assert.Multiple(() => {
 
@@ -139,7 +139,7 @@ namespace cloud.charging.open.LocalController.Tests
         public void TheFileNeverHoldsThePasswordInTheClear()
         {
 
-            logins.TrySetPassword("cs001", null, null, out var generated, out _);
+            logins.TrySetPassword("cs001", null, null, null, out var generated, out _);
 
             var written = File.ReadAllText(Path.Combine(directory, "ocpp-stations.json"));
 
@@ -166,13 +166,13 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
 
-                Assert.That(logins.TrySetPassword("cs001", "1234", null, out _, out var tooShort), Is.False);
+                Assert.That(logins.TrySetPassword("cs001", "1234", null, null, out _, out var tooShort), Is.False);
                 Assert.That(tooShort, Does.Contain("16"));
 
-                Assert.That(logins.TrySetPassword("cs001", new String('x', 65), null, out _, out var tooLong), Is.False);
+                Assert.That(logins.TrySetPassword("cs001", new String('x', 65), null, null, out _, out var tooLong), Is.False);
                 Assert.That(tooLong,  Does.Contain("64"));
 
-                Assert.That(logins.TrySetPassword("cs001", new String('x', 20), null, out _, out var fine), Is.True, fine);
+                Assert.That(logins.TrySetPassword("cs001", new String('x', 20), null, null, out _, out var fine), Is.True, fine);
 
             });
 
@@ -187,10 +187,10 @@ namespace cloud.charging.open.LocalController.Tests
         {
 
             Assert.Multiple(() => {
-                Assert.That(logins.TrySetPassword("",  null, null, out _, out var empty), Is.False);
+                Assert.That(logins.TrySetPassword("",  null, null, null, out _, out var empty), Is.False);
                 Assert.That(empty, Does.Contain("identification"));
 
-                Assert.That(logins.TrySetPassword(new String('c', 49), null, null, out _, out var tooLong), Is.False);
+                Assert.That(logins.TrySetPassword(new String('c', 49), null, null, null, out _, out var tooLong), Is.False);
                 Assert.That(tooLong, Does.Contain("48"));
             });
 
@@ -204,7 +204,7 @@ namespace cloud.charging.open.LocalController.Tests
         public void AWrongPasswordOrAnUnknownStationIsRefused()
         {
 
-            logins.TrySetPassword("cs001", null, null, out var generated, out _);
+            logins.TrySetPassword("cs001", null, null, null, out var generated, out _);
 
             Assert.Multiple(() => {
                 Assert.That(logins.Verify("cs001", generated!),        Is.True);
@@ -223,7 +223,7 @@ namespace cloud.charging.open.LocalController.Tests
         public void AStationSwitchedOffCannotSignInAndKeepsItsPassword()
         {
 
-            logins.TrySetPassword("cs001", null, null, out var generated, out _);
+            logins.TrySetPassword("cs001", null, null, null, out var generated, out _);
 
             Assert.That(logins.TrySetEnabled("cs001", false, out var error), Is.True, error);
 
@@ -251,10 +251,10 @@ namespace cloud.charging.open.LocalController.Tests
         public void ChangingAPasswordKeepsWhatWasKnownAboutTheStation()
         {
 
-            logins.TrySetPassword("cs001", null, "Ladepunkt 1", out var first, out _);
+            logins.TrySetPassword("cs001", null, null, "Ladepunkt 1", out var first, out _);
 
             logins.TrySetEnabled ("cs001", false, out _);
-            logins.TrySetPassword("cs001", null, null, out var second, out var error);
+            logins.TrySetPassword("cs001", null, null, null, out var second, out var error);
 
             var station = logins.Logins.Single();
 
@@ -276,7 +276,7 @@ namespace cloud.charging.open.LocalController.Tests
         public void ARemovedStationIsGoneFromTheFileToo()
         {
 
-            logins.TrySetPassword("cs001", null, null, out var generated, out _);
+            logins.TrySetPassword("cs001", null, null, null, out var generated, out _);
 
             Assert.That(logins.TryRemove("cs001", out var error), Is.True, error);
 
@@ -297,8 +297,8 @@ namespace cloud.charging.open.LocalController.Tests
         public void EverythingIsStillThereAfterARestart()
         {
 
-            logins.TrySetPassword("cs001", null, "Ladepunkt 1", out var generated, out _);
-            logins.TrySetPassword("cs002", null, null,          out _,             out _);
+            logins.TrySetPassword("cs001", null, null, "Ladepunkt 1", out var generated, out _);
+            logins.TrySetPassword("cs002", null, null, null,          out _,             out _);
             logins.TrySetEnabled ("cs002", false, out _);
 
             var restarted = new ChargingStationLogins(Path.Combine(directory, "ocpp-stations.json"), clock);
@@ -331,7 +331,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             logins.OnChanged += () => changes++;
 
-            logins.TrySetPassword("cs001", null, null, out _, out _);
+            logins.TrySetPassword("cs001", null, null, null, out _, out _);
             logins.TrySetEnabled ("cs001", false, out _);
             logins.TryRemove     ("cs001", out _);
 
@@ -354,7 +354,7 @@ namespace cloud.charging.open.LocalController.Tests
         public void WhatThePageIsShownNamesNoHashes()
         {
 
-            logins.TrySetPassword("cs001", null, "Ladepunkt 1", out _, out _);
+            logins.TrySetPassword("cs001", null, null, "Ladepunkt 1", out _, out _);
 
             var shown = logins.ToJSON();
 
@@ -363,6 +363,98 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(shown["stations"]?[0]?.Value<String>("id"),    Is.EqualTo("cs001"));
                 Assert.That(shown["stations"]?[0]?.Value<String>("note"),  Is.EqualTo("Ladepunkt 1"));
                 Assert.That(shown["stations"]?[0]?["password"],            Is.Null);
+            });
+
+        }
+
+        #endregion
+
+        #region WhatThePageIsShownCarriesNoSharedSecretEither()
+
+        /// <summary>
+        /// The shared secret is the one credential here that can be used as it
+        /// stands - not a hash of something, the thing itself. A page that
+        /// anybody who may read the configuration can open must not carry it.
+        /// </summary>
+        [Test]
+        public void WhatThePageIsShownCarriesNoSharedSecretEither()
+        {
+
+            const String theSecret = "a-shared-secret-long-enough";
+
+            logins.TrySetTOTP("cs001", theSecret, null, null, null, null, null, null, out _, out var error);
+
+            var shown = logins.ToJSON();
+
+            Assert.Multiple(() => {
+
+                Assert.That(error,                                                Is.Null);
+                Assert.That(shown.ToString(),                                     Does.Not.Contain(theSecret));
+                Assert.That(shown["stations"]?[0]?["totp"]?["sharedSecret"],      Is.Null);
+
+                // What the page does need: that there is one, and what shape it
+                // has, so somebody can see it is configured without seeing it.
+                Assert.That(shown["stations"]?[0]?.Value<Boolean>("hasTOTP"),      Is.True);
+                Assert.That(shown["stations"]?[0]?["totp"]?.Value<Int32>("length"), Is.EqualTo((Int32) TOTPSettings.DefaultLength));
+
+                // And the file does carry it, or no token could ever be checked.
+                Assert.That(File.ReadAllText(logins.Path),                         Does.Contain(theSecret));
+
+            });
+
+        }
+
+        #endregion
+
+        #region ALoginMayCarryNoCredentialsAtAll()
+
+        /// <summary>
+        /// A charging station that comes in on a client certificate proves who
+        /// it is without either - and may still want to be listed, so that it
+        /// belongs to a group that decides something about it.
+        /// </summary>
+        [Test]
+        public void ALoginMayCarryNoCredentialsAtAll()
+        {
+
+            logins.TrySetPassword("cs001", null, null, "Ladepunkt 1", out _, out _);
+
+            Assert.That(logins.TryClearPassword("cs001", out var error), Is.True, error);
+
+            var again = new ChargingStationLogins(logins.Path, clock);
+
+            Assert.That(again.TryLoad(out var reading), Is.True, reading);
+
+            var login = again.Logins.Single();
+
+            Assert.Multiple(() => {
+                Assert.That(login.HasPassword,   Is.False);
+                Assert.That(login.HasTOTP,       Is.False);
+                Assert.That(login.Credentials,   Is.Empty);
+                Assert.That(login.Note,          Is.EqualTo("Ladepunkt 1"));
+                Assert.That(again.Verify("cs001", ""), Is.False);
+            });
+
+        }
+
+        #endregion
+
+        #region TakingAwayACredentialThatIsNotThereSaysSo()
+
+        [Test]
+        public void TakingAwayACredentialThatIsNotThereSaysSo()
+        {
+
+            logins.TrySetPassword("cs001", null, null, null, out _, out _);
+
+            Assert.Multiple(() => {
+
+                Assert.That(logins.TryClearTOTP("cs001", out var noToken),  Is.False);
+                Assert.That(noToken, Does.Contain("no TOTP configuration"));
+
+                Assert.That(logins.TryClearTOTP("cs404", out var unknown),  Is.False);
+                Assert.That(unknown, Does.Contain("never heard of"));
+
             });
 
         }

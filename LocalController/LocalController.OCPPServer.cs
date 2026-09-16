@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2014-2026 GraphDefined GmbH <achim.friedland@graphdefined.com>
  * This file is part of LocalController <https://github.com/OpenChargingCloud/LocalController>
  *
@@ -460,17 +460,29 @@ namespace cloud.charging.open.LocalController
 
         /// <summary>
         /// Whether this charging station may come in - the OCPP security
-        /// profiles, decided in one place.
+        /// profiles and the login groups, decided in one place.
         /// </summary>
         /// <remarks>
+        /// <b>Three ways in, and each is checked twice.</b> A certificate, a
+        /// password or a one-time token; and whichever it is, the server as a
+        /// whole has to allow the security profile it arrives on, and the group
+        /// the login belongs to has to allow both the profile and the method.
+        /// The group can only narrow what the server allows, never widen it.
+        ///
         /// <b>Profile 3 first.</b> A station that authenticated with a
         /// certificate has already been checked against the accepted chains by
         /// the time this runs; it needs no password and is not asked for one.
+        /// If it is also listed as a login, its group has its say - which is
+        /// how a certificate station is put under the same rules as the rest.
+        /// If it is not listed, the accepted chains are the whole of the
+        /// decision, as they were before there were groups.
         ///
-        /// <b>Then profiles 1 and 2</b>, which are the same check over
-        /// different transports: HTTP Basic Authentication against the list of
-        /// charging station logins. What separates them is whether the port is
-        /// encrypted, and that was decided when the server started.
+        /// <b>Then a password or a token</b>, which are the same question over
+        /// the same transport: is this the credential this identification
+        /// should be showing? What decides the profile is whether the port is
+        /// encrypted, and that was settled when the server started. TOTP is not
+        /// an OCPP security profile at all, so it is judged under the profile
+        /// its transport would have had.
         ///
         /// A refusal says as little as it can to the station and as much as it
         /// can to the log. "Unauthorized" back over the wire; which
@@ -498,11 +510,26 @@ namespace cloud.charging.open.LocalController
                 // The certificate itself was held against the accepted chains
                 // during the handshake; a connection that got this far with one
                 // has passed.
-                var named = Connection.ClientCertificate.GetNameInfo(System.Security.Cryptography.X509Certificates.X509NameType.SimpleName, false);
+                var named  = Connection.ClientCertificate.GetNameInfo(System.Security.Cryptography.X509Certificates.X509NameType.SimpleName, false);
+                var who    = named.IsNullOrEmpty() ? Connection.ClientCertificate.Subject : named;
+
+                // Listed as a login as well? Then it is in a group, and the
+                // group decides. Not listed is not an error: the chain was the
+                // whole decision before groups existed and still is.
+                if (!named.IsNullOrEmpty() &&
+                    StationLogins.TryGet(named, out var certificateLogin))
+                {
+
+                    if (!certificateLogin.Enabled)
+                        return Refuse(Connection, $"the charging station '{named}' is switched off here");
+
+                    if (!GroupAllows(certificateLogin, AuthMethod.Certificate, 3, out var why))
+                        return Refuse(Connection, $"the charging station '{named}' {why}");
+
+                }
 
                 if (ocppServerSettings.Logging?.Authentication != false)
-                    Log.Info($"The charging station '{(named.IsNullOrEmpty() ? Connection.ClientCertificate.Subject : named)}' " +
-                             $"signed in from {from} with a certificate (security profile 3).",
+                    Log.Info($"The charging station '{who}' signed in from {from} with a certificate (security profile 3).",
                              "ocpp", "station", "auth");
 
                 return Task.FromResult<HTTPResponse?>(null);
@@ -514,11 +541,11 @@ namespace cloud.charging.open.LocalController
 
             #endregion
 
-            #region Security profiles 1 and 2: a password
+            #region Which profile a credential on this port would be
 
-            var profile = ocppServerTLS ? 2 : 1;
+            var profile = (Byte) (ocppServerTLS ? 2 : 1);
 
-            if (!profiles.Contains((Byte) profile))
+            if (!profiles.Contains(profile))
                 return Refuse(
                            Connection,
                            profile == 1
@@ -526,17 +553,124 @@ namespace cloud.charging.open.LocalController
                                : "the charging station port is encrypted, so this would be security profile 2, which is not allowed here"
                        );
 
-            if (Connection.HTTPRequest?.Authorization is not HTTPBasicAuthentication basicAuthentication)
-                return Refuse(Connection, "it sent no credentials");
+            #endregion
 
-            if (!StationLogins.Verify(basicAuthentication.Username, basicAuthentication.Password))
-                return Refuse(Connection, $"'{basicAuthentication.Username}' is not a charging station that may sign in, or the password is wrong");
+            #region A password
 
-            if (ocppServerSettings.Logging?.Authentication != false)
-                Log.Info($"The charging station '{basicAuthentication.Username}' signed in from {from} (security profile {profile}).",
-                         "ocpp", "station", "auth");
+            if (Connection.HTTPRequest?.Authorization is HTTPBasicAuthentication basicAuthentication)
+            {
 
-            return Task.FromResult<HTTPResponse?>(null);
+                var id = basicAuthentication.Username;
+
+                // Verified before the group is consulted, and always. The
+                // store hashes a fixed word for an identification it does not
+                // have, so that an unknown one does not answer faster than a
+                // known one - and asking the group first would put that back:
+                // a station in a group that forbids passwords would be refused
+                // without the hashing, and the difference is measurable.
+                var right = StationLogins.Verify(id, basicAuthentication.Password);
+
+                if (!StationLogins.TryGet(id, out var login) || !login.Enabled || !right)
+                    return Refuse(Connection, $"'{id}' is not a charging station that may sign in, or the password is wrong");
+
+                if (!GroupAllows(login, AuthMethod.Basic, profile, out var why))
+                    return Refuse(Connection, $"the charging station '{id}' {why}");
+
+                if (ocppServerSettings.Logging?.Authentication != false)
+                    Log.Info($"The charging station '{id}' signed in from {from} with a password (security profile {profile}).",
+                             "ocpp", "station", "auth");
+
+                return Task.FromResult<HTTPResponse?>(null);
+
+            }
+
+            #endregion
+
+            #region A one-time token
+
+            if (Connection.HTTPRequest?.Authorization is HTTPTOTPAuthentication totpAuthentication)
+            {
+
+                var id = totpAuthentication.Login;
+
+                // Hermod's default is the TLS-bound kind, which needs TLS
+                // exporter material - .NET does not offer that on an SslStream,
+                // so a token of that kind cannot be checked here at all. Said
+                // out loud, because the alternative is a station whose token is
+                // computed correctly and refused anyway, with nothing in the
+                // log to explain it.
+                if (totpAuthentication.Type != TOTPHTTPHeaderType.RAW)
+                    return Refuse(Connection, $"'{id}' sent a TLS-bound one-time token, which this server cannot check: " +
+                                               "it would need TLS exporter material, which .NET does not offer. The station has to send tlscb=false");
+
+                // Derived before the group is consulted, and always, for the
+                // same reason as the password above.
+                var right = StationLogins.VerifyTOTP(id, totpAuthentication.TOTP);
+
+                if (!StationLogins.TryGet(id, out var login) || !login.Enabled || !right)
+                    return Refuse(Connection, $"'{id}' is not a charging station that may sign in, or the one-time token is wrong");
+
+                if (!GroupAllows(login, AuthMethod.TOTP, profile, out var why))
+                    return Refuse(Connection, $"the charging station '{id}' {why}");
+
+                if (ocppServerSettings.Logging?.Authentication != false)
+                    Log.Info($"The charging station '{id}' signed in from {from} with a one-time token (security profile {profile}" +
+                             $"{(ocppServerTLS ? "" : ", on an unencrypted port, so the token is replayable while it stands")}).",
+                             "ocpp", "station", "auth");
+
+                return Task.FromResult<HTTPResponse?>(null);
+
+            }
+
+            #endregion
+
+            return Refuse(Connection, "it sent no credentials");
+
+
+            #region (local) GroupAllows(Login, Method, Profile, out Why)
+
+            // Whether the group of this login lets it in this way, on this
+            // security profile.
+            Boolean GroupAllows(ChargingStationLogin  Login,
+                                AuthMethod            Method,
+                                Byte                  Profile,
+                                out String            Why)
+            {
+
+                Why = "";
+
+                var group = StationLogins.GroupOf(Login);
+
+                // A login whose group has gone missing is refused rather than
+                // waved through: the group is what decides about it, and a
+                // decision that cannot be found is not a yes.
+                if (group is null)
+                {
+                    Why = $"belongs to the login group '{Login.GroupId}', which this controller does not have";
+                    return false;
+                }
+
+                if (!group.Enabled)
+                {
+                    Why = $"is in the login group '{group.Id}', which is switched off";
+                    return false;
+                }
+
+                if (!group.Allows(Method))
+                {
+                    Why = $"is in the login group '{group.Id}', which does not accept {Method.AsText()}";
+                    return false;
+                }
+
+                if (!group.Allows(Profile))
+                {
+                    Why = $"is in the login group '{group.Id}', which does not accept security profile {Profile}";
+                    return false;
+                }
+
+                return true;
+
+            }
 
             #endregion
 

@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2014-2026 GraphDefined GmbH <achim.friedland@graphdefined.com>
  * This file is part of LocalController <https://github.com/OpenChargingCloud/LocalController>
  *
@@ -109,7 +109,7 @@ namespace cloud.charging.open.LocalController.Tests
                              )
                          );
 
-            controller.StationLogins.TrySetPassword("cs001", ThePassword, null, out _, out _);
+            controller.StationLogins.TrySetPassword("cs001", ThePassword, null, null, out _, out _);
 
             controller.Start().GetAwaiter().GetResult();
 

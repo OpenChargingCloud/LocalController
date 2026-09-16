@@ -1,4 +1,4 @@
-import './styles/app.scss';
+﻿import './styles/app.scss';
 
 // FontAwesome: the CSS ends up in the extracted stylesheet, the referenced
 // font files become hashed assets below /assets/.
@@ -14,6 +14,7 @@ import { configurationPage }      from './pages/configuration';
 import { dnsPage }                from './pages/dns';
 import { ntsPage }                from './pages/nts';
 import { ocppServerPage }         from './pages/ocppServer';
+import { stationLoginsPage }      from './pages/stationLogins';
 import { serverCertificatesPage } from './pages/serverCertificates';
 import { clientTrustPage }        from './pages/clientTrust';
 import { loginPage }              from './pages/login';
@@ -40,6 +41,7 @@ const router = new Router({
         { path: '/configuration/nts',   page: ntsPage,            guard: auth.requireSignIn },
 
         { path: '/configuration/ocpp-server',               page: ocppServerPage,         guard: auth.requireSignIn },
+        { path: '/configuration/ocpp-server/logins',        page: stationLoginsPage,      guard: auth.requireSignIn },
         { path: '/configuration/ocpp-server/certificates',  page: serverCertificatesPage, guard: auth.requireSignIn },
         { path: '/configuration/ocpp-server/trust',         page: clientTrustPage,        guard: auth.requireSignIn },
 

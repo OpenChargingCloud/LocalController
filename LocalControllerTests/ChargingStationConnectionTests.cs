@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2014-2026 GraphDefined GmbH <achim.friedland@graphdefined.com>
  * This file is part of LocalController <https://github.com/OpenChargingCloud/LocalController>
  *
@@ -149,7 +149,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStationWithAPasswordGetsIn()
         {
 
-            Assert.That(Controller.StationLogins.TrySetPassword("cs001", ThePassword, "Ladepunkt 1", out _, out var error),
+            Assert.That(Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, "Ladepunkt 1", out _, out var error),
                         Is.True, error);
 
             var (connected, why, subprotocol) = await Connect("cs001", ThePassword);
@@ -184,7 +184,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AWrongPasswordIsTurnedAway()
         {
 
-            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, out _, out _);
+            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, null, out _, out _);
 
             var (connected, _, _) = await Connect("cs001", "not-the-password-at-all");
 
@@ -200,7 +200,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStationWithNoCredentialsAtAllIsTurnedAway()
         {
 
-            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, out _, out _);
+            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, null, out _, out _);
 
             using var client  = new ClientWebSocket();
 
@@ -235,7 +235,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStationThatWasSwitchedOffIsTurnedAwayAtOnce()
         {
 
-            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, out _, out _);
+            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, null, out _, out _);
 
             var (before, why, _) = await Connect("cs001", ThePassword);
 
@@ -258,7 +258,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStationThatWasRemovedIsTurnedAwayAtOnce()
         {
 
-            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, out _, out _);
+            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, null, out _, out _);
             Controller.StationLogins.TryRemove     ("cs001", out _);
 
             var (connected, _, _) = await Connect("cs001", ThePassword);
@@ -275,7 +275,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStationSpeakingAnotherOCPPVersionIsTurnedAway()
         {
 
-            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, out _, out _);
+            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, null, out _, out _);
 
             var (connected, _, _) = await Connect("cs001", ThePassword, "ocpp1.6");
 
@@ -296,7 +296,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task WhatHappenedIsInTheLog()
         {
 
-            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, out _, out _);
+            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, null, out _, out _);
 
             await Connect("cs001", ThePassword);
             await Connect("cs404", ThePassword);
@@ -327,7 +327,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task SwitchingTheServerOffStopsLettingAnybodyIn()
         {
 
-            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, out _, out _);
+            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, null, out _, out _);
 
             Assert.That(Controller.TryUpdateOCPPServerConfiguration(
                             new JObject(new JProperty("enabled", false)),
@@ -356,7 +356,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task SwitchingTheServerBackOnLetsThemInAgain()
         {
 
-            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, out _, out _);
+            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, null, out _, out _);
 
             Controller.TryUpdateOCPPServerConfiguration(new JObject(new JProperty("enabled", false)), out _);
 
@@ -435,7 +435,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task StoppingTheControllerLetsGoOfThePort()
         {
 
-            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, out _, out _);
+            Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, null, out _, out _);
 
             using var client  = new ClientWebSocket();
             client.Options.AddSubProtocol("ocpp2.1");

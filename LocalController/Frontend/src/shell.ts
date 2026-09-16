@@ -1,4 +1,4 @@
-import { auth } from './auth';
+﻿import { auth } from './auth';
 import { config } from './config';
 import { html, must, render, type HTMLFragment } from './html';
 
@@ -31,6 +31,7 @@ export const menu: MenuEntry[] = [
             { path: '/configuration/dns',                        label: 'DNS client',          icon: 'fa-magnifying-glass-location' },
             { path: '/configuration/nts',                        label: 'NTS client',          icon: 'fa-clock'                     },
             { path: '/configuration/ocpp-server',                label: 'Charging stations',   icon: 'fa-charging-station'          },
+            { path: '/configuration/ocpp-server/logins',         label: 'Logins and groups',   icon: 'fa-users-gear'                },
             { path: '/configuration/ocpp-server/certificates',   label: 'Server certificates', icon: 'fa-certificate'               },
             { path: '/configuration/ocpp-server/trust',          label: 'Accepted chains',     icon: 'fa-user-shield'               }
         ]

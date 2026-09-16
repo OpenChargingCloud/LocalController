@@ -1,4 +1,4 @@
-import { api, type OCPPServerConfiguration, type OCPPServerUpdate, type StationLogins } from '../api/client';
+﻿import { api, type OCPPServerConfiguration, type OCPPServerUpdate, type StationLogins } from '../api/client';
 import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '../html';
 import type { Page } from '../router';
@@ -39,10 +39,6 @@ export const ocppServerPage: Page = {
         let cancelled = false;
         let server:   OCPPServerConfiguration | null = null;
         let stations: StationLogins           | null = null;
-
-        /** The password of a station that was just made up, shown once. */
-        let justMadeUp: { id: string; password: string } | null = null;
-
 
         function draw(): void {
 
@@ -166,7 +162,7 @@ export const ocppServerPage: Page = {
                     ${profilesCard(configuration)}
                     ${reachableCard(configuration)}
                     ${loggingCard(configuration)}
-                    ${stationsCard(configuration, logins)}
+                    ${loginsCard(logins)}
 
                 </div>
             `);
@@ -361,97 +357,29 @@ export const ocppServerPage: Page = {
         }
 
 
-        // Who may sign in.
-        function stationsCard(configuration: OCPPServerConfiguration,
-                              logins:        StationLogins): HTMLFragment {
+        // Who may sign in now lives on its own page: it grew groups, one-time
+        // tokens and two kinds of credential per login, none of which belongs
+        // beside the socket settings.
+        function loginsCard(logins: StationLogins): HTMLFragment {
 
             return html`
-                <section class="card wide">
+                <section class="card">
 
-                    <h2><i class="fa-solid fa-charging-station"></i> Charging station logins</h2>
+                    <h2><i class="fa-solid fa-users-gear"></i> Who may sign in</h2>
 
-                    <p class="hint">
-                        For security profiles 1 and 2. A charging station that is not in this list cannot sign in,
-                        whatever it calls itself. Stored the way the web login is stored, so a password that has
-                        been set cannot be read again - not by this controller and not by whoever set it.
-                        Kept in ${logins.file}.
+                    <p>
+                        <strong>${logins.enabled}</strong> of ${logins.stations.length} charging station(s) could
+                        sign in right now, in ${logins.groups.length} group(s).
                     </p>
 
-                    ${justMadeUp === null ? '' : html`
-                        <div class="notice ok">
-                            <strong>The password of '${justMadeUp.id}' is</strong>
-                            <code class="password">${justMadeUp.password}</code><br />
-                            Write it down or type it into the charging station now: it is kept only as a hash, so
-                            a second look is a second password.
-                        </div>
-                    `}
+                    <p class="hint">
+                        Which stations those are, what each of them signs in with, and what their group allows
+                        them is managed on its own page.
+                    </p>
 
-                    ${logins.stations.length === 0
-                          ? html`<p class="muted">No charging station may sign in yet.</p>`
-                          : html`
-                              <table class="table">
-                                  <thead>
-                                      <tr>
-                                          <th>Identification</th>
-                                          <th>What it is</th>
-                                          <th>Added</th>
-                                          <th>May sign in</th>
-                                          <th></th>
-                                      </tr>
-                                  </thead>
-                                  <tbody>
-                                      ${logins.stations.map(station => html`
-                                          <tr class="${station.enabled ? '' : 'dimmed'}">
-                                              <td><code>${station.id}</code></td>
-                                              <td>${station.note ?? '-'}</td>
-                                              <td class="small muted">${formatTimestamp(station.addedAt)}</td>
-                                              <td>
-                                                  <label class="switch small">
-                                                      <input type="checkbox" class="station-enabled"
-                                                             data-id="${station.id}"
-                                                             ${station.enabled ? html`checked` : ''}
-                                                             ${mayChange ? '' : html`disabled`} />
-                                                      <span>${station.enabled ? 'yes' : 'no'}</span>
-                                                  </label>
-                                              </td>
-                                              <td class="right">
-                                                  <button type="button" class="btn small danger station-remove"
-                                                          data-id="${station.id}" ${mayChange ? '' : html`disabled`}>
-                                                      Remove
-                                                  </button>
-                                              </td>
-                                          </tr>
-                                      `)}
-                                  </tbody>
-                              </table>
-                          `}
-
-                    <form id="station-form" class="form-row">
-
-                        <label>Identification
-                            <input type="text" name="id" placeholder="cs001" maxlength="48"
-                                   ${mayChange ? '' : html`disabled`} required />
-                        </label>
-
-                        <label>What it is
-                            <input type="text" name="note" placeholder="Ladepunkt 1" maxlength="200"
-                                   ${mayChange ? '' : html`disabled`} />
-                        </label>
-
-                        <label>Password
-                            <input type="text" name="password" placeholder="leave empty to make one up"
-                                   minlength="${logins.minPasswordLength}" maxlength="64"
-                                   ${mayChange ? '' : html`disabled`} />
-                        </label>
-
-                        <div class="form-actions">
-                            <button type="submit" class="btn primary" ${mayChange ? '' : html`disabled`}>
-                                Add or change
-                            </button>
-                            <span id="station-error" class="form-error" role="alert"></span>
-                        </div>
-
-                    </form>
+                    <div class="form-actions">
+                        <a class="btn" href="/configuration/ocpp-server/logins">Logins and groups</a>
+                    </div>
 
                 </section>
             `;
@@ -575,24 +503,6 @@ export const ocppServerPage: Page = {
 
             });
 
-            content.querySelectorAll<HTMLInputElement>('.station-enabled').forEach(box => {
-                box.addEventListener('change', () => void enableStation(box.dataset.id ?? '', box.checked));
-            });
-
-            content.querySelectorAll<HTMLButtonElement>('.station-remove').forEach(button => {
-                button.addEventListener('click', () => void removeStation(button.dataset.id ?? ''));
-            });
-
-            must<HTMLFormElement>(content, '#station-form').addEventListener('submit', event => {
-
-                event.preventDefault();
-
-                const form = event.target as HTMLFormElement;
-
-                void addStation(field(form, 'id'), field(form, 'password'), field(form, 'note'));
-
-            });
-
         }
 
 
@@ -612,7 +522,6 @@ export const ocppServerPage: Page = {
                 if (cancelled)
                     return;
 
-                justMadeUp = null;
                 draw();
 
             }
@@ -629,91 +538,6 @@ export const ocppServerPage: Page = {
                 // form has to go back to saying what is true.
                 void load(false);
 
-            }
-
-        }
-
-
-        async function addStation(id: string, password: string, note: string): Promise<void> {
-
-            const error = must<HTMLElement>(content, '#station-error');
-            error.textContent = '';
-
-            try
-            {
-
-                const answer = await api.ocppServer.stations.save(id, password, note);
-
-                if (cancelled)
-                    return;
-
-                stations   = answer.stations;
-                justMadeUp = answer.password !== undefined
-                                 ? { id: answer.id, password: answer.password }
-                                 : null;
-
-                server = await api.ocppServer.get();
-
-                draw();
-
-            }
-            catch (problem)
-            {
-                if (!cancelled)
-                    error.textContent = errorMessage(problem);
-            }
-
-        }
-
-
-        async function enableStation(id: string, enabled: boolean): Promise<void> {
-
-            try
-            {
-
-                stations = await api.ocppServer.stations.enable(id, enabled);
-
-                if (cancelled)
-                    return;
-
-                justMadeUp = null;
-                server     = await api.ocppServer.get();
-
-                draw();
-
-            }
-            catch (problem)
-            {
-                if (!cancelled)
-                    must<HTMLElement>(content, '#station-error').textContent = errorMessage(problem);
-            }
-
-        }
-
-
-        async function removeStation(id: string): Promise<void> {
-
-            if (!window.confirm(`Remove the charging station '${id}'? It will no longer be able to sign in.`))
-                return;
-
-            try
-            {
-
-                stations = await api.ocppServer.stations.remove(id);
-
-                if (cancelled)
-                    return;
-
-                justMadeUp = null;
-                server     = await api.ocppServer.get();
-
-                draw();
-
-            }
-            catch (problem)
-            {
-                if (!cancelled)
-                    must<HTMLElement>(content, '#station-error').textContent = errorMessage(problem);
             }
 
         }

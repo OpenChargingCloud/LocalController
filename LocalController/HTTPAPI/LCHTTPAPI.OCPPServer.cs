@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2014-2026 GraphDefined GmbH <achim.friedland@graphdefined.com>
  * This file is part of LocalController <https://github.com/OpenChargingCloud/LocalController>
  *
@@ -17,10 +17,12 @@
 
 #region Usings
 
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
 using Newtonsoft.Json.Linq;
 
+using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 
 using cloud.charging.open.LocalController.OCPP;
@@ -69,10 +71,18 @@ namespace cloud.charging.open.LocalController
             AddHandler(root + "trust/{id}",           PutTrust,                 HTTPMethod.PUT);
             AddHandler(root + "trust/{id}",           DeleteTrust,              HTTPMethod.DELETE);
 
+            AddHandler(root + "groups",               PostGroup,                HTTPMethod.POST);
+            AddHandler(root + "groups/{id}",          PutGroup,                 HTTPMethod.PUT);
+            AddHandler(root + "groups/{id}",          DeleteGroup,              HTTPMethod.DELETE);
+
             AddHandler(root + "stations",             GetStations,              HTTPMethod.GET);
             AddHandler(root + "stations",             PostStation,              HTTPMethod.POST);
             AddHandler(root + "stations/{id}",        PutStation,               HTTPMethod.PUT);
             AddHandler(root + "stations/{id}",        DeleteStation,            HTTPMethod.DELETE);
+
+            AddHandler(root + "stations/{id}/totp",     PutStationTOTP,         HTTPMethod.PUT);
+            AddHandler(root + "stations/{id}/totp",     DeleteStationTOTP,      HTTPMethod.DELETE);
+            AddHandler(root + "stations/{id}/password", DeleteStationPassword,  HTTPMethod.DELETE);
 
         }
 
@@ -453,8 +463,8 @@ namespace cloud.charging.open.LocalController
         }
 
         /// <summary>
-        /// POST .../stations with {"id", "password", "note"}: add a charging
-        /// station, or give one a new password.
+        /// POST .../stations with {"id", "password", "group", "note"}: add a
+        /// charging station, or give one a new password.
         /// </summary>
         /// <remarks>
         /// An empty password means "make one up", and the made-up one comes
@@ -476,6 +486,7 @@ namespace cloud.charging.open.LocalController
             if (!Controller.StationLogins.TrySetPassword(
                      id,
                      json.Value<String>("password"),
+                     json.Value<String>("group"),
                      json.Value<String>("note"),
                      out var generated,
                      out var error))
@@ -498,8 +509,9 @@ namespace cloud.charging.open.LocalController
         }
 
         /// <summary>
-        /// PUT .../stations/{id} with {"enabled"}: let a charging station in,
-        /// or stop letting it in, without losing its password.
+        /// PUT .../stations/{id} with {"enabled"} and/or {"group"}: let a
+        /// charging station in, stop letting it in, or move it to another
+        /// group - without losing what it signs in with.
         /// </summary>
         private Task<HTTPResponse> PutStation(HTTPRequest Request)
         {
@@ -513,19 +525,156 @@ namespace cloud.charging.open.LocalController
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
                 return Task.FromResult(errorResponse);
 
-            if (json.Value<Boolean?>("enabled") is not Boolean enabled)
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, "An 'enabled' of true or false is required."));
+            var enabled  = json.Value<Boolean?>("enabled");
+            var group    = json.Value<String>("group");
 
-            if (!Controller.StationLogins.TrySetEnabled(id, enabled, out var error))
+            if (enabled is null && group is null)
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, "An 'enabled' of true or false, or a 'group', is required."));
+
+            if (group is not null &&
+                !Controller.StationLogins.TrySetGroup(id, group, out var groupError))
+            {
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.NotFound, groupError));
+            }
+
+            if (enabled is Boolean wanted &&
+                !Controller.StationLogins.TrySetEnabled(id, wanted, out var error))
+            {
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.NotFound, error));
+            }
 
-            Log.Info($"'{session.UserId}' {(enabled ? "let in" : "shut out")} the charging station '{id}'.", "ocpp", "station", "auth", "web");
+            if (group is not null)
+                Log.Info($"'{session.UserId}' moved the charging station '{id}' into the login group '{group}'.", "ocpp", "station", "auth", "web");
+
+            if (enabled is Boolean said)
+                Log.Info($"'{session.UserId}' {(said ? "let in" : "shut out")} the charging station '{id}'.", "ocpp", "station", "auth", "web");
 
             return Task.FromResult(
                        JSONResponse(Request, HTTPStatusCode.OK, Controller.StationLogins.ToJSON())
                    );
 
         }
+
+        /// <summary>
+        /// PUT .../stations/{id}/totp with {"sharedSecret", "validitySeconds",
+        /// "length", "alphabet", "hashAlgorithm", "group", "note"}: let a
+        /// charging station in with a one-time token.
+        /// </summary>
+        /// <remarks>
+        /// An empty shared secret means "make one up", and it comes back in
+        /// this response. Unlike a password it does not become unreadable
+        /// afterwards - it cannot, because the controller has to compute tokens
+        /// from it - but it is never put into the list the page reads, so this
+        /// is still the only place it is handed out.
+        /// </remarks>
+        private Task<HTTPResponse> PutStationTOTP(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryGetId(Request, out var id, out var badRequest))
+                return Task.FromResult(badRequest);
+
+            if (!TryParseJSONObject(Request, out var json, out var errorResponse))
+                return Task.FromResult(errorResponse);
+
+            TOTPHashAlgorithm? hash = null;
+
+            if (json.Value<String>("hashAlgorithm")?.Trim() is { Length: > 0 } hashText)
+            {
+
+                hash = hashText.ToUpperInvariant() switch {
+                           "SHA256"  => TOTPHashAlgorithm.SHA256,
+                           "SHA384"  => TOTPHashAlgorithm.SHA384,
+                           "SHA512"  => TOTPHashAlgorithm.SHA512,
+                           _         => null
+                       };
+
+                if (hash is null)
+                    return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest,
+                                                     $"'{hashText}' is not a TOTP hash algorithm; there are SHA256, SHA384 and SHA512."));
+
+            }
+
+            var seconds = json.Value<Double?>("validitySeconds");
+
+            if (!Controller.StationLogins.TrySetTOTP(
+                     id,
+                     json.Value<String>("sharedSecret"),
+                     seconds.HasValue ? TimeSpan.FromSeconds(seconds.Value) : null,
+                     json.Value<UInt32?>("length"),
+                     json.Value<String>("alphabet"),
+                     hash,
+                     json.Value<String>("group"),
+                     json.Value<String>("note"),
+                     out var generated,
+                     out var error))
+            {
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
+            }
+
+            Log.Notice($"'{session.UserId}' set the TOTP configuration of the charging station '{id}'.", "ocpp", "station", "auth", "web");
+
+            var response = new JObject(
+                               new JProperty("id",        id),
+                               new JProperty("stations",  Controller.StationLogins.ToJSON())
+                           );
+
+            if (generated is not null)
+                response.Add("sharedSecret", generated);
+
+            return Task.FromResult(JSONResponse(Request, HTTPStatusCode.OK, response));
+
+        }
+
+        /// <summary>
+        /// DELETE .../stations/{id}/totp: stop letting a charging station in
+        /// with a one-time token.
+        /// </summary>
+        private Task<HTTPResponse> DeleteStationTOTP(HTTPRequest Request)
+
+            => Task.FromResult(TakeCredentialAway(Request,
+                                                  (String id, out String? error) => Controller.StationLogins.TryClearTOTP(id, out error),
+                                                  "TOTP configuration"));
+
+        /// <summary>
+        /// DELETE .../stations/{id}/password: stop letting a charging station
+        /// in with a password.
+        /// </summary>
+        private Task<HTTPResponse> DeleteStationPassword(HTTPRequest Request)
+
+            => Task.FromResult(TakeCredentialAway(Request,
+                                                  (String id, out String? error) => Controller.StationLogins.TryClearPassword(id, out error),
+                                                  "password"));
+
+        /// <summary>
+        /// What the two routes above have in common.
+        /// </summary>
+        private HTTPResponse TakeCredentialAway(HTTPRequest       Request,
+                                                TryClearDelegate  Clear,
+                                                String            What)
+        {
+
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+                return refused;
+
+            if (!TryGetId(Request, out var id, out var badRequest))
+                return badRequest;
+
+            if (!Clear(id, out var error))
+                return ErrorJSON(Request, HTTPStatusCode.NotFound, error);
+
+            Log.Notice($"'{session.UserId}' took the {What} of the charging station '{id}' away.", "ocpp", "station", "auth", "web");
+
+            return JSONResponse(Request, HTTPStatusCode.OK, Controller.StationLogins.ToJSON());
+
+        }
+
+        /// <summary>
+        /// One of the store's "take this credential away" methods.
+        /// </summary>
+        private delegate Boolean TryClearDelegate(String Id, out String? Error);
 
         /// <summary>
         /// DELETE .../stations/{id}: forget a charging station.
@@ -543,6 +692,146 @@ namespace cloud.charging.open.LocalController
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.NotFound, error));
 
             Log.Notice($"'{session.UserId}' removed the charging station '{id}'.", "ocpp", "station", "auth", "web");
+
+            return Task.FromResult(
+                       JSONResponse(Request, HTTPStatusCode.OK, Controller.StationLogins.ToJSON())
+                   );
+
+        }
+
+        #endregion
+
+        #region (private) The groups that decide what a login may do
+
+        /// <summary>
+        /// POST .../groups with {"id", "name", "enabled", "authMethods",
+        /// "securityProfiles", "note"}: make a login group.
+        /// </summary>
+        private Task<HTTPResponse> PostGroup(HTTPRequest Request)
+        {
+
+            // Asked before the body is looked at, like every other route here:
+            // somebody who may not change anything should be told that and not
+            // what this controller thinks of their JSON.
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out _, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryParseJSONObject(Request, out var json, out var errorResponse))
+                return Task.FromResult(errorResponse);
+
+            return Task.FromResult(WriteGroup(Request, json.Value<String>("id"), json));
+
+        }
+
+        /// <summary>
+        /// PUT .../groups/{id}: change what a login group allows.
+        /// </summary>
+        private Task<HTTPResponse> PutGroup(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out _, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryGetId(Request, out var id, out var badRequest))
+                return Task.FromResult(badRequest);
+
+            if (!TryParseJSONObject(Request, out var json, out var errorResponse))
+                return Task.FromResult(errorResponse);
+
+            return Task.FromResult(WriteGroup(Request, id, json));
+
+        }
+
+        /// <summary>
+        /// Making a group and changing one are the same write; only where the
+        /// identification comes from differs.
+        /// </summary>
+        /// <remarks>
+        /// Everything about a group is replaced, not merged. A form that offers
+        /// the whole group sends the whole group, and merging would make
+        /// clearing the last authentication method impossible - which is
+        /// exactly the move somebody makes to shut a group out.
+        /// </remarks>
+        private HTTPResponse WriteGroup(HTTPRequest  Request,
+                                        String?      Id,
+                                        JObject      JSON)
+        {
+
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+                return refused;
+
+            #region The ways in it accepts
+
+            var methods = new List<AuthMethod>();
+
+            if (JSON["authMethods"] is JArray methodArray)
+                foreach (var token in methodArray)
+                {
+
+                    var method = AuthMethodExtensions.TryParseAuthMethod(token.Value<String>());
+
+                    if (method is null)
+                        return ErrorJSON(Request, HTTPStatusCode.BadRequest,
+                                         $"'{token}' is not a way of signing in that this local controller knows; " +
+                                          "there are basic, totp and certificate.");
+
+                    methods.Add(method.Value);
+
+                }
+
+            #endregion
+
+            #region The OCPP security profiles it accepts
+
+            var profiles = new List<Byte>();
+
+            if (JSON["securityProfiles"] is JArray profileArray)
+                foreach (var token in profileArray)
+                {
+
+                    if (token.Type != JTokenType.Integer)
+                        return ErrorJSON(Request, HTTPStatusCode.BadRequest, $"'{token}' is not an OCPP security profile.");
+
+                    profiles.Add(token.Value<Byte>());
+
+                }
+
+            #endregion
+
+            if (!Controller.StationLogins.TryAddOrUpdateGroup(
+                     Id,
+                     JSON.Value<String>("name"),
+                     JSON.Value<Boolean?>("enabled") ?? true,
+                     methods,
+                     profiles,
+                     JSON.Value<String>("note"),
+                     out var error))
+            {
+                return ErrorJSON(Request, HTTPStatusCode.BadRequest, error);
+            }
+
+            Log.Notice($"'{session.UserId}' wrote the login group '{Id}'.", "ocpp", "station", "auth", "web");
+
+            return JSONResponse(Request, HTTPStatusCode.OK, Controller.StationLogins.ToJSON());
+
+        }
+
+        /// <summary>
+        /// DELETE .../groups/{id}: forget a login group nobody is in.
+        /// </summary>
+        private Task<HTTPResponse> DeleteGroup(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryGetId(Request, out var id, out var badRequest))
+                return Task.FromResult(badRequest);
+
+            if (!Controller.StationLogins.TryRemoveGroup(id, out var error))
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.Conflict, error));
+
+            Log.Notice($"'{session.UserId}' removed the login group '{id}'.", "ocpp", "station", "auth", "web");
 
             return Task.FromResult(
                        JSONResponse(Request, HTTPStatusCode.OK, Controller.StationLogins.ToJSON())

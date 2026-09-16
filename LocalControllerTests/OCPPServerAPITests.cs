@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2014-2026 GraphDefined GmbH <achim.friedland@graphdefined.com>
  * This file is part of LocalController <https://github.com/OpenChargingCloud/LocalController>
  *
@@ -22,6 +22,8 @@ using System.Net;
 using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
+
+using cloud.charging.open.LocalController.OCPP;
 
 #endregion
 
@@ -491,6 +493,217 @@ namespace cloud.charging.open.LocalController.Tests
             var response = await http.DeleteAsync($"{Root}/stations/cs404");
 
             Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+
+        }
+
+        #endregion
+
+        #region NobodySignedInChangesNoLoginsAndNoGroups()
+
+        /// <summary>
+        /// The write routes are the ones worth trying uninvited, and a refusal
+        /// has to come before this controller says anything about the body.
+        /// </summary>
+        [Test]
+        public async Task NobodySignedInChangesNoLoginsAndNoGroups()
+        {
+
+            using var http = Anonymous();
+
+            var attempts = new (String What, Task<HttpResponseMessage> Response)[] {
+                ("POST groups",           http.PostAsync  ($"{Root}/groups",                   JSONBody(new JProperty("id", "sneaky")))),
+                ("PUT groups/{id}",       http.PutAsync   ($"{Root}/groups/default",           JSONBody(new JProperty("enabled", false)))),
+                ("DELETE groups/{id}",    http.DeleteAsync($"{Root}/groups/default")),
+                ("POST stations",         http.PostAsync  ($"{Root}/stations",                 JSONBody(new JProperty("id", "cs666")))),
+                ("PUT stations/../totp",  http.PutAsync   ($"{Root}/stations/cs001/totp",      JSONBody())),
+                ("DELETE ../totp",        http.DeleteAsync($"{Root}/stations/cs001/totp")),
+                ("DELETE ../password",    http.DeleteAsync($"{Root}/stations/cs001/password"))
+            };
+
+            foreach (var (what, response) in attempts)
+                Assert.That((await response).StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized), what);
+
+            Assert.Multiple(() => {
+                Assert.That(Controller.StationLogins.Logins,                        Is.Empty);
+                Assert.That(Controller.StationLogins.GetGroup("sneaky"),            Is.Null);
+                Assert.That(Controller.StationLogins.GetGroup(LoginGroup.DefaultId), Is.Not.Null);
+                Assert.That(Controller.StationLogins.GetGroup(LoginGroup.DefaultId)!.Enabled, Is.True);
+            });
+
+        }
+
+        #endregion
+
+        #region AGroupIsMadeNarrowedAndRemoved()
+
+        [Test]
+        public async Task AGroupIsMadeNarrowedAndRemoved()
+        {
+
+            using var http = await SignedIn();
+
+            var made = await http.PostAsync(
+                                 $"{Root}/groups",
+                                 JSONBody(
+                                     new JProperty("id",                "field-test"),
+                                     new JProperty("name",              "Field test"),
+                                     new JProperty("enabled",           true),
+                                     new JProperty("authMethods",       new JArray("basic", "totp")),
+                                     new JProperty("securityProfiles",  new JArray(1, 2))
+                                 )
+                             );
+
+            Assert.That(made.IsSuccessStatusCode, Is.True, await made.Content.ReadAsStringAsync());
+
+            var group = Controller.StationLogins.GetGroup("field-test");
+
+            Assert.That(group, Is.Not.Null);
+
+            Assert.Multiple(() => {
+                Assert.That(group!.AuthMethods,       Is.EquivalentTo(new[] { AuthMethod.Basic, AuthMethod.TOTP }));
+                Assert.That(group.SecurityProfiles,   Is.EquivalentTo(new Byte[] { 1, 2 }));
+                Assert.That(group.Allows(AuthMethod.Certificate), Is.False);
+            });
+
+            // Everything is replaced, not merged - which is what makes taking
+            // the last method away possible at all.
+            var narrowed = await http.PutAsync(
+                                     $"{Root}/groups/field-test",
+                                     JSONBody(
+                                         new JProperty("name",              "Field test"),
+                                         new JProperty("enabled",           true),
+                                         new JProperty("authMethods",       new JArray("totp")),
+                                         new JProperty("securityProfiles",  new JArray(2))
+                                     )
+                                 );
+
+            Assert.That(narrowed.IsSuccessStatusCode, Is.True, await narrowed.Content.ReadAsStringAsync());
+
+            Assert.Multiple(() => {
+                Assert.That(Controller.StationLogins.GetGroup("field-test")!.Allows(AuthMethod.Basic),  Is.False);
+                Assert.That(Controller.StationLogins.GetGroup("field-test")!.Allows((Byte) 1),          Is.False);
+            });
+
+            var gone = await http.DeleteAsync($"{Root}/groups/field-test");
+
+            Assert.Multiple(() => {
+                Assert.That(gone.IsSuccessStatusCode,                   Is.True);
+                Assert.That(Controller.StationLogins.GetGroup("field-test"), Is.Null);
+            });
+
+        }
+
+        #endregion
+
+        #region AGroupSomebodyIsStillInIsAConflictAndNotASilentMove()
+
+        [Test]
+        public async Task AGroupSomebodyIsStillInIsAConflictAndNotASilentMove()
+        {
+
+            using var http = await SignedIn();
+
+            await http.PostAsync($"{Root}/groups",
+                                 JSONBody(new JProperty("id",           "field-test"),
+                                          new JProperty("authMethods",  new JArray("basic")),
+                                          new JProperty("securityProfiles", new JArray(1))));
+
+            await http.PostAsync($"{Root}/stations",
+                                 JSONBody(new JProperty("id",     "cs001"),
+                                          new JProperty("group",  "field-test")));
+
+            var refused = await http.DeleteAsync($"{Root}/groups/field-test");
+
+            Assert.Multiple(() => {
+                Assert.That(refused.StatusCode,                              Is.EqualTo(HttpStatusCode.Conflict));
+                Assert.That(Controller.StationLogins.GetGroup("field-test"),  Is.Not.Null);
+                Assert.That(Controller.StationLogins.Logins.Single().GroupId, Is.EqualTo("field-test"));
+            });
+
+        }
+
+        #endregion
+
+        #region ASharedSecretIsHandedOutOnceAndNeverListed()
+
+        [Test]
+        public async Task ASharedSecretIsHandedOutOnceAndNeverListed()
+        {
+
+            using var http = await SignedIn();
+
+            await http.PostAsync($"{Root}/stations", JSONBody(new JProperty("id", "cs001")));
+
+            var given = await http.PutAsync($"{Root}/stations/cs001/totp", JSONBody());
+
+            Assert.That(given.IsSuccessStatusCode, Is.True, await given.Content.ReadAsStringAsync());
+
+            var answer = JObject.Parse(await given.Content.ReadAsStringAsync());
+            var secret = answer.Value<String>("sharedSecret");
+
+            await Assert.MultipleAsync(async () => {
+
+                Assert.That(secret, Is.Not.Null.And.Not.Empty,
+                            "No shared secret came back, so nobody can configure the charging station.");
+
+                Assert.That(Controller.StationLogins.TryGet("cs001", out var login) && login.HasTOTP, Is.True);
+
+                // The list the page reads must never carry it, however often it
+                // is asked - this is the one credential that works as it stands.
+                var listed = await GetJSON(http, $"{Root}/stations");
+
+                Assert.That(listed.ToString(), Does.Not.Contain(secret!));
+                Assert.That(listed["stations"]?[0]?.Value<Boolean>("hasTOTP"), Is.True);
+
+            });
+
+        }
+
+        #endregion
+
+        #region ATokenIsTakenAwayAgain()
+
+        [Test]
+        public async Task ATokenIsTakenAwayAgain()
+        {
+
+            using var http = await SignedIn();
+
+            await http.PostAsync($"{Root}/stations", JSONBody(new JProperty("id", "cs001")));
+            await http.PutAsync ($"{Root}/stations/cs001/totp", JSONBody());
+
+            var gone = await http.DeleteAsync($"{Root}/stations/cs001/totp");
+
+            Assert.Multiple(() => {
+                Assert.That(gone.IsSuccessStatusCode, Is.True);
+                Assert.That(Controller.StationLogins.TryGet("cs001", out var login) && login.HasTOTP, Is.False);
+                Assert.That(Controller.StationLogins.TryGet("cs001", out var still) && still.HasPassword, Is.True,
+                            "Taking the token away took the password with it.");
+            });
+
+        }
+
+        #endregion
+
+        #region ASecretThisControllerWouldThrowOnIsABadRequest()
+
+        [Test]
+        public async Task ASecretThisControllerWouldThrowOnIsABadRequest()
+        {
+
+            using var http = await SignedIn();
+
+            await http.PostAsync($"{Root}/stations", JSONBody(new JProperty("id", "cs001")));
+
+            var refused = await http.PutAsync(
+                                    $"{Root}/stations/cs001/totp",
+                                    JSONBody(new JProperty("sharedSecret", "short"))
+                                );
+
+            Assert.Multiple(() => {
+                Assert.That(refused.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+                Assert.That(Controller.StationLogins.TryGet("cs001", out var login) && login.HasTOTP, Is.False);
+            });
 
         }
 
