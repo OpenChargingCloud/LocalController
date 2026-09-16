@@ -80,6 +80,9 @@ namespace cloud.charging.open.LocalController.OCPP
             new ("ecdsa-p521",         "ECDSA P-521 (secp521r1)",   "SHA512withECDSA",
                  "The largest of the NIST curves. Widely supported in certificates and rather less widely in TLS itself."),
 
+            new ("rsa-2048",           "RSA 2048",                  "SHA256withRSA",
+                 "The smallest RSA key still generally accepted, and what an older charging station may be the only thing able to verify."),
+
             new ("rsa-3072",           "RSA 3072",                  "SHA256withRSA",
                  "What some certificate authorities still issue and nothing else."),
 
@@ -171,6 +174,7 @@ namespace cloud.charging.open.LocalController.OCPP
                    "ecdsa-p384"         => PKIFactory.GenerateECCKeyPair    ("secp384r1"),
                    "ecdsa-p521"         => PKIFactory.GenerateECCKeyPair    ("secp521r1"),
 
+                   "rsa-2048"           => PKIFactory.GenerateRSAKeyPair    (2048),
                    "rsa-3072"           => PKIFactory.GenerateRSAKeyPair    (3072),
                    "rsa-4096"           => PKIFactory.GenerateRSAKeyPair    (4096),
 
