@@ -125,8 +125,8 @@ namespace cloud.charging.open.LocalController.Configuration
         /// there, instead of quietly deleting the configuration of something it
         /// has not heard of yet.
         /// </remarks>
-        public Boolean TryLoadDocument([NotNullWhen(true)] out JObject?  Document,
-                                                           out String?   Error)
+        public Boolean TryLoadDocument([NotNullWhen(true)]  out JObject?  Document,
+                                       [NotNullWhen(false)] out String?   Error)
         {
 
             Document  = null;
