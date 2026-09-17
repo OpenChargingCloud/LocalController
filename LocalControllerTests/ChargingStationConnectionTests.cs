@@ -102,23 +102,32 @@ namespace cloud.charging.open.LocalController.Tests
 
             try
             {
-
                 await client.ConnectAsync(
                           new Uri($"ws://127.0.0.1:{Controller.OCPPServerSettings.TCPPort}"),
                           timeout.Token
                       );
-
-                var subprotocol = client.SubProtocol;
-
-                await client.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", timeout.Token);
-
-                return (true, null, subprotocol);
-
             }
             catch (Exception e)
             {
                 return (false, e.Message, null);
             }
+
+            var subprotocol = client.SubProtocol;
+
+            // Whether the charging station got in was decided by the upgrade,
+            // and it has just succeeded. How the socket is taken down again is
+            // a different question: a station that says nothing afterwards can
+            // be dropped by the server before the closing handshake finishes,
+            // and reporting that as a refusal would fail a test for the one
+            // thing it is not about.
+            try
+            {
+                await client.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", timeout.Token);
+            }
+            catch (Exception)
+            { }
+
+            return (true, null, subprotocol);
 
         }
 

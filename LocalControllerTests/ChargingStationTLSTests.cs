@@ -183,17 +183,37 @@ namespace cloud.charging.open.LocalController.Tests
 
             try
             {
-
                 await client.ConnectAsync(new Uri($"wss://127.0.0.1:{port}"), timeout.Token);
-                await client.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", timeout.Token);
-
-                return (true, null, presented, chainLength);
-
             }
             catch (Exception e)
             {
-                return (false, e.Message, presented, chainLength);
+
+                // The whole chain, not only the outermost message: what matters
+                // here is whether the port refused the connection or the TLS
+                // handshake was reset, and "Unable to connect to the remote
+                // server" says neither.
+                var why = new List<String>();
+
+                for (var inner = e; inner is not null; inner = inner.InnerException)
+                    why.Add($"{inner.GetType().Name}: {inner.Message}");
+
+                return (false, String.Join("  <-  ", why), presented, chainLength);
+
             }
+
+            // Whether the charging station got in was decided by the handshake
+            // and the upgrade, and both have just succeeded. How the socket is
+            // taken down again is a different question, and a server that drops
+            // a silent station before the closing handshake finishes must not
+            // fail a test about who may connect.
+            try
+            {
+                await client.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", timeout.Token);
+            }
+            catch (Exception)
+            { }
+
+            return (true, null, presented, chainLength);
 
         }
 

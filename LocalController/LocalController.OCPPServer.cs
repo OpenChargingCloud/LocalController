@@ -327,7 +327,53 @@ namespace cloud.charging.open.LocalController
             ocppServerTLS = wantsTLS && ServerCertificates.HasCertificate;
 
             if (ocppServerTLS)
+            {
+
                 ocppWebSocketServer.ServerCertificateChainSelector = (server, client) => ServerCertificates.Select();
+
+                #region Can the chain that would be presented actually be presented?
+
+                // Asked now rather than found out per connection. .NET builds
+                // the chain of the server's own certificate before it can
+                // present it, and refuses when it cannot reach a root this
+                // machine has - a private authority whose root was never
+                // installed, most often. What a charging station then sees is a
+                // TLS handshake reset with nothing said, and this port would
+                // turn every single one of them away while reporting itself as
+                // running and encrypted.
+                try
+                {
+
+                    var chain = ServerCertificates.Select();
+
+                    if (chain is null)
+                        Log.Critical(
+                            "The charging station port is meant to be encrypted, but no certificate could be chosen for it. " +
+                            "No charging station will be able to connect.",
+                            "ocpp", "station", "tls"
+                        );
+
+                    else if (!chain.TryCreateContext(out _, out var why))
+                        Log.Critical(
+                            $"The charging station port is encrypted, but the certificate it would present cannot be served: {why} " +
+                             "Until this is put right every charging station is turned away during the TLS handshake, " +
+                             "which looks to them like the port simply dropping the connection.",
+                            "ocpp", "station", "tls"
+                        );
+
+                }
+                catch (Exception e)
+                {
+                    Log.Critical(
+                        $"The certificate for the charging station port could not be examined: {e.Message} " +
+                         "Charging stations may be turned away during the TLS handshake.",
+                        "ocpp", "station", "tls"
+                    );
+                }
+
+                #endregion
+
+            }
 
             else
             {
@@ -819,6 +865,23 @@ namespace cloud.charging.open.LocalController
                         $"The charging station '{connection.Login ?? "?"}' went away ({statusCode}{(reason.IsNullOrEmpty() ? "" : $": {reason}")}).",
                         "ocpp", "station"
                     );
+
+                return Task.CompletedTask;
+
+            };
+
+            // A connection that never became one. Not behind the logging
+            // switches: what arrives here is a charging station being dropped
+            // before it could say anything, and that is never noise. The
+            // commonest cause is a TLS handshake that could not be started at
+            // all, which from the other end is a bare reset with nothing to
+            // explain it.
+            Server.OnTCPConnectionFailed += (server, timestamp, eventTrackingId, remoteSocket, connectionId, exception) => {
+
+                Log.Warning(
+                    $"A charging station at {remoteSocket} was dropped before it could sign in: {exception.Message}",
+                    "ocpp", "station", "tls"
+                );
 
                 return Task.CompletedTask;
 
