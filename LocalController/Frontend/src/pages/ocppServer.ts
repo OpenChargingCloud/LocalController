@@ -3,7 +3,7 @@ import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '../html';
 import type { Page } from '../router';
 import { shell } from '../shell';
-import { errorMessage, field, formatTimestamp } from '../ui';
+import { errorMessage, field, formatTimestamp, isChecked } from '../ui';
 
 /**
  * The server the charging stations connect to, and which of them may.
@@ -586,9 +586,4 @@ export const ocppServerPage: Page = {
 /** The values of every checked box of one name. */
 function checked(form: HTMLFormElement, name: string): string[] {
     return new FormData(form).getAll(name).map(String);
-}
-
-/** Whether one box is ticked. */
-function isChecked(form: HTMLFormElement, name: string): boolean {
-    return new FormData(form).get(name) !== null;
 }

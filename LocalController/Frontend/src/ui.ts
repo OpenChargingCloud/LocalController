@@ -1,4 +1,4 @@
-import type { LogLevel } from './api/client';
+﻿import type { LogLevel } from './api/client';
 
 export function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -21,6 +21,11 @@ export function field(form: HTMLFormElement, name: string, trim = true): string 
 // Times
 
 /** The time of day with milliseconds - the column in front of every log line. */
+/** Whether one box of a form is ticked. */
+export function isChecked(form: HTMLFormElement, name: string): boolean {
+    return new FormData(form).get(name) !== null;
+}
+
 export function formatTime(iso: string): string {
 
     const date = new Date(iso);

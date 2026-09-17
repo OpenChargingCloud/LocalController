@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2014-2026 GraphDefined GmbH <achim.friedland@graphdefined.com>
  * This file is part of LocalController <https://github.com/OpenChargingCloud/LocalController>
  *
@@ -570,6 +570,10 @@ namespace cloud.charging.open.LocalController
             // Nothing listens yet: Start() does.
             BuildOCPPServer(configuration?.OCPPServer);
 
+            // And the line upwards. Nothing is dialled yet either, for the
+            // same reason: Start() does.
+            BuildCSMSConnection(configuration?.CSMS);
+
             #endregion
 
         }
@@ -591,6 +595,11 @@ namespace cloud.charging.open.LocalController
             await httpServer.Start();
 
             await StartOCPPServer();
+
+            // After the port below, so that a controller whose backend is
+            // unreachable is still a controller its charging stations can
+            // reach. A CSMS that does not answer is logged, not fatal.
+            await ConnectCSMS();
 
             StartCheckingTheClock();
 
@@ -625,6 +634,10 @@ namespace cloud.charging.open.LocalController
             // server waits for every request it started. Closing the sockets
             // does not wake those, so they are ended here first.
             API.CloseEventStreams();
+
+            // Hung up before the port below is closed: a station that is
+            // still connected has somewhere for its last messages to go.
+            await DisconnectCSMS();
 
             await StopOCPPServer();
 

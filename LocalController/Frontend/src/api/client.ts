@@ -1,4 +1,4 @@
-import { config } from '../config';
+﻿import { config } from '../config';
 
 
 // What the JSON API answers. Everything below /api/v1 except the sign-in needs
@@ -413,6 +413,51 @@ export interface ClientTrust {
     entries:     TrustedChain[];
 }
 
+/** What this local controller signs in to the CSMS with. */
+export interface CSMSCredentials {
+    file:               string;
+    username:           string | null;
+    hasPassword:        boolean;
+    hasTOTP:            boolean;
+    minPasswordLength:  number;
+    totp?:              TOTPSettings;
+}
+
+/** The charging station management system above this local controller. */
+export interface CSMSConfiguration {
+    enabled:                     boolean;
+    url?:                        string;
+    securityProfile:             number;
+    nextHopNodeId?:              string;
+    subprotocols:                string[];
+    checkCertificateRevocation:  boolean;
+    pingEvery:                   number;
+    requestTimeout:              number;
+    reconnectInitialDelay:       number;
+    reconnectMaxDelay:           number;
+    credentials:                 CSMSCredentials;
+    state: {
+        connected:           boolean;
+        connectedSince:      string | null;
+        lastProblem:         string | null;
+        hasCredentials:      boolean;
+        waitingForARestart:  string[];
+    };
+}
+
+/** What the CSMS connection may be changed to. */
+export interface CSMSUpdate {
+    enabled?:                     boolean;
+    url?:                         string;
+    securityProfile?:             number;
+    subprotocols?:                string[];
+    checkCertificateRevocation?:  boolean;
+    pingEvery?:                   number;
+    requestTimeout?:              number;
+    reconnectInitialDelay?:       number;
+    reconnectMaxDelay?:           number;
+}
+
 /** A way a charging station can prove who it is. */
 export type AuthMethod = 'basic' | 'totp' | 'certificate';
 
@@ -602,6 +647,26 @@ export const api = {
      * The charging station server: its socket, the certificates it presents,
      * the chains it accepts and the stations that may sign in.
      */
+    csms: {
+
+        get:          ()  => request<CSMSConfiguration>('GET', '/configuration/csms'),
+
+        save:         (update: CSMSUpdate) =>
+                          request<CSMSConfiguration>('PUT', '/configuration/csms', update),
+
+        /**
+         * Neither secret is made up here, unlike the passwords of the charging
+         * stations: both are issued by whoever runs the CSMS and typed in. So
+         * nothing comes back but the state - the secret went the other way.
+         */
+        saveCredentials: (credentials: { username: string; password?: string; sharedSecret?: string }) =>
+                          request<CSMSConfiguration>('PUT', '/configuration/csms/credentials', credentials),
+
+        removeCredentials: () =>
+                          request<CSMSConfiguration>('DELETE', '/configuration/csms/credentials')
+
+    },
+
     ocppServer: {
 
         get:   ()                          => request<OCPPServerConfiguration>('GET', '/configuration/ocpp-server'),

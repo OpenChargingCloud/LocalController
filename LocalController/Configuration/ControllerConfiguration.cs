@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2014-2026 GraphDefined GmbH <achim.friedland@graphdefined.com>
  * This file is part of LocalController <https://github.com/OpenChargingCloud/LocalController>
  *
@@ -47,10 +47,12 @@ namespace cloud.charging.open.LocalController.Configuration
     /// <param name="NTS">Where this local controller reads the time.</param>
     /// <param name="OCPP">Who this local controller says it is when it speaks OCPP.</param>
     /// <param name="OCPPServer">The server the charging stations below it connect to.</param>
+    /// <param name="CSMS">The charging station management system above it, and how it is dialled.</param>
     public sealed record ControllerConfiguration(DNSConfiguration?         DNS          = null,
                                                  NTSConfiguration?         NTS          = null,
                                                  OCPPConfiguration?        OCPP         = null,
-                                                 OCPPServerConfiguration?  OCPPServer   = null)
+                                                 OCPPServerConfiguration?  OCPPServer   = null,
+                                                 CSMSConfiguration?        CSMS         = null)
     {
 
         #region Properties
@@ -59,7 +61,7 @@ namespace cloud.charging.open.LocalController.Configuration
         /// Whether this document says anything at all.
         /// </summary>
         public Boolean IsEmpty
-            => DNS is null && NTS is null && OCPP is null && OCPPServer is null;
+            => DNS is null && NTS is null && OCPP is null && OCPPServer is null && CSMS is null;
 
         #endregion
 
@@ -168,7 +170,27 @@ namespace cloud.charging.open.LocalController.Configuration
 
             #endregion
 
-            Configuration = new ControllerConfiguration(dns, nts, ocpp, ocppServer);
+            #region CSMS
+
+            CSMSConfiguration? csms = null;
+
+            if (JSON[CSMSConfiguration.SectionName] is JToken csmsToken && csmsToken.Type != JTokenType.Null)
+            {
+
+                if (csmsToken is not JObject csmsJSON)
+                {
+                    Error = $"'{CSMSConfiguration.SectionName}' must be a JSON object.";
+                    return false;
+                }
+
+                if (!CSMSConfiguration.TryParse(csmsJSON, out csms, out Error))
+                    return false;
+
+            }
+
+            #endregion
+
+            Configuration = new ControllerConfiguration(dns, nts, ocpp, ocppServer, csms);
             return true;
 
         }
@@ -196,6 +218,9 @@ namespace cloud.charging.open.LocalController.Configuration
 
             if (OCPPServer is not null)
                 json.Add(OCPPServerConfiguration.SectionName, OCPPServer.ToJSON());
+
+            if (CSMS is not null)
+                json.Add(CSMSConfiguration.SectionName, CSMS.ToJSON());
 
             return json;
 

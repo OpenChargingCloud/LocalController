@@ -209,6 +209,7 @@ namespace cloud.charging.open.LocalController
             // accepts and the stations that may sign in; see
             // LCHTTPAPI.OCPPServer.cs.
             RegisterOCPPServerRoutes();
+            RegisterCSMSRoutes();
 
             AddHandler(HTTPPath.Root + "v1/logs",          GetLogs,           HTTPMethod.GET);
 
