@@ -65,12 +65,37 @@ namespace cloud.charging.open.LocalController.Tests
         #region Data
 
         /// <summary>
+        /// The kind of key an authority and the stations it issues to get when
+        /// nothing else is said.
+        /// </summary>
+        /// <remarks>
+        /// What a fleet's authority actually is, and what every test that is
+        /// not about key algorithms should keep using: a test that quietly
+        /// changed the shape of its certificates would be testing something
+        /// else.
+        /// </remarks>
+        public const String DefaultAlgorithm = "ecdsa-p256";
+
+        /// <summary>
         /// The key of whichever certificate signs: the intermediate where there
         /// is one, the root otherwise.
         /// </summary>
         private readonly AsymmetricKeyParameter  issuerKey;
 
         private readonly BCx509.X509Certificate  issuer;
+
+        /// <summary>
+        /// The kind of key this authority signs with, which is what decides
+        /// the signature it makes.
+        /// </summary>
+        /// <remarks>
+        /// Kept rather than worked out at each signature, and kept rather than
+        /// written into the call: "SHA256withECDSA" used to be a literal in
+        /// three places, so an authority made with any other kind of key would
+        /// have handed an elliptic curve signer a key it could not use. Which
+        /// is the same mistake this library's own factory had, one layer down.
+        /// </remarks>
+        private readonly KeyAlgorithm            algorithm;
 
         #endregion
 
@@ -95,12 +120,14 @@ namespace cloud.charging.open.LocalController.Tests
         private TestCA(X509Certificate2        Certificate,
                        X509Certificate2?       Intermediate,
                        BCx509.X509Certificate  Issuer,
-                       AsymmetricKeyParameter  IssuerKey)
+                       AsymmetricKeyParameter  IssuerKey,
+                       KeyAlgorithm            Algorithm)
         {
             this.Certificate   = Certificate;
             this.Intermediate  = Intermediate;
             this.issuer        = Issuer;
             this.issuerKey     = IssuerKey;
+            this.algorithm     = Algorithm;
         }
 
         #endregion
@@ -111,11 +138,20 @@ namespace cloud.charging.open.LocalController.Tests
         /// <summary>
         /// A new authority, valid over the given period.
         /// </summary>
+        /// <param name="Algorithm">
+        /// The kind of key this authority is built on; an elliptic curve P-256
+        /// one when nothing is said, which is what a fleet's authority
+        /// normally is.
+        /// </param>
         public static TestCA Create(String           Name,
                                     DateTimeOffset?  NotBefore          = null,
                                     DateTimeOffset?  NotAfter           = null,
-                                    Boolean          WithIntermediate   = false)
+                                    Boolean          WithIntermediate   = false,
+                                    String?          Algorithm          = null)
         {
+
+            var algorithm = KeyAlgorithm.Find(Algorithm ?? DefaultAlgorithm)
+                                ?? throw new ArgumentException($"'{Algorithm}' is not a kind of key this library makes.");
 
             // Wide on purpose, and not a year either side of today: an
             // authority cannot sign a certificate reaching outside its own
@@ -127,29 +163,30 @@ namespace cloud.charging.open.LocalController.Tests
 
             #region A root, signing itself
 
-            var rootPair = PKIFactory.GenerateECCKeyPair("secp256r1");
+            var rootPair = algorithm.Generate();
 
-            var root     = Authority($"CN={Name}", rootPair.Public, rootPair, notBefore, notAfter, null);
+            var root     = Authority($"CN={Name}", rootPair.Public, rootPair, notBefore, notAfter, null, algorithm);
 
             #endregion
 
             if (!WithIntermediate)
-                return new TestCA(ToDotNet(root), null, root, rootPair.Private);
+                return new TestCA(ToDotNet(root), null, root, rootPair.Private, algorithm);
 
             #region An intermediate, signed by the root
 
-            var intermediatePair = PKIFactory.GenerateECCKeyPair("secp256r1");
+            var intermediatePair = algorithm.Generate();
 
             var intermediate     = Authority($"CN={Name} Issuing CA",
                                              intermediatePair.Public,
                                              rootPair,
                                              notBefore,
                                              notAfter,
-                                             root.SubjectDN);
+                                             root.SubjectDN,
+                                             algorithm);
 
             #endregion
 
-            return new TestCA(ToDotNet(root), ToDotNet(intermediate), intermediate, intermediatePair.Private);
+            return new TestCA(ToDotNet(root), ToDotNet(intermediate), intermediate, intermediatePair.Private, algorithm);
 
         }
 
@@ -161,7 +198,8 @@ namespace cloud.charging.open.LocalController.Tests
                                                         AsymmetricCipherKeyPair  Signer,
                                                         DateTime                 NotBefore,
                                                         DateTime                 NotAfter,
-                                                        X509Name?                Issuer)
+                                                        X509Name?                Issuer,
+                                                        KeyAlgorithm             Algorithm)
         {
 
             var generator = new X509V3CertificateGenerator();
@@ -176,7 +214,7 @@ namespace cloud.charging.open.LocalController.Tests
             generator.AddExtension(X509Extensions.BasicConstraints, true,  new BasicConstraints(true));
             generator.AddExtension(X509Extensions.KeyUsage,         true,  new KeyUsage(KeyUsage.KeyCertSign | KeyUsage.CrlSign));
 
-            return generator.Generate(new Asn1SignatureFactory("SHA256withECDSA", Signer.Private));
+            return generator.Generate(new Asn1SignatureFactory(Algorithm.SignatureAlgorithm, Signer.Private));
 
         }
 
@@ -235,7 +273,11 @@ namespace cloud.charging.open.LocalController.Tests
 
             #endregion
 
-            return ToDotNet(generator.Generate(new Asn1SignatureFactory("SHA256withECDSA", issuerKey)));
+            // The signature is this authority's to make, so its own key
+            // decides which one it is - not the key in the request. That is
+            // exactly the mistake Hermod's factory had, and the reason an
+            // authority here can answer a request for any kind of key at all.
+            return ToDotNet(generator.Generate(new Asn1SignatureFactory(algorithm.SignatureAlgorithm, issuerKey)));
 
         }
 
@@ -247,14 +289,23 @@ namespace cloud.charging.open.LocalController.Tests
         /// A certificate for a key of this authority's own making - a charging
         /// station, for instance, which does not ask this controller for one.
         /// </summary>
+        /// <param name="SubjectAlgorithm">
+        /// The kind of key the station gets, which need not be this
+        /// authority's: a fleet does not change its root because one station
+        /// asked for something newer.
+        /// </param>
         public X509Certificate2 SignFor(String          Subject,
                                         DateTimeOffset  NotBefore,
                                         DateTimeOffset  NotAfter,
                                         Boolean         ClientAuthentication   = true,
-                                        Boolean         WithoutAnyKeyUsage     = false)
+                                        Boolean         WithoutAnyKeyUsage     = false,
+                                        String?         SubjectAlgorithm       = null)
         {
 
-            var pair      = PKIFactory.GenerateECCKeyPair("secp256r1");
+            var subjectKind = KeyAlgorithm.Find(SubjectAlgorithm ?? DefaultAlgorithm)
+                                  ?? throw new ArgumentException($"'{SubjectAlgorithm}' is not a kind of key this library makes.");
+
+            var pair      = subjectKind.Generate();
 
             var generator = new X509V3CertificateGenerator();
 
@@ -276,7 +327,7 @@ namespace cloud.charging.open.LocalController.Tests
                                              : KeyPurposeID.id_kp_serverAuth)
                 );
 
-            return ToDotNet(generator.Generate(new Asn1SignatureFactory("SHA256withECDSA", issuerKey)));
+            return ToDotNet(generator.Generate(new Asn1SignatureFactory(algorithm.SignatureAlgorithm, issuerKey)));
 
         }
 

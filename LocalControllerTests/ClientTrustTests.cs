@@ -143,6 +143,108 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region AStationOfAnyKindOfKeyIsLetIn(Algorithm)
+
+        /// <summary>
+        /// A P-256 authority, and stations whose own keys are anything at all.
+        /// </summary>
+        /// <remarks>
+        /// The path a fleet actually takes, and the one nothing here measured:
+        /// every certificate in these tests used to be P-256 on both sides,
+        /// which is the one case that worked while Hermod chose a signature
+        /// from the subject's key rather than the issuer's. So the tests sat
+        /// exactly on the diagonal that hid the fault.
+        ///
+        /// The authority stays P-256 on purpose. Whoever issues certificates
+        /// for a fleet does not change their root because one station turned
+        /// up with a newer kind of key - and a controller that could only
+        /// admit stations shaped like its own authority would be a controller
+        /// nobody can migrate.
+        /// </remarks>
+        [Test]
+        [TestCase("ecdsa-p521")]
+        [TestCase("rsa-3072")]
+        [TestCase("ed25519")]
+        [TestCase("ed448")]
+        [TestCase("ml-dsa-65")]
+        public void AStationOfAnyKindOfKeyIsLetIn(String Algorithm)
+        {
+
+            using var ca      = TestCA.Create("Some Charging Network");
+            var id            = Accept(ca, "Some Charging Network");
+
+            using var station = ca.SignFor("cs001",
+                                           clock.Now.AddDays(-1),
+                                           clock.Now.AddYears(1),
+                                           SubjectAlgorithm: Algorithm);
+
+            var result = store.Validate(station, null, false);
+
+            Assert.Multiple(() => {
+                Assert.That(result.Accepted,  Is.True, $"A station with an {Algorithm} key was turned away: {result.Reason}");
+                Assert.That(result.AnchorId,  Is.EqualTo(id));
+                Assert.That(result.Subject,   Does.Contain("cs001"));
+            });
+
+        }
+
+        #endregion
+
+        #region AnAuthorityOfAnyKindOfKeyCanBeTrusted(Algorithm)
+
+        /// <summary>
+        /// And the other way round: a controller told to trust an authority
+        /// that is not elliptic curve at all.
+        /// </summary>
+        /// <remarks>
+        /// A different question from the one above, with a different answer,
+        /// and the difference is worth keeping straight. A station's own key
+        /// can be anything at all, because nothing in the chain has to verify
+        /// it - every signature in the chain is the authority's. An
+        /// authority's key has to be one this runtime can check a signature
+        /// with, because that is precisely what building a chain does.
+        ///
+        /// So this is not pinned to a list. Measured on .NET 10 today: an RSA
+        /// or an ML-DSA authority is accepted, and an Ed25519 one is refused
+        /// with "the chain could not be built" - .NET gained ML-DSA in 10 and
+        /// has never had Ed25519. That is a sentence with a date in it, and a
+        /// test that froze it would start failing the day the runtime grows.
+        ///
+        /// What is asserted instead is that the answer is always one of the
+        /// two: accepted with the right anchor, or refused for a reason that
+        /// says what could not be done. Never a crash, never a silent yes.
+        /// </remarks>
+        [Test]
+        [TestCase("rsa-3072")]
+        [TestCase("ed25519")]
+        [TestCase("ed448")]
+        [TestCase("ml-dsa-65")]
+        public void AnAuthorityIsUsableWhereThisRuntimeCanCheckItsSignatures(String Algorithm)
+        {
+
+            using var ca      = TestCA.Create("Some Charging Network", Algorithm: Algorithm);
+            var id            = Accept(ca, "Some Charging Network");
+
+            using var station = ca.SignFor("cs001",
+                                           clock.Now.AddDays(-1),
+                                           clock.Now.AddYears(1),
+                                           SubjectAlgorithm: Algorithm);
+
+            var result = store.Validate(station, null, false);
+
+            if (result.Accepted)
+                Assert.That(result.AnchorId, Is.EqualTo(id),
+                            $"An {Algorithm} authority was accepted and credited to the wrong anchor.");
+
+            else
+                Assert.That(result.Reason, Does.Contain("chain"),
+                            $"An {Algorithm} authority was refused, and the reason says nothing about " +
+                            $"the chain that could not be built: {result.Reason}");
+
+        }
+
+        #endregion
+
         #region AStationFromSomewhereElseIsTurnedAway()
 
         /// <summary>
