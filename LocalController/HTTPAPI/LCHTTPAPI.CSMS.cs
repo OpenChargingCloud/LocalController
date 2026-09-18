@@ -87,7 +87,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutCSMS(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
@@ -96,7 +96,7 @@ namespace cloud.charging.open.LocalController
             if (!Controller.TryUpdateCSMSConfiguration(json, out var error))
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
 
-            Log.Info($"'{session.UserId}' changed the CSMS connection.", "ocpp", "csms", "config", "web");
+            Log.Info($"'{user.Id}' changed the CSMS connection.", "ocpp", "csms", "config", "web");
 
             return Task.FromResult(
                        JSONResponse(Request, HTTPStatusCode.OK, Controller.CSMSConfigurationJSON())
@@ -122,7 +122,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutCSMSCredentials(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
@@ -187,7 +187,7 @@ namespace cloud.charging.open.LocalController
 
             #endregion
 
-            Log.Notice($"'{session.UserId}' set the credentials this local controller signs in to the CSMS with.",
+            Log.Notice($"'{user.Id}' set the credentials this local controller signs in to the CSMS with.",
                        "ocpp", "csms", "auth", "web");
 
             return Task.FromResult(
@@ -202,13 +202,13 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> DeleteCSMSCredentials(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!Controller.CSMSLogin.TryClear(out var error))
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
 
-            Log.Notice($"'{session.UserId}' removed the credentials this local controller signs in to the CSMS with.",
+            Log.Notice($"'{user.Id}' removed the credentials this local controller signs in to the CSMS with.",
                        "ocpp", "csms", "auth", "web");
 
             return Task.FromResult(

@@ -23,6 +23,8 @@ using org.GraphDefined.Vanaheimr.Illias;
 using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.DNS;
 using org.GraphDefined.Vanaheimr.Hermod.HTTP;
+using org.GraphDefined.Vanaheimr.Hermod.Mail;
+using NullMailer = org.GraphDefined.Vanaheimr.Hermod.SMTP.NullMailer;
 using org.GraphDefined.Vanaheimr.Norn.NTS;
 
 using cloud.charging.open.protocols.WWCP.NetworkingNode;
@@ -76,6 +78,44 @@ namespace cloud.charging.open.LocalController
         /// over one socket is a confusing way to find that out.
         /// </remarks>
         public static readonly IPPort DefaultHTTPPort = IPPort.Parse(2350);
+
+        /// <summary>
+        /// Where the accounts live, unless another directory is given.
+        /// </summary>
+        public const String  DefaultAccountsPath          = "accounts";
+
+        /// <summary>
+        /// The accounts themselves, inside that directory.
+        /// </summary>
+        public const String  DefaultAccountsDatabaseFile  = "users.db";
+
+        /// <summary>
+        /// Where the HTTPExt API answers: accounts, groups and API keys.
+        /// </summary>
+        /// <remarks>
+        /// Beside "/api" rather than under it, because it is not this
+        /// controller's API: it is Hermod's, with its own routes and its own
+        /// vocabulary, and putting it under /api/v1 would promise that this
+        /// controller versions it.
+        /// </remarks>
+        public static readonly HTTPPath  ExtAPIPath       = HTTPPath.Parse("/ext");
+
+        /// <summary>
+        /// The account made at a first start.
+        /// </summary>
+        public const String  DefaultAdminUser             = "root";
+
+        /// <summary>
+        /// The organization that account belongs to.
+        /// </summary>
+        /// <remarks>
+        /// A box in a car park has no organizations to speak of, and this one
+        /// exists because the HTTPExt API's sign-in refuses an account that is
+        /// in none - "You do not have access to any organization!" - however
+        /// right its password is. So there is exactly one, named after the
+        /// thing it stands for.
+        /// </remarks>
+        public const String  DefaultOrganization          = "LocalController";
 
         /// <summary>
         /// The file of the bundle that is the web interface; its presence is
@@ -158,14 +198,15 @@ namespace cloud.charging.open.LocalController
         public EventLog               Log                    { get; }
 
         /// <summary>
-        /// Who may open the web interface, and which browsers currently may.
+        /// Who may open the web interface: the accounts, the groups they are
+        /// in, and the sessions and API keys they hold.
         /// </summary>
-        public WebSessions            Sessions               { get; }
+        public HTTPExtAPI             ExtAPI                 { get; }
 
         /// <summary>
-        /// Where the web login lives between starts.
+        /// The directory the accounts live in between starts.
         /// </summary>
-        public WebLoginFile           LoginFile              { get; }
+        public String                 AccountsPath           { get; }
 
         /// <summary>
         /// Where everything this local controller can be told in writing lives
@@ -225,11 +266,16 @@ namespace cloud.charging.open.LocalController
         public Boolean                NTSEnabled             { get; private set; } = true;
 
         /// <summary>
-        /// The password this local controller made up because there was no
-        /// login file, or null when the login came from the file. It is shown
+        /// The password this local controller made up because there were no
+        /// accounts, or null when accounts were already there. It is shown
         /// once, on the console, and kept nowhere but in its hash.
         /// </summary>
-        public String?                GeneratedPassword      { get; }
+        /// <remarks>
+        /// Set by <see cref="Start"/> rather than by the constructor, because
+        /// creating the account is asynchronous and a constructor that waited
+        /// on it would be a constructor that can deadlock.
+        /// </remarks>
+        public String?                GeneratedPassword      { get; private set; }
 
         /// <summary>
         /// Where the web interface comes from: this assembly, or a directory
@@ -289,7 +335,7 @@ namespace cloud.charging.open.LocalController
         /// <param name="HTTPRootPath">The root path of the JSON API, "/api" by default.</param>
         /// <param name="HTTPHostname">The address to listen on; the loopback address by default.</param>
         /// <param name="HTTPPort">The TCP port to listen on.</param>
-        /// <param name="LoginFile">Where the web login lives; "web-login.json" beside the process by default.</param>
+        /// <param name="AccountsPath">The directory the accounts live in between starts; "accounts" beside the process by default.</param>
         /// <param name="ConfigFile">Where everything this controller can be told in writing lives; "configuration.json" beside the process by default.</param>
         /// <param name="OCPP">Who this controller says it is in OCPP, unless the configuration file says otherwise.</param>
         /// <param name="Frontend">Where the web interface comes from; the bundle embedded in this assembly by default.</param>
@@ -304,7 +350,7 @@ namespace cloud.charging.open.LocalController
                                HTTPPath?              HTTPRootPath      = null,
                                IIPAddress?            HTTPHostname      = null,
                                IPPort?                HTTPPort          = null,
-                               WebLoginFile?          LoginFile         = null,
+                               String?                AccountsPath      = null,
                                ControllerConfigFile?  ConfigFile        = null,
                                OCPPConfiguration?     OCPP              = null,
                                IStaticContentSource?  Frontend          = null,
@@ -346,36 +392,16 @@ namespace cloud.charging.open.LocalController
 
             #endregion
 
-            #region Who may open the web interface
+            #region Where the accounts live
 
-            this.LoginFile = LoginFile ?? new WebLoginFile(WebLoginFile.DefaultFileName);
+            // Ending in a separator, because the HTTPExt API builds the paths
+            // of its files by putting strings together rather than with
+            // Path.Combine: a directory that does not end in one would give it
+            // "...accountsUsersAPI" and not "...accounts/UsersAPI".
+            this.AccountsPath = AccountsPath ?? DefaultAccountsPath;
 
-            if (this.LoginFile.TryLoad(out var loadedLogin, out var loginError) && loadedLogin is not null)
-                this.Sessions = new WebSessions(loadedLogin,   TimeProvider: this.TimeProvider);
-
-            else
-            {
-
-                // A login file that is there but unreadable is not something to
-                // paper over with a new password: that would lock out whoever
-                // owns the old one without saying why.
-                if (loginError is not null)
-                    throw new InvalidOperationException($"{loginError} Repair or remove '{this.LoginFile.Path}' and start again.");
-
-                // A first start: nobody can sign in to a web interface whose
-                // login is not set yet, and an unauthenticated setup page would
-                // be a door of its own. So the password is made up here and
-                // shown once, on the console, to whoever started the process.
-                var (generated, password) = WebLoginSettings.Generate();
-
-                this.LoginFile.Save(generated);
-
-                this.Sessions           = new WebSessions(generated, TimeProvider: this.TimeProvider);
-                this.GeneratedPassword  = password;
-
-                this.Log.Notice($"No web login found, so one was made up and written to '{this.LoginFile.Path}'.", "web", "auth");
-
-            }
+            if (!this.AccountsPath.EndsWith(Path.DirectorySeparatorChar))
+                this.AccountsPath += Path.DirectorySeparatorChar;
 
             #endregion
 
@@ -453,19 +479,81 @@ namespace cloud.charging.open.LocalController
 
             this.WebInterfaceURL = URL.Parse($"http://{address}:{port}/");
 
-            // 1) The JSON API at "/api". Registered first, so that it is the
-            //    most specific API and an unknown /api path never reaches the
-            //    single-page-application stub below.
+            // 1) The HTTPExt API at "/ext". First of the three, because it is
+            //    the one with a database behind it: whatever it finds wrong
+            //    with its files, it should say so before a port is opened and
+            //    before anybody is let in against accounts that were not read.
+            this.ExtAPI        = new HTTPExtAPI(
+                                     HTTPServer:             httpServer,
+                                     RootPath:               ExtAPIPath,
+                                     HTTPServerName:         $"OpenChargingCloud LocalController v{Version}",
+                                     HTTPServiceName:        $"OpenChargingCloud LocalController v{Version}",
+                                     APIRobotEMailAddress:   EMailAddress.Parse("OpenChargingCloud LocalController Robot <robot@charging.cloud>"),
+                                     APIRobotGPGPassphrase:  "",
+
+                                     // Nothing here sends mail. A controller
+                                     // that notifies by e-mail is told so by
+                                     // whoever runs it, with a submission
+                                     // client of their own; until then a
+                                     // mailer that swallows what it is given
+                                     // is better than one that quietly retries
+                                     // against a host nobody configured.
+                                     SMTPSubmissionClient:   new NullMailer(),
+                                     DisableNotifications:   true,
+
+                                     // The cookie has to reach "/api", and its
+                                     // path would otherwise be the root path of
+                                     // this API - "/ext" - so a browser signed
+                                     // in at /ext/login would send nothing to
+                                     // the API and look signed out everywhere
+                                     // else.
+                                     HTTPCookiePath:         "/",
+
+                                     // A secure cookie is dropped by a browser
+                                     // over plain HTTP, and a controller on a
+                                     // bench is reached over plain HTTP. Tied
+                                     // to the TLS the server is actually using
+                                     // rather than switched off: on a box with
+                                     // a certificate this stays on.
+                                     UseSecureCookies:       false,
+
+                                     // The shortest name a role of this controller has,
+                                     // because that is what a group identification has
+                                     // to be allowed to be. Hermod's own floor is four
+                                     // characters and "cpo" is three, so the group
+                                     // would be refused - by a returned result rather
+                                     // than an exception, which is a refusal nobody is
+                                     // obliged to notice - and the role it carries
+                                     // could never be held by anybody.
+                                     MinUserGroupIdLength:   (Byte) UserRole.All.Min(role => role.Name.Length),
+
+                                     LoggingPath:            AccountsPath,
+                                     DatabaseFileName:       DefaultAccountsDatabaseFile,
+
+                                     // Left on, and that is what makes the
+                                     // directory above: switching it off skips
+                                     // the CreateDirectory that the accounts
+                                     // file is written into, and the first
+                                     // account created would fail on a path
+                                     // that was never made.
+                                     DisableLogging:         false
+                                 );
+
+            this.Log.Info($"The accounts of this local controller are in '{ExtAPI.DatabaseFileName}', its HTTPExt API at '{ExtAPIPath}'.", "web", "http");
+
+            // 2) The JSON API at "/api". Before the web interface, so that it
+            //    is the more specific API and an unknown /api path never
+            //    reaches the single-page-application stub below.
             this.API           = new LCHTTPAPI(
                                      HTTPServer:  httpServer,
                                      Controller:  this,
-                                     Sessions:    Sessions,
+                                     ExtAPI:      ExtAPI,
                                      Log:         this.Log,
                                      APIPath:     httpRootPath,
                                      Version:     Version
                                  );
 
-            // 2) The web interface at "/": the files of the bundle, and the
+            // 3) The web interface at "/": the files of the bundle, and the
             //    single-page-application stub for every other page URL, so
             //    that a reload on /logs and a bookmark to it both work.
             this.Frontend      = Frontend ?? new EmbeddedContentSource(HTTPRoot, typeof(LocalController).Assembly);
@@ -592,6 +680,11 @@ namespace cloud.charging.open.LocalController
             if (started)
                 return;
 
+            // Before the port opens, and that order is the point: a web
+            // interface reachable before its accounts exist is a door with
+            // nobody behind it.
+            await EnsureAccounts();
+
             await httpServer.Start();
 
             await StartOCPPServer();
@@ -649,6 +742,190 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
+
+        #region (private) EnsureAccounts()
+
+        /// <summary>
+        /// Make the three groups and, at a first start, the one account that
+        /// is in the last of them.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The groups are made every start rather than only the first, because
+        /// they are this controller's vocabulary and not somebody's data: a
+        /// group deleted by hand would otherwise leave a role that can never be
+        /// held again, and the routes asking for it would refuse everybody with
+        /// no way to put it right.
+        /// </para>
+        /// <para>
+        /// The account is made only when there is none at all. Nobody can sign
+        /// in to a web interface whose accounts are empty, and an
+        /// unauthenticated setup page would be a door of its own - so the
+        /// password is made up here and shown once, on the console, to whoever
+        /// started the process. It is never written down: what the accounts
+        /// hold is the hash the HTTPExt API makes of it.
+        /// </para>
+        /// </remarks>
+        private async Task EnsureAccounts()
+        {
+
+            // Read what is on disk first. The HTTPExt API writes its accounts
+            // as it goes but does not read them back when it is built, so a
+            // controller that skipped this would find no accounts at every
+            // start, make a second root beside the first, and refuse the
+            // password its owner already has.
+            await ExtAPI.LoadDatabase();
+
+            var firstStart  = !ExtAPI.Users.Any();
+
+            IUser?  admin   = null;
+
+            #region The one account, when there is none
+
+            if (firstStart)
+            {
+
+                var password  = RandomExtensions.RandomString(24);
+                var userId    = User_Id.Parse(DefaultAdminUser);
+
+                // An account in no organization is refused at the sign-in -
+                // "You do not have access to any organization!" - however right
+                // its password is. Hence the single organization, which a box
+                // in a car park has no other use for.
+                var organization  = await ExtAPI.CreateOrganizationIfNotExists(
+                                              Organization_Id.Parse(DefaultOrganization),
+                                              I18NString.Create(Languages.en, DefaultOrganization)
+                                          );
+
+                if (organization is not Organization controllerOrganization)
+                    throw new InvalidOperationException("The organization of this local controller could not be created, and an account outside one cannot sign in.");
+
+                // CreateUser rather than AddUser: the password is set from
+                // inside the OnAdded callback, where the user already has its
+                // API back-reference, and that is the only place the password
+                // store can be reached. AddUser followed by ChangePassword
+                // looks equivalent and writes the account without one - which
+                // is an account nobody can sign in to, and nothing says so.
+                admin         = await ExtAPI.CreateUser(
+                                          userId,
+                                          I18NString.Create(Languages.en, DefaultAdminUser),
+                                          SimpleEMailAddress.Parse($"{DefaultAdminUser}@localhost"),
+                                          User2OrganizationEdgeLabel.IsAdmin,
+                                          controllerOrganization,
+                                          Password:                  password,
+
+                                          // Nothing is sent and nobody is told:
+                                          // a controller has no mail server, no
+                                          // second user to notify, and the one
+                                          // account it makes is announced on the
+                                          // console it was started from.
+                                          SkipDefaultNotifications:  true,
+                                          SkipNewUserEMail:          true,
+                                          SkipNewUserNotifications:  true,
+
+                                          // Without this nobody can sign in, and
+                                          // nothing says why: the sign-in paths
+                                          // require an accepted EULA and refuse a
+                                          // correct password without one. There is
+                                          // no agreement to show here - whoever
+                                          // started the process owns the box - so
+                                          // it is accepted at the moment the
+                                          // account is made.
+                                          AcceptedEULA:              TimeProvider.GetUtcNow().AddSeconds(-1),
+
+                                          IsAuthenticated:           true
+                                      );
+
+                if (admin is null)
+                    throw new InvalidOperationException("The account of this local controller could not be created, so nobody could sign in to it.");
+
+                GeneratedPassword = password;
+
+                Log.Notice($"No accounts were found, so '{DefaultAdminUser}' was made up and put in the {UserRole.SystemAdmin.Name} group.",
+                           "web", "auth");
+
+            }
+
+            #endregion
+
+            #region The three groups
+
+            foreach (var role in UserRole.All)
+            {
+
+                if (ExtAPI.TryGetUserGroup(role.GroupId, out _))
+                    continue;
+
+                var added = await ExtAPI.AddUserGroup(
+                                      new UserGroup(
+                                          role.GroupId,
+                                          I18NString.Create(Languages.en, role.Name)
+                                      )
+                                  );
+
+                // Looked at, and that is the point: this answers with a result
+                // rather than throwing, so a group it declined to make would
+                // otherwise leave a role nobody can ever hold - and every route
+                // asking for it refusing everybody, with nothing anywhere to
+                // say why. Better to stop before the port opens.
+                if (added.Result != CommandResult.Success)
+                    throw new InvalidOperationException(
+                              $"The user group '{role.GroupId}' of this controller could not be made: " +
+                              $"{added.Description.FirstText()} A role without its group is a role nobody can hold."
+                          );
+
+            }
+
+            #endregion
+
+            #region The one account joins the one group that can fix the rest
+
+            // Through AddUserToUserGroup, which writes a command of its own.
+            // Putting the edge on the group object before storing it looks
+            // equivalent and is not: what AddUserGroup writes is the group,
+            // and a group's stored form does not carry its members - so the
+            // membership was there until the next start and gone after it,
+            // which is the worst shape a permission can have.
+            if (admin is not null)
+            {
+
+                if (!ExtAPI.TryGetUser     (admin.Id,                     out var storedAdmin) ||
+                    !ExtAPI.TryGetUserGroup(UserRole.SystemAdmin.GroupId, out var adminGroup)  ||
+                     storedAdmin is not User      user ||
+                     adminGroup  is not UserGroup group)
+                {
+                    throw new InvalidOperationException(
+                              $"The account of this local controller could not be put in the {UserRole.SystemAdmin.Name} group, " +
+                               "so the one account it has would be allowed to do nothing at all."
+                          );
+                }
+
+                var joined = await ExtAPI.AddUserToUserGroup(
+                                       user,
+                                       User2UserGroupEdgeLabel.IsAdmin,
+                                       group
+                                   );
+
+                // Looked at for the same reason as the group above: this
+                // answers with a result too, and a membership it declined to
+                // write leaves the one account able to do nothing at all -
+                // with a password about to be printed that opens nothing.
+                // A different result type from AddUserGroup's, and so a
+                // different question: IsSuccess rather than Result.
+                if (!joined.IsSuccess)
+                    throw new InvalidOperationException(
+                              $"The account '{DefaultAdminUser}' could not be put in the {UserRole.SystemAdmin.Name} group: " +
+                              $"{joined.ErrorDescription?.FirstText()} It would be able to do nothing at all."
+                          );
+
+            }
+
+            #endregion
+
+        }
+
+        #endregion
+
         #region ConfigurationJSON()
 
         /// <summary>
@@ -657,8 +934,8 @@ namespace cloud.charging.open.LocalController
         /// </summary>
         /// <remarks>
         /// Read-only: it answers "what am I running", not "change it". Nothing
-        /// here is a secret - the web login appears with its username and the
-        /// path of its file, and never with anything about its password.
+        /// here is a secret - the accounts appear as the path they live at and
+        /// the route to sign in, and never as anything about a password.
         /// </remarks>
         public JObject ConfigurationJSON()
 
@@ -682,13 +959,12 @@ namespace cloud.charging.open.LocalController
                    )),
 
                    new JProperty("web",        new JObject(
-                       new JProperty("username",       Sessions.Username),
-                       new JProperty("loginFile",      LoginFile.Path),
-                       new JProperty("cookie",         Sessions.CookieName.ToString()),
-                       new JProperty("secureCookies",  Sessions.SecureCookies),
-                       new JProperty("idleTimeout",    Sessions.IdleTimeout.    ToString()),
-                       new JProperty("maxLifetime",    Sessions.MaximumLifetime.ToString()),
-                       new JProperty("sessions",       Sessions.Count)
+                       new JProperty("accountsPath",   AccountsPath),
+                       new JProperty("signInAt",       $"{ExtAPIPath.ToString().TrimEnd('/')}/login"),
+                       new JProperty("users",          ExtAPI.Users.     Count()),
+                       new JProperty("groups",         ExtAPI.UserGroups.Count()),
+                       new JProperty("cookie",         ExtAPI.SessionCookieName.ToString()),
+                       new JProperty("maxLifetime",    ExtAPI.MaxSignInSessionLifetime.ToString())
                    )),
 
                    new JProperty("log",        new JObject(

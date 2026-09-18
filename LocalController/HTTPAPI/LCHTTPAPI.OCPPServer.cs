@@ -118,7 +118,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutOCPPServer(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
@@ -127,7 +127,7 @@ namespace cloud.charging.open.LocalController
             if (!Controller.TryUpdateOCPPServerConfiguration(json, out var error))
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
 
-            Log.Info($"'{session.UserId}' changed the charging station server.", "ocpp", "station", "config", "web");
+            Log.Info($"'{user.Id}' changed the charging station server.", "ocpp", "station", "config", "web");
 
             return Task.FromResult(
                        JSONResponse(Request, HTTPStatusCode.OK, Controller.OCPPServerConfigurationJSON())
@@ -173,7 +173,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PostCertificateRequest(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
@@ -204,7 +204,7 @@ namespace cloud.charging.open.LocalController
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
             }
 
-            Log.Notice($"'{session.UserId}' had this local controller generate the key '{id}'.", "ocpp", "tls", "web");
+            Log.Notice($"'{user.Id}' had this local controller generate the key '{id}'.", "ocpp", "tls", "web");
 
             return Task.FromResult(
                        JSONResponse(
@@ -261,7 +261,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutCertificate(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -294,7 +294,7 @@ namespace cloud.charging.open.LocalController
                            )
                        );
 
-            Log.Notice($"'{session.UserId}' uploaded a certificate for the key '{actual}'.", "ocpp", "tls", "web");
+            Log.Notice($"'{user.Id}' uploaded a certificate for the key '{actual}'.", "ocpp", "tls", "web");
 
             return Task.FromResult(
                        JSONResponse(
@@ -315,7 +315,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> DeleteCertificate(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -324,7 +324,7 @@ namespace cloud.charging.open.LocalController
             if (!Controller.ServerCertificates.TryRemove(id, out var error))
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.Conflict, error));
 
-            Log.Notice($"'{session.UserId}' removed the key '{id}'.", "ocpp", "tls", "web");
+            Log.Notice($"'{user.Id}' removed the key '{id}'.", "ocpp", "tls", "web");
 
             return Task.FromResult(
                        JSONResponse(Request, HTTPStatusCode.OK, Controller.ServerCertificates.ToJSON())
@@ -359,7 +359,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PostTrust(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
@@ -373,7 +373,7 @@ namespace cloud.charging.open.LocalController
             if (!Controller.ClientTrust.TryAdd(pem, json.Value<String>("name"), out var id, out var warnings, out var error))
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
 
-            Log.Notice($"'{session.UserId}' added the accepted chain '{id}'.", "ocpp", "tls", "trust", "web");
+            Log.Notice($"'{user.Id}' added the accepted chain '{id}'.", "ocpp", "tls", "trust", "web");
 
             return Task.FromResult(
                        JSONResponse(
@@ -395,7 +395,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutTrust(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -412,7 +412,7 @@ namespace cloud.charging.open.LocalController
                 !Controller.ClientTrust.TrySetEnabled(id, enabled, out var enableError))
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, enableError));
 
-            Log.Info($"'{session.UserId}' changed the accepted chain '{id}'.", "ocpp", "tls", "trust", "web");
+            Log.Info($"'{user.Id}' changed the accepted chain '{id}'.", "ocpp", "tls", "trust", "web");
 
             return Task.FromResult(
                        JSONResponse(Request, HTTPStatusCode.OK, Controller.ClientTrust.ToJSON())
@@ -426,7 +426,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> DeleteTrust(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -435,7 +435,7 @@ namespace cloud.charging.open.LocalController
             if (!Controller.ClientTrust.TryRemove(id, out var error))
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.NotFound, error));
 
-            Log.Notice($"'{session.UserId}' removed the accepted chain '{id}'.", "ocpp", "tls", "trust", "web");
+            Log.Notice($"'{user.Id}' removed the accepted chain '{id}'.", "ocpp", "tls", "trust", "web");
 
             return Task.FromResult(
                        JSONResponse(Request, HTTPStatusCode.OK, Controller.ClientTrust.ToJSON())
@@ -475,7 +475,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PostStation(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
@@ -494,7 +494,7 @@ namespace cloud.charging.open.LocalController
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
             }
 
-            Log.Notice($"'{session.UserId}' set the password of the charging station '{id}'.", "ocpp", "station", "auth", "web");
+            Log.Notice($"'{user.Id}' set the password of the charging station '{id}'.", "ocpp", "station", "auth", "web");
 
             var response = new JObject(
                                new JProperty("id",        id),
@@ -516,7 +516,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutStation(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -544,10 +544,10 @@ namespace cloud.charging.open.LocalController
             }
 
             if (group is not null)
-                Log.Info($"'{session.UserId}' moved the charging station '{id}' into the login group '{group}'.", "ocpp", "station", "auth", "web");
+                Log.Info($"'{user.Id}' moved the charging station '{id}' into the login group '{group}'.", "ocpp", "station", "auth", "web");
 
             if (enabled is Boolean said)
-                Log.Info($"'{session.UserId}' {(said ? "let in" : "shut out")} the charging station '{id}'.", "ocpp", "station", "auth", "web");
+                Log.Info($"'{user.Id}' {(said ? "let in" : "shut out")} the charging station '{id}'.", "ocpp", "station", "auth", "web");
 
             return Task.FromResult(
                        JSONResponse(Request, HTTPStatusCode.OK, Controller.StationLogins.ToJSON())
@@ -570,7 +570,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutStationTOTP(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -614,7 +614,7 @@ namespace cloud.charging.open.LocalController
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
             }
 
-            Log.Notice($"'{session.UserId}' set the TOTP configuration of the charging station '{id}'.", "ocpp", "station", "auth", "web");
+            Log.Notice($"'{user.Id}' set the TOTP configuration of the charging station '{id}'.", "ocpp", "station", "auth", "web");
 
             var response = new JObject(
                                new JProperty("id",        id),
@@ -656,7 +656,7 @@ namespace cloud.charging.open.LocalController
                                                 String            What)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
                 return refused;
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -665,7 +665,7 @@ namespace cloud.charging.open.LocalController
             if (!Clear(id, out var error))
                 return ErrorJSON(Request, HTTPStatusCode.NotFound, error);
 
-            Log.Notice($"'{session.UserId}' took the {What} of the charging station '{id}' away.", "ocpp", "station", "auth", "web");
+            Log.Notice($"'{user.Id}' took the {What} of the charging station '{id}' away.", "ocpp", "station", "auth", "web");
 
             return JSONResponse(Request, HTTPStatusCode.OK, Controller.StationLogins.ToJSON());
 
@@ -682,7 +682,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> DeleteStation(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -691,7 +691,7 @@ namespace cloud.charging.open.LocalController
             if (!Controller.StationLogins.TryRemove(id, out var error))
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.NotFound, error));
 
-            Log.Notice($"'{session.UserId}' removed the charging station '{id}'.", "ocpp", "station", "auth", "web");
+            Log.Notice($"'{user.Id}' removed the charging station '{id}'.", "ocpp", "station", "auth", "web");
 
             return Task.FromResult(
                        JSONResponse(Request, HTTPStatusCode.OK, Controller.StationLogins.ToJSON())
@@ -757,7 +757,7 @@ namespace cloud.charging.open.LocalController
                                         JObject      JSON)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
                 return refused;
 
             #region The ways in it accepts
@@ -810,7 +810,7 @@ namespace cloud.charging.open.LocalController
                 return ErrorJSON(Request, HTTPStatusCode.BadRequest, error);
             }
 
-            Log.Notice($"'{session.UserId}' wrote the login group '{Id}'.", "ocpp", "station", "auth", "web");
+            Log.Notice($"'{user.Id}' wrote the login group '{Id}'.", "ocpp", "station", "auth", "web");
 
             return JSONResponse(Request, HTTPStatusCode.OK, Controller.StationLogins.ToJSON());
 
@@ -822,7 +822,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> DeleteGroup(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -831,7 +831,7 @@ namespace cloud.charging.open.LocalController
             if (!Controller.StationLogins.TryRemoveGroup(id, out var error))
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.Conflict, error));
 
-            Log.Notice($"'{session.UserId}' removed the login group '{id}'.", "ocpp", "station", "auth", "web");
+            Log.Notice($"'{user.Id}' removed the login group '{id}'.", "ocpp", "station", "auth", "web");
 
             return Task.FromResult(
                        JSONResponse(Request, HTTPStatusCode.OK, Controller.StationLogins.ToJSON())

@@ -23,6 +23,8 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using cloud.charging.open.LocalController.Web;
+
 #endregion
 
 namespace cloud.charging.open.LocalController.Tests
@@ -76,6 +78,63 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region TheJSONAPIHasNoSignIn()
+
+        /// <summary>
+        /// The one door that can check a password is the HTTPExt API's, and
+        /// this API has no second one onto the same credentials.
+        /// </summary>
+        [Test]
+        public async Task TheJSONAPIHasNoSignIn()
+        {
+
+            using var http = Anonymous();
+
+            var response = await http.PostAsync(
+                                     "/api/v1/auth/login",
+                                     LoginBody(LocalController.DefaultAdminUser, Password)
+                                 );
+
+            Assert.Multiple(() => {
+                Assert.That(response.StatusCode,  Is.EqualTo(HttpStatusCode.NotFound));
+                Assert.That(response.Content.Headers.ContentType?.MediaType,  Is.EqualTo("application/json"));
+            });
+
+        }
+
+        #endregion
+
+        #region EveryRoleHasItsGroup()
+
+        /// <summary>
+        /// One user group per role, made at every start - because a role is
+        /// that group, and nothing else.
+        /// </summary>
+        /// <remarks>
+        /// This is the failure that does not announce itself. AddUserGroup
+        /// answers with a result rather than throwing, and the HTTPExt API's
+        /// own floor for a group identification is four characters - so "cpo",
+        /// which is three, was refused and simply did not exist. What that
+        /// leaves is a role nobody can ever hold: the pages that ask for it
+        /// refuse everybody, correct password and all, and there is nothing
+        /// anywhere that says why.
+        /// </remarks>
+        [Test]
+        public void EveryRoleHasItsGroup()
+        {
+
+            Assert.Multiple(() => {
+
+                foreach (var role in UserRole.All)
+                    Assert.That(Controller.ExtAPI.TryGetUserGroup(role.GroupId, out _), Is.True,
+                                $"The '{role.Name}' role has no user group, so nobody can ever hold it.");
+
+            });
+
+        }
+
+        #endregion
+
         #region AWrongPasswordIsRefused()
 
         [Test]
@@ -85,14 +144,21 @@ namespace cloud.charging.open.LocalController.Tests
             using var http = Anonymous();
 
             var response = await http.PostAsync(
-                                     "/api/v1/auth/login",
-                                     JSONBody(
-                                         new JProperty("username", Controller.Sessions.Username),
-                                         new JProperty("password", "not the password")
-                                     )
+                                     SignInPath,
+                                     LoginBody(LocalController.DefaultAdminUser, "not the password")
                                  );
 
-            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+            Assert.Multiple(() => {
+
+                Assert.That(response.IsSuccessStatusCode, Is.False);
+
+                // And nothing was let in on the strength of it: the cookie is
+                // what a sign-in hands out, and a refusal that still handed one
+                // out would pass the status check above and open the door.
+                Assert.That(http.GetAsync("/api/v1/status").Result.StatusCode,
+                            Is.EqualTo(HttpStatusCode.Unauthorized));
+
+            });
 
         }
 
@@ -107,14 +173,18 @@ namespace cloud.charging.open.LocalController.Tests
             using var http = Anonymous();
 
             var response = await http.PostAsync(
-                                     "/api/v1/auth/login",
-                                     JSONBody(
-                                         new JProperty("username", "somebody-else"),
-                                         new JProperty("password", Password)
-                                     )
+                                     SignInPath,
+                                     LoginBody("somebody-else", Password)
                                  );
 
-            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+            Assert.Multiple(() => {
+
+                Assert.That(response.IsSuccessStatusCode, Is.False);
+
+                Assert.That(http.GetAsync("/api/v1/status").Result.StatusCode,
+                            Is.EqualTo(HttpStatusCode.Unauthorized));
+
+            });
 
         }
 
@@ -131,22 +201,69 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task TheGeneratedPasswordSignsIn()
         {
 
-            using var http = Anonymous();
+            using var http = await SignedIn();
 
-            var response = await http.PostAsync(
-                                     "/api/v1/auth/login",
-                                     JSONBody(
-                                         new JProperty("username", Controller.Sessions.Username),
-                                         new JProperty("password", Password)
-                                     )
-                                 );
+            var me = await GetJSON(http, "/api/v1/auth/me");
 
-            var me = JObject.Parse(await response.Content.ReadAsStringAsync());
+            Assert.That(me.Value<String>("username"), Is.EqualTo(LocalController.DefaultAdminUser));
 
-            Assert.Multiple(() => {
-                Assert.That(response.IsSuccessStatusCode,   Is.True);
-                Assert.That(me.Value<String>("username"),   Is.EqualTo(Controller.Sessions.Username));
-            });
+        }
+
+        #endregion
+
+        #region TheAccountSurvivesARestart()
+
+        /// <summary>
+        /// The accounts are read back at the next start, so the password
+        /// somebody wrote down still works - and no second root is made up
+        /// beside the first.
+        /// </summary>
+        /// <remarks>
+        /// The one that would not announce itself: without LoadDatabase the
+        /// store is empty at every start, the first start happens forever, and
+        /// the password on the console changes while the one in somebody's
+        /// notebook stops working.
+        /// </remarks>
+        [Test]
+        public async Task TheAccountSurvivesARestart()
+        {
+
+            // Stopped rather than disposed: TearDown disposes this one, and the
+            // accounts are written with File.AppendAllText, which holds no
+            // handle for the second controller to trip over.
+            await Controller.Stop();
+
+            var again = TestControllers.New(Directory, Configuration, Clock);
+
+            try
+            {
+
+                await again.Start();
+
+                Assert.That(again.GeneratedPassword, Is.Null,
+                            "A second password was made up, so the accounts of the first start were not read back.");
+
+                using var http      = new HttpClient(new HttpClientHandler { CookieContainer = new CookieContainer(), UseCookies = true }) {
+                                          BaseAddress = new Uri(again.WebInterfaceURL.ToString())
+                                      };
+
+                var       signIn    = await http.PostAsync(SignInPath, LoginBody(LocalController.DefaultAdminUser, Password));
+
+                Assert.That(signIn.IsSuccessStatusCode, Is.True,
+                            "The password from the first start no longer opens the controller.");
+
+                var me = await GetJSON(http, "/api/v1/auth/me");
+
+                Assert.Multiple(() => {
+                    Assert.That(again.ExtAPI.Users.Count(),          Is.EqualTo(1));
+                    Assert.That(me["roles"]?.Values<String>(),       Is.EquivalentTo(new[] { "systemadmin" }));
+                });
+
+            }
+            finally
+            {
+                await again.DisposeAsync();
+            }
 
         }
 
@@ -198,13 +315,49 @@ namespace cloud.charging.open.LocalController.Tests
             var logout = await http.PostAsync("/api/v1/auth/logout", null);
 
             Assert.Multiple(() => {
-                Assert.That(logout.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
-                Assert.That(Controller.Sessions.Count, Is.EqualTo(0));
+                Assert.That(logout.StatusCode,               Is.EqualTo(HttpStatusCode.NoContent));
+                Assert.That(Controller.ExtAPI.Sessions.Count(), Is.EqualTo(0),
+                            "The session was only forgotten by this browser, not ended where it lives.");
             });
 
             Assert.That((await http.GetAsync("/api/v1/auth/me")).StatusCode,
                         Is.EqualTo(HttpStatusCode.Unauthorized),
                         "The cookie still opened the controller after signing out.");
+
+        }
+
+        #endregion
+
+        #region SigningOutExpiresTheCookieIn1970()
+
+        /// <summary>
+        /// The browser is told to drop the cookie, rather than merely not
+        /// being given a new one.
+        /// </summary>
+        /// <remarks>
+        /// The HTTPExt API sets its cookies inside its own handlers and has
+        /// nothing to hand one out, so the expiry is written on this side -
+        /// which is why it is worth a test on this side.
+        /// </remarks>
+        [Test]
+        public async Task SigningOutExpiresTheCookieIn1970()
+        {
+
+            using var http = await SignedIn();
+
+            var logout  = await http.PostAsync("/api/v1/auth/logout", null);
+
+            var cookie  = logout.Headers.TryGetValues("Set-Cookie", out var values)
+                              ? values.FirstOrDefault(value => value.StartsWith(Controller.ExtAPI.SessionCookieName.ToString(), StringComparison.Ordinal))
+                              : null;
+
+            Assert.That(cookie, Is.Not.Null, "Signing out did not tell the browser to drop the cookie.");
+
+            Assert.Multiple(() => {
+                Assert.That(cookie, Does.Contain("Expires=Thu, 01 Jan 1970"));
+                Assert.That(cookie, Does.Contain("Path=/"));
+                Assert.That(cookie, Does.Contain("HttpOnly"));
+            });
 
         }
 

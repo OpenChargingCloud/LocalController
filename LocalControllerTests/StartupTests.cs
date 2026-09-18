@@ -29,13 +29,14 @@ namespace cloud.charging.open.LocalController.Tests
 {
 
     /// <summary>
-    /// What a local controller does with its two files when it is built, and
-    /// what it refuses to do.
+    /// What a local controller does with the configuration file it is handed
+    /// and the accounts it finds, and what it refuses to do.
     /// </summary>
     /// <remarks>
-    /// Built, not started: everything here is decided in the constructor, and
-    /// a controller that was only built has not scheduled anything or bound a
-    /// socket.
+    /// The configuration is read in the constructor, so those tests only build
+    /// a controller. The accounts are made by <c>Start()</c>, because creating
+    /// one is asynchronous - so the tests about them start the controller, and
+    /// pay for a socket to do it.
     /// </remarks>
     public class StartupTests
     {
@@ -62,31 +63,38 @@ namespace cloud.charging.open.LocalController.Tests
         #endregion
 
 
-        #region AFirstStartMakesUpAPasswordAndWritesItDown()
+        #region AFirstStartMakesUpAnAccountAndKeepsOnlyItsHash()
 
         /// <summary>
-        /// Nobody can sign in to a web interface whose login is not set yet,
-        /// and an unauthenticated setup page would be a door of its own. So the
+        /// Nobody can sign in to a web interface with no accounts in it, and
+        /// an unauthenticated setup page would be a door of its own. So the
         /// password is made up, handed back once, and kept only as a hash.
         /// </summary>
         [Test]
-        public async Task AFirstStartMakesUpAPasswordAndWritesItDown()
+        public async Task AFirstStartMakesUpAnAccountAndKeepsOnlyItsHash()
         {
 
             await using var controller = TestControllers.New(directory, TestControllers.Offline);
 
-            var loginFile = Path.Combine(directory, "web-login.json");
+            await controller.Start();
 
             Assert.Multiple(() => {
 
-                Assert.That(controller.GeneratedPassword, Is.Not.Null.And.Not.Empty);
-                Assert.That(controller.Sessions.Username, Is.EqualTo("root"));
-                Assert.That(File.Exists(loginFile),       Is.True);
+                Assert.That(controller.GeneratedPassword,      Is.Not.Null.And.Not.Empty);
+                Assert.That(controller.ExtAPI.Users.Count(),   Is.EqualTo(1));
+                Assert.That(controller.ExtAPI.Users.First().Id.ToString(),
+                                                               Is.EqualTo(LocalController.DefaultAdminUser));
 
-                var written = File.ReadAllText(loginFile);
+                // The password is nowhere below the accounts directory, in any
+                // of the files the HTTPExt API writes - only the hash of it.
+                var written = String.Join(
+                                  "\n",
+                                  Directory.GetFiles(controller.AccountsPath, "*", SearchOption.AllDirectories).
+                                            Select(File.ReadAllText)
+                              );
 
                 Assert.That(written, Does.Not.Contain(controller.GeneratedPassword!),
-                            "The password this controller made up was written to its file in the clear.");
+                            "The password this controller made up was written to disk in the clear.");
                 Assert.That(written, Does.Contain("$pbkdf2"));
 
             });
@@ -95,49 +103,35 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region ASecondStartUsesTheLoginItFindsAndMakesUpNothing()
+        #region ASecondStartUsesTheAccountsItFindsAndMakesUpNothing()
 
         [Test]
-        public async Task ASecondStartUsesTheLoginItFindsAndMakesUpNothing()
+        public async Task ASecondStartUsesTheAccountsItFindsAndMakesUpNothing()
         {
 
             String firstPassword;
 
             await using (var first = TestControllers.New(directory, TestControllers.Offline))
             {
+                await first.Start();
                 firstPassword = first.GeneratedPassword!;
             }
 
             await using var second = TestControllers.New(directory, TestControllers.Offline);
 
+            await second.Start();
+
             Assert.Multiple(() => {
-                Assert.That(second.GeneratedPassword, Is.Null,
-                            "A controller that found a login file made up another password anyway.");
-                Assert.That(second.Sessions.Login.Verify("root", firstPassword), Is.True,
-                            "The login from the file is not the one the first start wrote.");
+                Assert.That(second.GeneratedPassword,    Is.Null,
+                            "A controller that found accounts made up another password anyway.");
+                Assert.That(second.ExtAPI.Users.Count(), Is.EqualTo(1),
+                            "A second account was made beside the one the first start wrote.");
             });
 
-        }
-
-        #endregion
-
-        #region AnUnreadableLoginFileStopsTheController()
-
-        /// <summary>
-        /// Papering over it with a new password would lock out whoever owns the
-        /// old one without saying why.
-        /// </summary>
-        [Test]
-        public void AnUnreadableLoginFileStopsTheController()
-        {
-
-            File.WriteAllText(Path.Combine(directory, "web-login.json"), "{ not json at all");
-
-            var problem = Assert.Throws<InvalidOperationException>(
-                              () => TestControllers.New(directory, TestControllers.Offline)
-                          );
-
-            Assert.That(problem!.Message, Does.Contain("web-login.json"));
+            // That the first password still opens it is checked over the wire
+            // in AuthenticationTests.TheAccountSurvivesARestart; here what is
+            // asked is only that nothing was made up a second time.
+            Assert.That(firstPassword, Is.Not.Null.And.Not.Empty);
 
         }
 

@@ -71,7 +71,7 @@ namespace cloud.charging.open.LocalController.Tests
         protected String           BaseURL      { get; private set; } = default!;
 
         /// <summary>
-        /// The directory holding its web login and its configuration, removed
+        /// The directory holding its accounts and its configuration, removed
         /// again in TearDown.
         /// </summary>
         protected String           Directory    { get; private set; } = default!;
@@ -114,13 +114,14 @@ namespace cloud.charging.open.LocalController.Tests
 
             Controller  = TestControllers.New(Directory, Configuration, Clock);
 
-            // Null would mean the login came from a file, and there was no file.
-            Password    = Controller.GeneratedPassword
-                              ?? throw new InvalidOperationException("The controller did not make up a password for its first start!");
-
             BaseURL     = Controller.WebInterfaceURL.ToString();
 
             await Controller.Start();
+
+            // After Start(), because that is what makes the account. Null would
+            // mean accounts were already there, and the directory is new.
+            Password    = Controller.GeneratedPassword
+                              ?? throw new InvalidOperationException("The controller did not make up a password for its first start!");
 
         }
 
@@ -157,18 +158,29 @@ namespace cloud.charging.open.LocalController.Tests
         /// A browser that has signed in with the password this controller made
         /// up, carrying the session cookie from here on.
         /// </summary>
+        /// <remarks>
+        /// At the HTTPExt API and not at the JSON API: the password store is
+        /// private to the HTTPExt API, so "/ext/login" is the only door that
+        /// can check one. What it sets is the cookie the JSON API reads.
+        /// </remarks>
         protected async Task<HttpClient> SignedIn()
+
+            => await SignedInAs(LocalController.DefaultAdminUser, Password);
+
+        #endregion
+
+        #region (protected) SignedInAs(Login, Password)
+
+        /// <summary>
+        /// A browser that has tried to sign in as somebody in particular, for
+        /// a test that wants a second account or a wrong password.
+        /// </summary>
+        protected async Task<HttpClient> SignedInAs(String Login, String Password)
         {
 
             var http      = Anonymous();
 
-            var response  = await http.PostAsync(
-                                      "/api/v1/auth/login",
-                                      JSONBody(
-                                          new JProperty("username", Controller.Sessions.Username),
-                                          new JProperty("password", Password)
-                                      )
-                                  );
+            var response  = await http.PostAsync(SignInPath, LoginBody(Login, Password));
 
             Assert.That(response.IsSuccessStatusCode, Is.True,
                         $"Signing in failed with {(Int32) response.StatusCode}, and every assertion below it would say so instead.");
@@ -176,6 +188,28 @@ namespace cloud.charging.open.LocalController.Tests
             return http;
 
         }
+
+        #endregion
+
+        #region (protected static) SignInPath / LoginBody(Login, Password)
+
+        /// <summary>
+        /// Where a password is checked: the HTTPExt API's own sign-in.
+        /// </summary>
+        protected static String SignInPath
+
+            => $"{LocalController.ExtAPIPath.ToString().TrimEnd('/')}/login";
+
+        /// <summary>
+        /// A sign-in body, as the web interface sends one: form-urlencoded,
+        /// and the field is called "login" rather than "username".
+        /// </summary>
+        protected static FormUrlEncodedContent LoginBody(String Login, String Password)
+
+            => new ([
+                   new KeyValuePair<String, String>("login",     Login),
+                   new KeyValuePair<String, String>("password",  Password)
+               ]);
 
         #endregion
 

@@ -261,16 +261,14 @@ namespace cloud.charging.open.LocalController.Tests
                            BaseAddress = new Uri(Controller.WebInterfaceURL.ToString())
                        };
 
+            // At the HTTPExt API: it is the only place that can check a
+            // password, and the cookie it sets is what the JSON API reads.
             var response = await http.PostAsync(
-                                     "/api/v1/auth/login",
-                                     new StringContent(
-                                         new JObject(
-                                             new JProperty("username", Controller.Sessions.Username),
-                                             new JProperty("password", Controller.GeneratedPassword)
-                                         ).ToString(),
-                                         System.Text.Encoding.UTF8,
-                                         "application/json"
-                                     )
+                                     $"{LocalController.ExtAPIPath.ToString().TrimEnd('/')}/login",
+                                     new FormUrlEncodedContent([
+                                         new KeyValuePair<String, String>("login",     LocalController.DefaultAdminUser),
+                                         new KeyValuePair<String, String>("password",  Controller.GeneratedPassword ?? "")
+                                     ])
                                  );
 
             Assert.That(response.IsSuccessStatusCode, Is.True, "Signing in failed.");

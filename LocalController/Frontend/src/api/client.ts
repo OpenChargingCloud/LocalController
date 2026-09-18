@@ -52,7 +52,6 @@ export interface Me {
     username:     string;
     roles:        string[];
     permissions:  Permission[];
-    session:      { createdAt: string; expiresAt: string };
 }
 
 /** How the local controller is doing right now. */
@@ -559,6 +558,54 @@ export function onUnauthorized(handler: () => void): void {
 }
 
 
+/**
+ * Sign in at the HTTPExt API and answer with who is now signed in.
+ *
+ * Two requests rather than one, and that is not a detour. The HTTPExt API is
+ * the only place that can check a password - the store it reads is private to
+ * it - but it answers in its own shape and knows nothing of this controller's
+ * roles. So it sets the session cookie, and "me" is asked afterwards for the
+ * roles and permissions this frontend actually works from.
+ *
+ * Form-urlencoded because that is what its sign-in route accepts, and the
+ * field is called "login" rather than "username".
+ */
+async function signIn(username: string, password: string): Promise<Me> {
+
+    const response = await fetch(config.extBase + '/login', {
+                               method:       'POST',
+                               headers:      {
+                                                 'Content-Type':  'application/x-www-form-urlencoded',
+                                                 'Accept':        'application/json'
+                                             },
+                               credentials:  'same-origin',
+                               body:         new URLSearchParams({ login: username, password }).toString()
+                           });
+
+    if (!response.ok) {
+
+        // Its refusals carry a "description"; ours carry an "error". Both are
+        // shown to somebody who just typed a password, so both are read.
+        let message = `${response.status} ${response.statusText}`;
+
+        try {
+            const json = JSON.parse(await response.text());
+            if (typeof json === 'object' && json !== null) {
+                if      ('description' in json && typeof json.description === 'string')  message = json.description;
+                else if ('error'       in json && typeof json.error       === 'string')  message = json.error;
+            }
+        }
+        catch { /* the status line says enough */ }
+
+        throw new ApiError(response.status, message, null);
+
+    }
+
+    return request<Me>('GET', '/auth/me');
+
+}
+
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
 
     const headers: Record<string, string> = { 'Accept': 'application/json' };
@@ -617,7 +664,7 @@ export const api = {
 
     auth: {
         me:      ()                                    => request<Me>  ('GET',  '/auth/me'),
-        login:   (username: string, password: string)  => request<Me>  ('POST', '/auth/login', { username, password }),
+        login:   signIn,
         logout:  ()                                    => request<void>('POST', '/auth/logout')
     },
 

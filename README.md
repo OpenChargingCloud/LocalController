@@ -11,7 +11,8 @@ the controller over a JSON API and one Server-Sent Events stream.
 
 ```
   browser  ──  GET /                       the SPA stub and the bundle
-           ──  POST /api/v1/auth/login     the session cookie
+           ──  POST /ext/login             the session cookie
+           ──  GET  /api/v1/auth/me        what that account may do here
            ──  GET  /api/v1/configuration  what the controller is made of
            ──  GET  /api/v1/logs           what happened up to now
            ──  GET  /api/v1/events         and everything from now on (SSE)
@@ -54,12 +55,11 @@ From the repository that has this one as a submodule
 dotnet run --project LocalControllerCLI
 ```
 
-At the first start there is no web login, so the controller makes one up for
-the user `root`, writes its hash to `web-login.json` and prints the password
-once:
+At the first start there are no accounts, so the controller makes one up for
+the user `root`, keeps it under `accounts/` and prints the password once:
 
 ```
-  ┌─ First start: there was no web login, so one was made up for you ─────────
+  ┌─ First start: there were no accounts, so one was made up for you ─────────
   │  user      root
   │  password  QBDD77Lc7HseB-xORuuw8RpX
   │  It is shown here once and kept only as a hash. Write it down.
@@ -121,9 +121,10 @@ test suite that fails on a train.
 
 `LocalController` takes a `TimeProvider` as its last constructor parameter and
 hands it to everything of its own that asks what time it is: the timestamp of
-every log entry, `CreatedAt`, the uptime the status resource reports, and the
-sessions - through Hermod's `SessionStore`, which takes one too. The system
-clock by default; an NTS-disciplined or a fake one where a test says so.
+every log entry, `CreatedAt` and the uptime the status resource reports. The
+system clock by default; an NTS-disciplined or a fake one where a test says
+so. The sign-in sessions are not among them - they belong to the HTTPExt API
+and run on its clock.
 
 It is assigned first in the constructor, before the event log is built, because
 the log stamps its entries with it - a clock set afterwards would leave the log
@@ -139,9 +140,9 @@ sealed class FixedClock(DateTimeOffset Start) : TimeProvider
 var clock           = new FixedClock(new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero));
 var localController = new LocalController(TimeProvider: clock);
 
-localController.Sessions.TryLogin("root", password, out var session);   // 1 live session
-clock.Now = clock.Now.AddHours(13);                                     // past the 12 hour idle timeout
-var gone  = localController.Sessions.Count;                             // 0
+var at    = localController.CreatedAt;               // 2000-01-01T00:00:00Z
+clock.Now = clock.Now.AddHours(13);
+var up    = localController.TimeProvider.GetUtcNow() - at;   // 13 hours of uptime
 ```
 
 **The clock is never set from NTS.** Every fifteen minutes the controller asks
@@ -185,8 +186,15 @@ cached events costs bytes and nothing else.
 
 ## Who may open it
 
-One login, in `web-login.json`, with the password kept as a PBKDF2-SHA256 PHC
-string and never in the clear. What it may do comes from its roles:
+The accounts are Hermod's `HTTPExtAPI`, mounted at `/ext` and kept under
+`accounts/`: the users, their passwords as PBKDF2-SHA256 PHC strings, the
+sessions and the API keys. Signing in happens at `POST /ext/login` - that is
+the only place that can check a password - and the cookie it sets is what this
+controller's own API reads. Basic auth and API keys work just as well, because
+Hermod offers all three.
+
+What somebody may do comes from the user groups they are in. Each group is one
+role, under the same name:
 
 | Role | May |
 |------|-----|
@@ -194,7 +202,12 @@ string and never in the clear. What it may do comes from its roles:
 | `cpo` | that, and change the name and time servers, and test them |
 | `systemadmin` | everything this controller can be told |
 
-A role this controller has never heard of is refused when the login file is
-read, rather than quietly granting nothing. The permissions travel to the
-browser so a page can grey out what somebody may not do - a courtesy, not a
-lock: every request is checked again on arrival.
+The three groups are made at every start, so a group deleted by hand does not
+leave a role nobody can ever hold again. A group that is not one of these
+grants nothing - a role this controller has never heard of is a role it cannot
+enforce.
+
+Membership is asked on every request rather than remembered at the sign-in, so
+taking somebody out of a group takes effect on their next request. The
+permissions travel to the browser so a page can grey out what somebody may not
+do - a courtesy, not a lock: every request is checked again on arrival.

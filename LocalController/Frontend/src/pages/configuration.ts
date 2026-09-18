@@ -58,7 +58,7 @@ export const configurationPage: Page = {
                         `)}
 
                         ${card('HTTP server',   'fa-server',    configuration.http)}
-                        ${card('Web login',     'fa-user-lock', configuration.web)}
+                        ${card('Accounts',      'fa-user-lock', configuration.web)}
                         ${card('Event log',     'fa-list-ul',   configuration.log)}
                         ${card('Time',          'fa-clock',     configuration.time)}
 

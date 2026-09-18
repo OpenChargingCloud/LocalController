@@ -22,9 +22,10 @@ namespace cloud.charging.open.LocalController.Web
     /// Writing a file that only its owner may read.
     /// </summary>
     /// <remarks>
-    /// The web login file holds the hash of the password that opens this
-    /// local controller's web interface, which is worth a dictionary attack to
-    /// whoever gets hold of it.
+    /// The files this controller keeps its secrets in - the passwords its
+    /// charging stations sign in with, the credentials it signs in to its CSMS
+    /// with, the private keys of its server certificates - are worth stealing
+    /// to whoever can reach them.
     ///
     /// <b>The mode goes on at creation and not afterwards.</b> Creating a file
     /// readable and restricting it once the content is in leaves a window, and

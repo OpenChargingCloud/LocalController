@@ -44,9 +44,10 @@ namespace cloud.charging.open.LocalController
     /// single-page-application fallback of the web interface at "/": Hermod
     /// dispatches a request to the most specific HTTPAPI first.
     ///
-    /// Everything below /api/v1 except the sign-in itself needs the session
-    /// cookie - the event stream included, which is why the stream is opened
-    /// here by hand rather than through Hermod's MapEventSource.
+    /// Everything below /api/v1 needs somebody signed in - the event stream
+    /// included, which is why the stream is opened here by hand rather than
+    /// through Hermod's MapEventSource. Signing in itself happens at the
+    /// HTTPExt API's own "/ext/login"; this API only reads what that door set.
     /// </remarks>
     public partial class LCHTTPAPI : HTTPAPI
     {
@@ -67,12 +68,6 @@ namespace cloud.charging.open.LocalController
         /// The sub-event every log entry travels as.
         /// </summary>
         public const           String    LogEventName        = "log";
-
-        /// <summary>
-        /// How long a failed sign-in waits before it answers. Not a lock-out,
-        /// just enough to make guessing a slow business.
-        /// </summary>
-        public static readonly TimeSpan  FailedLoginDelay    = TimeSpan.FromMilliseconds(500);
 
         /// <summary>
         /// The most log entries one request may ask for.
@@ -114,9 +109,10 @@ namespace cloud.charging.open.LocalController
         public EventLog                  Log         { get; }
 
         /// <summary>
-        /// The signed-in browsers.
+        /// Who may open the web interface: the accounts, and the groups whose
+        /// membership carries this controller's roles.
         /// </summary>
-        public WebSessions               Sessions    { get; }
+        public HTTPExtAPI                ExtAPI      { get; }
 
         /// <summary>
         /// The version reported by the status resource.
@@ -137,13 +133,13 @@ namespace cloud.charging.open.LocalController
         /// </summary>
         /// <param name="HTTPServer">The HTTP server.</param>
         /// <param name="Controller">The local controller this API speaks for.</param>
-        /// <param name="Sessions">The web sessions.</param>
+        /// <param name="ExtAPI">The accounts and the groups they are in.</param>
         /// <param name="Log">Everything that happens inside this local controller.</param>
         /// <param name="APIPath">The root path of the API, "/api" by default.</param>
         /// <param name="Version">The version reported by the status resource.</param>
         public LCHTTPAPI(HTTPServer       HTTPServer,
                          LocalController  Controller,
-                         WebSessions      Sessions,
+                         HTTPExtAPI       ExtAPI,
                          EventLog         Log,
                          HTTPPath?        APIPath   = null,
                          String?          Version   = null)
@@ -155,7 +151,7 @@ namespace cloud.charging.open.LocalController
         {
 
             this.Controller  = Controller;
-            this.Sessions    = Sessions;
+            this.ExtAPI      = ExtAPI;
             this.Log         = Log;
             this.startedAt   = Controller.TimeProvider.GetUtcNow();
 
@@ -188,7 +184,11 @@ namespace cloud.charging.open.LocalController
         private void RegisterURLTemplates()
         {
 
-            AddHandler(HTTPPath.Root + "v1/auth/login",    Login,             HTTPMethod.POST);
+            // No sign-in route here. Signing in happens at the HTTPExt API's
+            // own "/ext/login", which is the only place that can check a
+            // password: the check reads a store this API has no access to, and
+            // a second door onto the same credentials is a second door to get
+            // wrong. What this API does is read the cookie that door sets.
             AddHandler(HTTPPath.Root + "v1/auth/logout",   Logout,            HTTPMethod.POST);
             AddHandler(HTTPPath.Root + "v1/auth/me",       Me,                HTTPMethod.GET);
 
@@ -228,48 +228,6 @@ namespace cloud.charging.open.LocalController
         #endregion
 
 
-        #region (private) Login           (Request)
-
-        /// <summary>
-        /// POST /api/v1/auth/login with {"username", "password"}: the session
-        /// cookie, or 401 after a short pause.
-        /// </summary>
-        private async Task<HTTPResponse> Login(HTTPRequest Request)
-        {
-
-            if (RefuseCrossSite(Request) is HTTPResponse refused)
-                return refused;
-
-            if (!TryParseJSONObject(Request, out var json, out var errorResponse))
-                return errorResponse;
-
-            if (!Sessions.TryLogin(json.Value<String>("username"),
-                                   json.Value<String>("password"),
-                                   out var session))
-            {
-
-                Log.Warning($"Sign-in refused for {Request.RemoteSocket}.", "web", "auth");
-
-                await Task.Delay(FailedLoginDelay, Request.CancellationToken);
-
-                return ErrorJSON(Request, HTTPStatusCode.Unauthorized, "Wrong username or password.");
-
-            }
-
-            Log.Notice($"'{session.UserId}' signed in from {Request.RemoteSocket} as {String.Join(", ", Sessions.Roles.Select(role => role.Name))}.", "web", "auth");
-
-            return new HTTPResponse.Builder(Request) {
-                       HTTPStatusCode  = HTTPStatusCode.OK,
-                       ContentType     = HTTPContentType.Application.JSON_UTF8,
-                       Content         = Encoding.UTF8.GetBytes(MeJSON(session).ToString(Formatting.None)),
-                       CacheControl    = "no-store",
-                       SetCookie       = Sessions.SessionCookie(session)
-                   }.WithCommonSecurityHeaders().AsImmutable;
-
-        }
-
-        #endregion
-
         #region (private) Logout          (Request)
 
         /// <summary>
@@ -281,14 +239,26 @@ namespace cloud.charging.open.LocalController
             if (RefuseCrossSite(Request) is HTTPResponse refused)
                 return Task.FromResult(refused);
 
-            if (Sessions.SignOut(Request))
-                Log.Notice($"'{Sessions.Username}' signed out from {Request.RemoteSocket}.", "web", "auth");
+            // The session is ended where it lives, and not only forgotten by
+            // this browser: a cookie that is merely expired is still a valid
+            // token to whoever copied it.
+            if (Request.Cookies is not null                                                      &&
+                Request.Cookies.TryGet(ExtAPI.SessionCookieName, out var cookie)                 &&
+                cookie is not null                                                               &&
+                SecurityToken_Id.TryParse(cookie.FirstOrDefault().Key, out var securityTokenId))
+            {
+
+                ExtAPI.Sessions.Remove(securityTokenId);
+
+                Log.Notice($"A session was ended from {Request.RemoteSocket}.", "web", "auth");
+
+            }
 
             return Task.FromResult(
                        new HTTPResponse.Builder(Request) {
                            HTTPStatusCode  = HTTPStatusCode.NoContent,
                            CacheControl    = "no-store",
-                           SetCookie       = Sessions.ExpiredCookie()
+                           SetCookie       = ExpiredSessionCookie()
                        }.WithCommonSecurityHeaders().AsImmutable
                    );
 
@@ -304,8 +274,8 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> Me(HTTPRequest Request)
 
             => Task.FromResult(
-                   TryGetSession(Request, out var session, out var unauthorized)
-                       ? JSONResponse(Request, HTTPStatusCode.OK, MeJSON(session))
+                   TryGetUser(Request, out var user, out var unauthorized)
+                       ? JSONResponse(Request, HTTPStatusCode.OK, MeJSON(user))
                        : unauthorized
                );
 
@@ -320,7 +290,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> GetStatus(HTTPRequest Request)
         {
 
-            if (!TryGetSession(Request, out _, out var unauthorized))
+            if (!TryGetUser(Request, out _, out var unauthorized))
                 return Task.FromResult(unauthorized);
 
             var now = Controller.TimeProvider.GetUtcNow();
@@ -337,7 +307,7 @@ namespace cloud.charging.open.LocalController
                                new JProperty("timestamp",  now.ToString("o")),
                                new JProperty("startedAt",  startedAt.ToString("o")),
                                new JProperty("uptime",     (now - startedAt).ToString(@"d\.hh\:mm\:ss")),
-                               new JProperty("sessions",   Sessions.Count),
+                               new JProperty("sessions",   ExtAPI.Sessions.Count()),
                                new JProperty("log",        new JObject(
                                                                new JProperty("entries",   Log.Count),
                                                                new JProperty("capacity",  Log.Capacity),
@@ -424,7 +394,7 @@ namespace cloud.charging.open.LocalController
         private async Task<HTTPResponse> PostDNSQuery(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.RunDiagnostics, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.RunDiagnostics, true, out var user, out var refused))
                 return refused;
 
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
@@ -438,7 +408,7 @@ namespace cloud.charging.open.LocalController
             if (!LocalController.TryParseRecordTypes(json["recordTypes"], out var recordTypes, out var problem))
                 return ErrorJSON(Request, HTTPStatusCode.BadRequest, problem);
 
-            Log.Info($"'{session.UserId}' asked this local controller to resolve '{name}'.", "dns", "test", "web");
+            Log.Info($"'{user.Id}' asked this local controller to resolve '{name}'.", "dns", "test", "web");
 
             return JSONResponse(
                        Request,
@@ -501,10 +471,10 @@ namespace cloud.charging.open.LocalController
         private async Task<HTTPResponse> PostNTSSync(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.RunDiagnostics, true, out var session, out var refused))
+            if (!TryAuthorize(Request, Permissions.RunDiagnostics, true, out var user, out var refused))
                 return refused;
 
-            Log.Info($"'{session.UserId}' asked this local controller to synchronise its time.", "nts", "test", "web");
+            Log.Info($"'{user.Id}' asked this local controller to synchronise its time.", "nts", "test", "web");
 
             var result = await Controller.SyncTimeAsync(Request.CancellationToken);
 
@@ -563,7 +533,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> GetLogs(HTTPRequest Request)
         {
 
-            if (!TryGetSession(Request, out _, out var unauthorized))
+            if (!TryGetUser(Request, out _, out var unauthorized))
                 return Task.FromResult(unauthorized);
 
             var limit    = Request.QueryString.GetInt32 ("limit") ?? DefaultLogPageSize;
@@ -609,7 +579,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> StreamEvents(HTTPRequest Request)
         {
 
-            if (!TryGetSession(Request, out _, out var unauthorized))
+            if (!TryGetUser(Request, out _, out var unauthorized))
                 return Task.FromResult(unauthorized);
 
             var clientId = Request.RemoteSocket.ToString();
@@ -755,18 +725,22 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
-        #region (private) TryGetSession(Request, out Session, out Unauthorized)
+        #region (private) TryGetUser(Request, out User, out Unauthorized)
 
         /// <summary>
-        /// The live session behind the request, or the 401 response - which
-        /// also expires a stale cookie, so that the browser stops sending it.
+        /// Who is behind the request, or the 401 response - which also expires
+        /// a stale cookie, so that the browser stops sending it.
         /// </summary>
-        private Boolean TryGetSession(HTTPRequest                             Request,
-                                      [NotNullWhen(true)]  out Session?        Session,
-                                      [NotNullWhen(false)] out HTTPResponse?  Unauthorized)
+        private Boolean TryGetUser(HTTPRequest                             Request,
+                                   [NotNullWhen(true)]  out IUser?         User,
+                                   [NotNullWhen(false)] out HTTPResponse?  Unauthorized)
         {
 
-            if (Sessions.TryGetSession(Request, out Session))
+            // Cookie, HTTP Basic auth or an API key - whichever of the three
+            // the caller used. Which one it was does not change what they may
+            // do: the groups do that, and they hang off the account rather than
+            // off the door it came through.
+            if (ExtAPI.TryGetHTTPUser(Request, out User) && User is not null)
             {
                 Unauthorized = null;
                 return true;
@@ -779,8 +753,11 @@ namespace cloud.charging.open.LocalController
                               CacheControl    = "no-store"
                           };
 
-            if (Sessions.HasCookie(Request))
-                builder.SetCookie = Sessions.ExpiredCookie();
+            if (Request.Cookies is not null &&
+                Request.Cookies.TryGet(ExtAPI.SessionCookieName, out _))
+            {
+                builder.SetCookie = ExpiredSessionCookie();
+            }
 
             Unauthorized = builder.WithCommonSecurityHeaders().AsImmutable;
             return false;
@@ -789,11 +766,11 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
-        #region (private) TryAuthorize(Request, Required, StateChanging, out Session, out Refused)
+        #region (private) TryAuthorize(Request, Required, StateChanging, out User, out Refused)
 
         /// <summary>
-        /// The live session behind the request, when it is allowed to do this -
-        /// or the response that says why not.
+        /// Who is behind the request, when they are allowed to do this - or
+        /// the response that says why not.
         /// </summary>
         /// <remarks>
         /// Three refusals, in the order they have to happen: a request from
@@ -807,16 +784,16 @@ namespace cloud.charging.open.LocalController
         /// <param name="Request">The request.</param>
         /// <param name="Required">What this request needs permission to do.</param>
         /// <param name="StateChanging">Whether it changes something, and is therefore also checked for being cross-site.</param>
-        /// <param name="Session">The session behind it.</param>
+        /// <param name="User">Who is behind it.</param>
         /// <param name="Refused">The response to send instead.</param>
         private Boolean TryAuthorize(HTTPRequest                             Request,
                                      Permissions                             Required,
                                      Boolean                                 StateChanging,
-                                     [NotNullWhen(true)]  out Session?       Session,
+                                     [NotNullWhen(true)]  out IUser?         User,
                                      [NotNullWhen(false)] out HTTPResponse?  Refused)
         {
 
-            Session = null;
+            User = null;
 
             if (StateChanging && RefuseCrossSite(Request) is HTTPResponse crossSite)
             {
@@ -824,15 +801,15 @@ namespace cloud.charging.open.LocalController
                 return false;
             }
 
-            if (!TryGetSession(Request, out Session, out Refused))
+            if (!TryGetUser(Request, out User, out Refused))
                 return false;
 
-            var permissions = Sessions.PermissionsOf(Session);
+            var permissions = PermissionsOf(User);
 
             if (!permissions.HasFlag(Required))
             {
-                Refused  = RefusePermission(Request, Session, Required, null);
-                Session  = null;
+                Refused  = RefusePermission(Request, User, Required, null);
+                User     = null;
                 return false;
             }
 
@@ -843,7 +820,7 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
-        #region (private) RefusePermission(Request, Session, Required, Because)
+        #region (private) RefusePermission(Request, User, Required, Because)
 
         /// <summary>
         /// The 403 for somebody signed in who may not do this, naming the roles
@@ -858,7 +835,7 @@ namespace cloud.charging.open.LocalController
         /// </remarks>
         /// <param name="Because">What it was about this particular request, when the route alone does not say.</param>
         private HTTPResponse RefusePermission(HTTPRequest  Request,
-                                              Session      Session,
+                                              IUser        User,
                                               Permissions  Required,
                                               String?      Because)
         {
@@ -870,8 +847,8 @@ namespace cloud.charging.open.LocalController
                                        Select(role => role.Name);
 
             Log.Warning(
-                $"'{Session.UserId}' was refused {Required} on {Request.HTTPMethod} {Request.Path}; " +
-                $"signed in as {String.Join(", ", Sessions.Roles.Select(role => role.Name))}." +
+                $"'{User.Id}' was refused {Required} on {Request.HTTPMethod} {Request.Path}; " +
+                $"signed in as {String.Join(", ", RolesOf(User).Select(role => role.Name))}." +
                 (Because is null ? "" : $" {Because}"),
                 "web", "auth"
             );
@@ -966,7 +943,7 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
-        #region (private) MeJSON(Session)
+        #region (private) MeJSON(User)
 
         /// <summary>
         /// Who is signed in, and what they may do.
@@ -979,17 +956,67 @@ namespace cloud.charging.open.LocalController
         /// arrival, so a browser that edits this list gains nothing but a
         /// button that answers 403.
         /// </remarks>
-        private JObject MeJSON(Session Session)
+        private JObject MeJSON(IUser User)
 
             => new (
-                   new JProperty("username",     Session.UserId.ToString()),
-                   new JProperty("roles",        new JArray(Sessions.Roles.Select(role => role.Name))),
-                   new JProperty("permissions",  new JArray(Sessions.PermissionsOf(Session).Names())),
-                   new JProperty("session",      new JObject(
-                                                     new JProperty("createdAt",  Session.CreatedAt.ToString("o")),
-                                                     new JProperty("expiresAt",  Session.ExpiresAt.ToString("o"))
-                                                 ))
+                   new JProperty("username",     User.Id.ToString()),
+                   new JProperty("roles",        new JArray(RolesOf(User).Select(role => role.Name))),
+                   new JProperty("permissions",  new JArray(PermissionsOf(User).Names()))
                );
+
+        #endregion
+
+        #region (private) ExpiredSessionCookie()
+
+        /// <summary>
+        /// The Set-Cookie of a sign-out: the HTTPExt API's session cookie,
+        /// expired in 1970, so that the browser drops it.
+        /// </summary>
+        /// <remarks>
+        /// Written here rather than asked of the HTTPExt API, which sets its
+        /// cookies inside its own handlers and has nothing to hand one out.
+        /// One HTTPCookie parsed as one: HTTPCookies.Parse(String) is made for
+        /// the Cookie header of a request, where a semicolon separates cookies,
+        /// and would turn "Path=/" and "HttpOnly" into cookies of their own.
+        /// </remarks>
+        private HTTPCookies ExpiredSessionCookie()
+
+            => new (HTTPCookie.Parse(
+                        String.Concat(ExtAPI.SessionCookieName, "=",
+                                      "; Expires=", DateTimeOffset.UnixEpoch.ToRFC1123(),
+                                      "; Path=/",
+                                      "; SameSite=strict",
+                                      "; HttpOnly")
+                    ));
+
+        #endregion
+
+        #region (private) RolesOf(User) / PermissionsOf(User)
+
+        /// <summary>
+        /// The roles this account holds: one per group of that name it is in.
+        /// </summary>
+        /// <remarks>
+        /// Asked of the groups on every request rather than remembered at
+        /// sign-in, so that taking somebody out of a group takes effect on
+        /// their next request instead of at their next sign-in. A role revoked
+        /// that still works until a browser is closed is not revoked.
+        /// </remarks>
+        private IEnumerable<UserRole> RolesOf(IUser User)
+
+              // IsMember compares the account by identification, which is what
+              // makes this safe to ask with whatever instance authenticated the
+              // request: a cookie brings one rebuilt from what the cookie holds
+              // rather than the one the membership was made with.
+            => UserRole.All.Where(role => ExtAPI.IsMember(User, role.GroupId));
+
+        /// <summary>
+        /// Everything those roles add up to, or nothing at all when the account
+        /// is in none of the groups.
+        /// </summary>
+        private Permissions PermissionsOf(IUser User)
+
+            => RolesOf(User).PermissionsOf();
 
         #endregion
 

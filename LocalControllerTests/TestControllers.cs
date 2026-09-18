@@ -54,8 +54,11 @@ namespace cloud.charging.open.LocalController.Tests
         /// puts a timer on the network to check the clock, so a controller that
         /// was only built is also one that will not quietly go and ask a time
         /// server in the middle of a test run.
+        ///
+        /// It is also <c>Start()</c> that makes the accounts, so a controller
+        /// that was only built has none yet and no password to show for them.
         /// </remarks>
-        /// <param name="Directory">Where its web login and its configuration go; created when it does not exist.</param>
+        /// <param name="Directory">Where its accounts and its configuration go; created when it does not exist.</param>
         /// <param name="Configuration">What its configuration file says, or null for a controller nobody has configured.</param>
         /// <param name="Clock">Where it reads the time, for a test that needs to decide what time it is.</param>
         public static LocalController New(String         Directory,
@@ -72,7 +75,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             return new LocalController(
                        HTTPPort:         IPPort.Parse(FreePort()),
-                       LoginFile:        new WebLoginFile        (Path.Combine(Directory, "web-login.json")),
+                       AccountsPath:     Path.Combine(Directory, "accounts"),
                        ConfigFile:       new ControllerConfigFile(configFile),
                        LogToConsole:     false,
                        BridgeDebugLog:   false,
@@ -144,7 +147,7 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// A directory of its own for one test, so that no two of them read
-        /// each other's web login or configuration.
+        /// each other's accounts or configuration.
         /// </summary>
         public static String TemporaryDirectory(String Purpose)
 

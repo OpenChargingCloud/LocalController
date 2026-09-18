@@ -19,6 +19,8 @@
 
 using System.Diagnostics.CodeAnalysis;
 
+using org.GraphDefined.Vanaheimr.Hermod.HTTP;
+
 #endregion
 
 namespace cloud.charging.open.LocalController.Web
@@ -33,11 +35,11 @@ namespace cloud.charging.open.LocalController.Web
     /// is then a constant instead of a collection to be built and searched.
     ///
     /// Only what this local controller actually enforces is named here. A
-    /// permission with nothing behind it is a promise made to whoever reads the
-    /// login file and not kept - so these arrived one at a time, as the things
-    /// they guard did: which charging stations may call this controller is its
-    /// own permission rather than something that grew quietly inside one that
-    /// already existed, and so is the trust the controller extends.
+    /// permission with nothing behind it is a promise made to whoever reads
+    /// the list of them and not kept - so these arrived one at a time, as the
+    /// things they guard did: which charging stations may call this controller
+    /// is its own permission rather than something that grew quietly inside
+    /// one that already existed, and so is the trust the controller extends.
     /// </remarks>
     [Flags]
     public enum Permissions : UInt32
@@ -113,16 +115,37 @@ namespace cloud.charging.open.LocalController.Web
     /// A role somebody signs in as: a name, and the permissions it carries.
     /// </summary>
     /// <remarks>
-    /// A closed set: a role this local controller has never heard of is a role
-    /// it cannot enforce. So an unrecognised name is refused when the login
-    /// file is read, rather than quietly granting nothing - or, far worse,
-    /// being taken for a known one because it looks similar.
+    /// <para>
+    /// A closed set, and deliberately so: a role this local controller has
+    /// never heard of is a role it cannot enforce. So a group whose name is
+    /// not one of these grants nothing, rather than quietly granting something
+    /// - or, far worse, being taken for a known one because it looks similar.
+    /// </para>
+    /// <para>
+    /// Each role is a user group in the HTTPExt API, under the same name, and
+    /// membership of that group is what carries the permissions below. The
+    /// permissions stay here because they are this controller's own
+    /// vocabulary: the HTTPExt API knows users, groups and organizations, and
+    /// has no opinion about what "may add a trust anchor" means. So it answers
+    /// who somebody is and this answers what that lets them do.
+    /// </para>
     /// </remarks>
-    /// <param name="Name">How the role is written in the login file.</param>
+    /// <param name="Name">The role, and the name of the user group that carries it.</param>
     /// <param name="Permissions">What it grants.</param>
     public sealed record UserRole(String       Name,
                                   Permissions  Permissions)
     {
+
+        #region Properties
+
+        /// <summary>
+        /// The user group in the HTTPExt API whose members hold this role.
+        /// </summary>
+        public UserGroup_Id  GroupId
+            => UserGroup_Id.Parse(Name);
+
+        #endregion
+
 
         #region Data
 
@@ -175,7 +198,7 @@ namespace cloud.charging.open.LocalController.Web
         #region (static) TryParse(Text, out Role, out Error)
 
         /// <summary>
-        /// A role by the name the login file writes it under, in any case.
+        /// A role by the name of the user group that carries it, in any case.
         /// </summary>
         public static Boolean TryParse(String?                           Text,
                                        [NotNullWhen(true)]  out UserRole?  Role,

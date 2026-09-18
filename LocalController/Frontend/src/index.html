@@ -14,6 +14,10 @@
     <!-- Runtime configuration for the bundle: read via document.querySelector,
          so that no inline script is needed and the CSP can stay strict. -->
     <meta name="api-base"          content="/api/v1" />
+
+    <!-- Signing in happens here and not at the API above: Hermod's HTTPExt
+         API is the only place that can check a password. -->
+    <meta name="ext-base"          content="/ext" />
     <meta name="frontend-version"  content="<%= htmlWebpackPlugin.options.version %>" />
 
     <!-- {{...}} placeholders are replaced by the C# server when it serves this
