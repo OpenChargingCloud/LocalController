@@ -98,12 +98,18 @@ namespace cloud.charging.open.LocalController.Tests
 
             var html   = await http.GetStringAsync("/");
 
-            var start  = html.IndexOf("/assets/main.", StringComparison.Ordinal);
+            // Relative, and the <base href> above it is what it resolves
+            // against: the same bundle is served at "/" on a port of its own
+            // and below "/CSMS" where several of these share one server, and
+            // an absolute "/assets/..." would only ever have worked at the
+            // first. The client's own base address stands in for the <base>
+            // here, which is what a browser would do.
+            var start  = html.IndexOf("\"assets/main.", StringComparison.Ordinal);
 
             Assert.That(start, Is.GreaterThan(-1),
                         "The stub references no bundle at all.");
 
-            var script = html[start..html.IndexOf('"', start)];
+            var script = html[(start + 1)..html.IndexOf('"', start + 1)];
 
             var bundle = await http.GetAsync(script);
 

@@ -7,6 +7,12 @@ function meta(name: string): string | undefined {
 }
 
 export const config = {
+
+    // Where this web interface is mounted: "" on a port of its own, "/EV" or
+    // the like when several of these programs share one HTTP server and are
+    // told apart by the first path segment. See basePath.ts.
+    base:             meta('base')             ?? '',
+
     apiBase:          meta('api-base')         ?? '/api/v1',
 
     // Signing in happens at Hermod's HTTPExt API, not at this controller's own

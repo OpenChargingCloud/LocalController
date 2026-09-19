@@ -6,6 +6,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
+    <!-- Everything relative in this page - the bundle, its assets, its fonts -
+         resolves against this rather than against the page's own depth, so
+         that /logs and /configuration/dns both find the same files. The
+         {{...}} is filled in by the C# server; html-webpack-plugin leaves it
+         alone. -->
+    <base href="{{BasePath}}/" />
+
     <title><%= htmlWebpackPlugin.options.title %></title>
 
     <meta name="description"       content="The web interface of an OpenChargingCloud local controller, served by the Hermod HTTP/1.1 server" />
@@ -13,11 +20,12 @@
 
     <!-- Runtime configuration for the bundle: read via document.querySelector,
          so that no inline script is needed and the CSP can stay strict. -->
-    <meta name="api-base"          content="/api/v1" />
+    <meta name="api-base"          content="{{APIBase}}" />
 
     <!-- Signing in happens here and not at the API above: Hermod's HTTPExt
          API is the only place that can check a password. -->
-    <meta name="ext-base"          content="/ext" />
+    <meta name="ext-base"          content="{{ExtBase}}" />
+    <meta name="base"              content="{{BasePath}}" />
     <meta name="frontend-version"  content="<%= htmlWebpackPlugin.options.version %>" />
 
     <!-- {{...}} placeholders are replaced by the C# server when it serves this

@@ -44,9 +44,11 @@ module.exports = (env, argv) => {
             path:                 path.resolve(__dirname, 'dist'),
             filename:             'assets/[name].[contenthash].js',
             assetModuleFilename:  'assets/[name].[contenthash][ext]',
-            // Absolute URLs, so that a deep page URL like /logs still resolves
-            // the bundle to /assets/... and not /logs/assets/...
-            publicPath:           '/',
+            // Relative, and the <base href> in index.html is what they resolve
+            // against - so a deep page URL like /logs still finds the bundle,
+            // and so does the same bundle mounted below /EV or /CSMS. An
+            // absolute '/' worked only at the root.
+            publicPath:           'auto',
             clean:                true
         },
 

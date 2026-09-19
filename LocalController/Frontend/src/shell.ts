@@ -1,6 +1,7 @@
 ﻿import { auth } from './auth';
 import { config } from './config';
 import { html, must, render, type HTMLFragment } from './html';
+import { toURL } from './basePath';
 
 /**
  * The frame every signed-in page sits in: the menu on the left, a heading and
@@ -137,7 +138,7 @@ function link(entry: MenuEntry, active: string): HTMLFragment {
     const current = entry.path === active;
 
     return html`
-        <a href="${entry.path}"
+        <a href="${toURL(entry.path)}"
            class="${current ? 'active' : ''}"
            ${current ? html`aria-current="page"` : ''}>
             <i class="fa-solid ${entry.icon}"></i>

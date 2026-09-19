@@ -204,6 +204,57 @@ namespace cloud.charging.open.LocalController
         public HTTPExtAPI             ExtAPI                 { get; }
 
         /// <summary>
+        /// Whether those accounts are this local controller's own, or somebody else's
+        /// that it was handed.
+        /// </summary>
+        /// <remarks>
+        /// Handing one in is what makes one sign-in open several of these
+        /// programs at once: the groups each of them makes as it starts land
+        /// in one set of accounts, and the names overlap on purpose - an
+        /// account in "systemadmin" is an administrator of every one of them.
+        /// </remarks>
+        public Boolean                OwnsExtAPI             { get; }
+
+        /// <summary>
+        /// Whether the HTTP server is this local controller's own, or one it was
+        /// handed and shares with somebody else.
+        /// </summary>
+        /// <remarks>
+        /// A shared server is started and stopped by whoever made it. One that
+        /// started a server it did not make would take the same socket twice
+        /// where several of these programs are on it, and one that stopped it
+        /// would close the web interface of every other program registered
+        /// within it.
+        /// </remarks>
+        public Boolean                OwnsHTTPServer         { get; }
+
+        /// <summary>
+        /// Everything of this local controller - its web interface, its JSON API and,
+        /// where the accounts are its own, those too - sits below this.
+        /// </summary>
+        /// <remarks>
+        /// The root, which is what a local controller on a port of its own wants and
+        /// what it always used to be. It is something else only where several
+        /// of these programs share one HTTP server and are told apart by the
+        /// first path segment rather than by the port.
+        /// </remarks>
+        public HTTPPath               BasePath               { get; }
+
+        /// <summary>
+        /// The base path as it is written into a URL: the empty string at the
+        /// root, and "/LocalController" or the like below one.
+        /// </summary>
+        /// <remarks>
+        /// Its own property because the two forms are not interchangeable and
+        /// the difference is exactly one character: <c>HTTPPath.Root</c> writes
+        /// itself as "/", and "/" + "/index.html" is a URL nothing serves.
+        /// </remarks>
+        public String                 BasePathText
+            => BasePath == HTTPPath.Root
+                   ? ""
+                   : BasePath.ToString().TrimEnd('/');
+
+        /// <summary>
         /// The directory the accounts live in between starts.
         /// </summary>
         public String                 AccountsPath           { get; }
@@ -332,7 +383,9 @@ namespace cloud.charging.open.LocalController
         /// <param name="DNSClient">The DNS client used by everything below.</param>
         /// <param name="NTSClient">The time client.</param>
         /// <param name="HTTPServer">An HTTP server to register within, or null to make one.</param>
-        /// <param name="HTTPRootPath">The root path of the JSON API, "/api" by default.</param>
+        /// <param name="BasePath">What everything of this controller sits below; the root by default. Something else only where several of these programs share one HTTP server.</param>
+        /// <param name="HTTPRootPath">The root path of the JSON API, "/api" below <paramref name="BasePath"/> by default.</param>
+        /// <param name="ExtAPI">An HTTPExt API to sign in against, or null for one of this controller's own. Handing one in is what makes one sign-in open several of these programs at once.</param>
         /// <param name="HTTPHostname">The address to listen on; the loopback address by default.</param>
         /// <param name="HTTPPort">The TCP port to listen on.</param>
         /// <param name="AccountsPath">The directory the accounts live in between starts; "accounts" beside the process by default.</param>
@@ -347,7 +400,9 @@ namespace cloud.charging.open.LocalController
         public LocalController(DNSClient?             DNSClient         = null,
                                NTSClient?             NTSClient         = null,
                                HTTPServer?            HTTPServer        = null,
+                               HTTPPath?              BasePath          = null,
                                HTTPPath?              HTTPRootPath      = null,
+                               HTTPExtAPI?            ExtAPI            = null,
                                IIPAddress?            HTTPHostname      = null,
                                IPPort?                HTTPPort          = null,
                                String?                AccountsPath      = null,
@@ -468,6 +523,8 @@ namespace cloud.charging.open.LocalController
             var address        = HTTPHostname ?? IPv4Address.Localhost;
             var port           = HTTPPort     ?? DefaultHTTPPort;
 
+            this.OwnsHTTPServer = HTTPServer is null;
+
             this.httpServer    = HTTPServer   ?? new HTTPServer(
                                                      IPAddress:       address,
                                                      TCPPort:         port,
@@ -475,17 +532,25 @@ namespace cloud.charging.open.LocalController
                                                      DNSClient:       dnsClient
                                                  );
 
-            this.httpRootPath  = HTTPRootPath ?? LCHTTPAPI.DefaultAPIPath;
+            // The root unless somebody is putting several of these programs on
+            // one server, where the first path segment is what tells them
+            // apart. Everything below is relative to it, which is the whole
+            // reason it is settled here and read rather than repeated.
+            this.BasePath      = BasePath     ?? HTTPPath.Root;
 
-            this.WebInterfaceURL = URL.Parse($"http://{address}:{port}/");
+            this.httpRootPath  = HTTPRootPath ?? this.BasePath + LCHTTPAPI.DefaultAPIPath;
+
+            this.WebInterfaceURL = URL.Parse($"http://{address}:{port}{this.BasePath.ToString().TrimEnd('/')}/");
 
             // 1) The HTTPExt API at "/ext". First of the three, because it is
             //    the one with a database behind it: whatever it finds wrong
             //    with its files, it should say so before a port is opened and
             //    before anybody is let in against accounts that were not read.
-            this.ExtAPI        = new HTTPExtAPI(
+            this.OwnsExtAPI    = ExtAPI is null;
+
+            this.ExtAPI        = ExtAPI ?? new HTTPExtAPI(
                                      HTTPServer:             httpServer,
-                                     RootPath:               ExtAPIPath,
+                                     RootPath:               this.BasePath + (ExtAPIPath),
                                      HTTPServerName:         $"OpenChargingCloud LocalController v{Version}",
                                      HTTPServiceName:        $"OpenChargingCloud LocalController v{Version}",
                                      APIRobotEMailAddress:   EMailAddress.Parse("OpenChargingCloud LocalController Robot <robot@charging.cloud>"),
@@ -539,7 +604,12 @@ namespace cloud.charging.open.LocalController
                                      DisableLogging:         false
                                  );
 
-            this.Log.Info($"The accounts of this local controller are in '{ExtAPI.DatabaseFileName}', its HTTPExt API at '{ExtAPIPath}'.", "web", "http");
+            this.Log.Info(
+                OwnsExtAPI
+                    ? $"The accounts of this local controller are in '{this.ExtAPI.DatabaseFileName}', its HTTPExt API at '{this.ExtAPI.RootPath}'."
+                    : $"This local controller signs in against accounts it shares, at '{this.ExtAPI.RootPath}'.",
+                "web", "http"
+            );
 
             // 2) The JSON API at "/api". Before the web interface, so that it
             //    is the more specific API and an unknown /api path never
@@ -547,7 +617,7 @@ namespace cloud.charging.open.LocalController
             this.API           = new LCHTTPAPI(
                                      HTTPServer:  httpServer,
                                      Controller:  this,
-                                     ExtAPI:      ExtAPI,
+                                     ExtAPI:      this.ExtAPI,
                                      Log:         this.Log,
                                      APIPath:     httpRootPath,
                                      Version:     Version
@@ -561,12 +631,25 @@ namespace cloud.charging.open.LocalController
             if (this.Frontend.TryGet(IndexFile, out _))
             {
 
-                this.WebInterface = httpServer.AddHTTPAPI();
+                this.WebInterface = httpServer.AddHTTPAPI(this.BasePath);
 
                 this.WebInterface.MapSinglePageApplication(
                     this.Frontend,
                     new SinglePageAppOptions {
-                        IndexTransform = html => html.Replace("{{ServerVersion}}", $"v{Version}", StringComparison.Ordinal)
+
+                        // Three placeholders and not one. The bundle reads
+                        // where it is and where its API is out of <meta> tags
+                        // rather than assuming "/" and "/api/v1", because
+                        // under a base path both of those are wrong - and a
+                        // single-page application that guesses its own base
+                        // path is one that works until somebody mounts it
+                        // somewhere.
+                        IndexTransform = html => html.
+                                                     Replace("{{ServerVersion}}", $"v{Version}",         StringComparison.Ordinal).
+                                                     Replace("{{BasePath}}",      BasePathText,          StringComparison.Ordinal).
+                                                     Replace("{{APIBase}}",       $"{httpRootPath.ToString().TrimEnd('/')}/v1", StringComparison.Ordinal).
+                                                     Replace("{{ExtBase}}",       this.ExtAPI.RootPath.ToString().TrimEnd('/'), StringComparison.Ordinal)
+
                     }
                 );
 
@@ -581,7 +664,7 @@ namespace cloud.charging.open.LocalController
                         request => Task.FromResult(
                                        new HTTPResponse.Builder(request) {
                                            HTTPStatusCode  = HTTPStatusCode.TemporaryRedirect,
-                                           Location        = Location.From(HTTPPath.Parse("/" + FaviconSVG)),
+                                           Location        = Location.From(HTTPPath.Parse($"{BasePathText}/{FaviconSVG}")),
                                            CacheControl    = "public, max-age=3600"
                                        }.AsImmutable
                                    ),
@@ -685,7 +768,10 @@ namespace cloud.charging.open.LocalController
             // nobody behind it.
             await EnsureAccounts();
 
-            await httpServer.Start();
+            // Only where it is ours: a shared server is started by whoever
+            // made it, and starting it again would take the same socket twice.
+            if (OwnsHTTPServer)
+                await httpServer.Start();
 
             await StartOCPPServer();
 
@@ -734,7 +820,11 @@ namespace cloud.charging.open.LocalController
 
             await StopOCPPServer();
 
-            await httpServer.Stop();
+            // The event streams above are ended whoever owns the server,
+            // because they are this local controller's; the socket is closed only where it
+            // is this local controller's too.
+            if (OwnsHTTPServer)
+                await httpServer.Stop();
 
             started = false;
 

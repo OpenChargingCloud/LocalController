@@ -9,6 +9,9 @@
 // A page may return a cleanup function from render(); it is called before the
 // next page renders, e.g. to close an EventSource or destroy a chart.
 
+import { fromURL, toURL } from './basePath';
+
+
 export type Params   = Record<string, string>;
 export type Cleanup  = () => void;
 
@@ -82,10 +85,15 @@ export class Router {
 
     navigate(path: string, replace = false): void {
 
+        // Routes are written without the base everywhere in this bundle; this
+        // is where it goes on. Idempotent, so a link's own absolute pathname
+        // can be handed straight to it.
+        const target = toURL(path);
+
         if (replace)
-            history.replaceState(null, '', path);
+            history.replaceState(null, '', target);
         else
-            history.pushState(null, '', path);
+            history.pushState(null, '', target);
 
         void this.render();
 
@@ -124,9 +132,13 @@ export class Router {
 
     private match(pathname: string): { page: Page; params: Params; guard?: Guard } | null {
 
-        const path = pathname.length > 1 && pathname.endsWith('/')
-                         ? pathname.slice(0, -1)
-                         : pathname;
+        // Off again here, and only here: every route in the table above is
+        // written as it would be at the root.
+        const withoutBase = fromURL(pathname);
+
+        const path = withoutBase.length > 1 && withoutBase.endsWith('/')
+                         ? withoutBase.slice(0, -1)
+                         : withoutBase;
 
         for (const route of this.routes)
         {
