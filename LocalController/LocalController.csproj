@@ -30,7 +30,9 @@
     MapSinglePageApplication serves.
 
       dotnet build                            builds the frontend when its inputs changed
-      dotnet build -p:SkipFrontendBuild=true  backend only, reuses the existing dist/
+      dotnet build -p:SkipFrontendBuild=true  backend only, reusing whatever is in dist/ -
+                                             and, where nothing is, an assembly with no web
+                                             interface at all, which is a warning and not an error
 
     Three separate targets on purpose:
       - NpmInstall     runs "npm ci" only when node_modules is missing
@@ -67,14 +69,26 @@
 
   <Target Name="EmbedFrontend" DependsOnTargets="BuildFrontend" BeforeTargets="BeforeBuild" Condition="'$(DesignTimeBuild)' != 'true'">
 
-    <Error Condition="!Exists('$(FrontendDist)index.html')" Text="The frontend build output '$(FrontendDist)' is missing. Run 'npm run build' in '$(FrontendDir)', or build with -p:SkipFrontendBuild=true to leave the web interface out." />
+    <!-- Built, and still not there: npm ran and produced nothing, which is a
+         build that failed rather than one without a web interface. -->
+    <Error Condition="'$(FrontendBuildEnabled)' == 'true' And !Exists('$(FrontendDist)index.html')"
+           Text="The frontend build in '$(FrontendDir)' produced no '$(FrontendDist)index.html'. Read what 'npm run build' said above." />
 
-    <ItemGroup>
+    <!-- Asked to skip the frontend build, and there is nothing from an earlier
+         one to reuse. The assembly is then built without a web interface, which
+         it survives: the JSON API answers, a browser gets nothing, and it says
+         exactly that at every start. A warning rather than an error, because
+         "no Node on this machine" is a reason to build the backend alone, not
+         a reason to be unable to. -->
+    <Warning Condition="'$(FrontendBuildEnabled)' != 'true' And !Exists('$(FrontendDist)index.html')"
+             Text="No web interface: '$(FrontendDist)' holds no index.html and the frontend build was skipped. Run 'npm run build' in '$(FrontendDir)' and build again to get one." />
+
+    <ItemGroup Condition="Exists('$(FrontendDist)index.html')">
       <_FrontendFile Include="$(FrontendDist)**\*" />
       <EmbeddedResource Include="@(_FrontendFile)" LogicalName="$(FrontendResourcePrefix)$([System.String]::Copy('%(_FrontendFile.RecursiveDir)').Replace('\', '.').Replace('/', '.'))%(_FrontendFile.Filename)%(_FrontendFile.Extension)" WithCulture="false" />
     </ItemGroup>
 
-    <Message Importance="high" Text="Frontend: embedding @(_FrontendFile-&gt;Count()) files from '$(FrontendDist)' as '$(FrontendResourcePrefix)*'." />
+    <Message Importance="high" Condition="Exists('$(FrontendDist)index.html')" Text="Frontend: embedding @(_FrontendFile-&gt;Count()) files from '$(FrontendDist)' as '$(FrontendResourcePrefix)*'." />
 
   </Target>
 

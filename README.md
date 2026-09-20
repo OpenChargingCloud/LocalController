@@ -83,7 +83,9 @@ Port 2350 and not 2348: an OpenChargingCloud charging station uses 2348 and
 
 ```
 dotnet build                            the whole thing
-dotnet build -p:SkipFrontendBuild=true  backend only, reusing the existing dist/
+dotnet build -p:SkipFrontendBuild=true  backend only, reusing the existing dist/ -
+                                        and where there is none, no web interface
+                                        at all, which is a warning and not an error
 npm run watch     (in Frontend/)        rebuild the bundle as it is edited
 npm run typecheck (in Frontend/)        tsc --noEmit
 ```
