@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2014-2026 GraphDefined GmbH <achim.friedland@graphdefined.com>
  * This file is part of LocalController <https://github.com/OpenChargingCloud/LocalController>
  *
@@ -23,6 +23,8 @@ using Newtonsoft.Json.Linq;
 
 using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.DNS;
+using org.GraphDefined.Vanaheimr.Norn.Monitoring;
+using org.GraphDefined.Vanaheimr.Norn.TimeSync;
 
 #endregion
 
@@ -46,6 +48,9 @@ namespace cloud.charging.open.LocalController.Configuration
     /// <param name="LegalTimeAuthority">Who stands behind that server's time, e.g. "PTB" - the operator saying so, because this local controller cannot find out by itself.</param>
     /// <param name="LegalTimeTolerance">How far this local controller's own clock may be from it and still count.</param>
     /// <param name="LegalTimeMaxAge">How old the last check may be and still count.</param>
+    /// <param name="Servers">Every time server of this controller, or none to ask only the one named by Hostname.</param>
+    /// <param name="MinServers">How many of them must answer before their time counts.</param>
+    /// <param name="MaxDeviation">How far their answers may be apart before the disagreement is written down.</param>
     public sealed record NTSConfiguration(Boolean?     Enabled               = null,
                                           DomainName?  Hostname              = null,
                                           IPPort?      NTSKEPort             = null,
@@ -54,7 +59,10 @@ namespace cloud.charging.open.LocalController.Configuration
                                           TimeSpan?    CheckEvery            = null,
                                           String?      LegalTimeAuthority    = null,
                                           TimeSpan?    LegalTimeTolerance    = null,
-                                          TimeSpan?    LegalTimeMaxAge       = null)
+                                          TimeSpan?                             LegalTimeMaxAge       = null,
+                                          IEnumerable<NTSServerConfiguration>?  Servers               = null,
+                                          Byte?                                 MinServers            = null,
+                                          TimeSpan?                             MaxDeviation          = null)
     {
 
         #region Data
@@ -131,7 +139,9 @@ namespace cloud.charging.open.LocalController.Configuration
                 !ConfigurationReader.TryReadSeconds(JSON, "checkEverySeconds", "nts", 10, 86400, out var checkEvery, out Error) ||
                 !ConfigurationReader.TryReadSeconds(JSON, "legalTimeToleranceSeconds", "nts", 0.001, 60, out var tolerance, out Error) ||
                 !ConfigurationReader.TryReadSeconds(JSON, "legalTimeMaxAgeSeconds", "nts", 10, 86400, out var maxAge, out Error) ||
-                !ConfigurationReader.TryReadString (JSON, "legalTimeAuthority", "nts", MaxAuthorityLength, out var authority, out Error))
+                !ConfigurationReader.TryReadString (JSON, "legalTimeAuthority", "nts", MaxAuthorityLength, out var authority, out Error) ||
+                !ConfigurationReader.TryReadByte   (JSON, "minServers",          "nts",                     out var minServers, out Error) ||
+                !ConfigurationReader.TryReadSeconds(JSON, "maxDeviationSeconds", "nts", 0.001, 3600,        out var maxDeviation, out Error))
             {
                 return false;
             }
@@ -144,6 +154,50 @@ namespace cloud.charging.open.LocalController.Configuration
                 return false;
             }
 
+            #region The servers, when there is a list of them
+
+            List<NTSServerConfiguration>? servers = null;
+
+            if (JSON.TryGetValue("servers", out var serversToken))
+            {
+
+                if (serversToken is not JArray serverArray)
+                {
+                    Error = "'nts.servers' must be a list!";
+                    return false;
+                }
+
+                servers = [];
+
+                for (var i = 0; i < serverArray.Count; i++)
+                {
+
+                    if (!NTSServerConfiguration.TryParse(serverArray[i], i, out var server, out Error))
+                        return false;
+
+                    servers.Add(server);
+
+                }
+
+                // An empty list is not the same as no list: it says "ask
+                // nobody", which is what switching NTS off is for and is almost
+                // certainly a mistake here.
+                if (servers.Count == 0)
+                {
+                    Error = "'nts.servers' is empty: name a server, or set 'nts.enabled' to false.";
+                    return false;
+                }
+
+                if (minServers > servers.Count(server => server.Enabled))
+                {
+                    Error = $"'nts.minServers' is {minServers}, which is more servers than 'nts.servers' has switched on.";
+                    return false;
+                }
+
+            }
+
+            #endregion
+
             Configuration = new NTSConfiguration(
                                 enabled,
                                 domainName,
@@ -153,12 +207,49 @@ namespace cloud.charging.open.LocalController.Configuration
                                 checkEvery,
                                 authority,
                                 tolerance,
-                                maxAge
+                                maxAge,
+                                servers,
+                                minServers,
+                                maxDeviation
                             );
 
             return true;
 
         }
+
+        #endregion
+
+        #region ToGroup(FallbackHostname)
+
+        /// <summary>
+        /// The time servers of this local controller as a group that can be
+        /// asked.
+        /// </summary>
+        /// <remarks>
+        /// Called "legal" after the white paper's well-known group, because this
+        /// is the clock the charging stations below are billed by. A controller
+        /// asking a second group for something else would name that one; there is
+        /// no such group yet and inventing one now would be naming something
+        /// nobody asks for.
+        ///
+        /// A section that names a single hostname and no list becomes a group of
+        /// one. That is a worse arrangement than four servers and it is the one
+        /// every existing configuration file already has, so it keeps working
+        /// rather than becoming an error at the next start.
+        /// </remarks>
+        /// <param name="FallbackHostname">The server to use when the section names none at all.</param>
+        public TimeSourceGroup ToGroup(DomainName FallbackHostname)
+
+            => new ("legal",
+                    Servers is not null
+                        ? Servers.Select(server => server.ToEndpoint())
+                        : [ new NTSServerEndpoint(
+                                Hostname ?? FallbackHostname,
+                                NTSKEPort,
+                                NTPPort
+                            ) ],
+                    MinServers,
+                    MaxDeviation);
 
         #endregion
 
@@ -181,6 +272,9 @@ namespace cloud.charging.open.LocalController.Configuration
 
             if (CheckEvery.HasValue)          json.Add("checkEverySeconds",           CheckEvery.        Value.TotalSeconds);
             if (LegalTimeAuthority is not null) json.Add("legalTimeAuthority",        LegalTimeAuthority);
+            if (Servers            is not null) json.Add("servers",                   new JArray(Servers.Select(server => server.ToJSON())));
+            if (MinServers.HasValue)           json.Add("minServers",                MinServers.Value);
+            if (MaxDeviation.HasValue)         json.Add("maxDeviationSeconds",       MaxDeviation.Value.TotalSeconds);
             if (LegalTimeTolerance.HasValue)  json.Add("legalTimeToleranceSeconds",   LegalTimeTolerance.Value.TotalSeconds);
             if (LegalTimeMaxAge.   HasValue)  json.Add("legalTimeMaxAgeSeconds",      LegalTimeMaxAge.   Value.TotalSeconds);
 

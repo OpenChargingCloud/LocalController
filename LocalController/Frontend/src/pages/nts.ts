@@ -1,4 +1,4 @@
-import { api, type Clock, type NTSConfiguration, type NTSSyncResult, type NTSUpdate } from '../api/client';
+﻿import { api, type Clock, type NTSConfiguration, type NTSSyncResult, type NTSUpdate } from '../api/client';
 import { auth } from '../auth';
 import { html, must, render } from '../html';
 import type { Page } from '../router';
@@ -150,6 +150,36 @@ export const ntsPage: Page = {
                         ${sync === null || sync === undefined ? '' : syncResult(sync)}
 
                     </section>
+
+                    ${!configuration.timeSources || configuration.timeSources.length === 0 ? '' : html`
+                        <section class="card">
+
+                            <h2><i class="fa-solid fa-users"></i> Time servers</h2>
+
+                            <div class="kv-list">
+                                ${configuration.timeSources.map(source => html`
+                                    <div class="kv">
+                                        <span class="k">${source.hostname}${source.enabled ? '' : html` <span class="muted small">switched off</span>`}</span>
+                                        <span class="v">
+                                            ${source.lastExchange
+                                                  ? html`${formatValue(source.cookies)} cookie(s)
+                                                         <span class="muted small">${source.aeadAlgorithm ?? ''}, exchanged ${formatValue(source.lastExchange)}</span>`
+                                                  : html`<span class="muted">not asked yet</span>`}
+                                        </span>
+                                    </div>
+                                `)}
+                            </div>
+
+                            ${configuration.group
+                                  ? html`<p class="hint">
+                                             Group '${configuration.group.name}': at least ${configuration.group.minServers}
+                                             of them must answer, and a disagreement of
+                                             ${configuration.group.maxDeviationSeconds} s or more is written down.
+                                         </p>`
+                                  : ''}
+
+                        </section>
+                    `}
 
                     <section class="card">
                         <h2><i class="fa-solid fa-cookie-bite"></i> Cookies</h2>

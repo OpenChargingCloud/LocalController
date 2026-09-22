@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2014-2026 GraphDefined GmbH <achim.friedland@graphdefined.com>
  * This file is part of LocalController <https://github.com/OpenChargingCloud/LocalController>
  *
@@ -23,6 +23,7 @@ using System.Diagnostics.CodeAnalysis;
 using Newtonsoft.Json.Linq;
 
 using org.GraphDefined.Vanaheimr.Hermod.DNS;
+using org.GraphDefined.Vanaheimr.Norn.TimeSync;
 
 #endregion
 
@@ -267,132 +268,98 @@ namespace cloud.charging.open.LocalController
                 return Failed("NTS is switched off on this local controller.");
             }
 
-            var client     = ntsClient;
+            var group      = timeSources;
+            var asked      = group.Bands().SelectMany(band => band).Select(source => source.Hostname.ToString()).ToArray();
             var stopwatch  = Stopwatch.StartNew();
 
-            Log.Info($"NTS: key exchange with {client.Hostname}:{client.NTSKE_Port} ...", "nts", "ntske", "test");
+            Log.Info($"NTS: asking the {asked.Length} time server(s) of group '{group.Name}' ...", "nts", "test");
 
             try
             {
 
-                #region NTS-KE
-
-                var keyExchange = await client.GetNTSKERecords(CancellationToken: CancellationToken);
-
-                if (!keyExchange.Success || keyExchange.Response is null)
-                {
-
-                    Log.Error(
-                        $"NTS: the key exchange with {client.Hostname} failed after {stopwatch.ElapsedMilliseconds} ms " +
-                        $"({keyExchange.ErrorCategory}): {keyExchange.ErrorMessage}",
-                        "nts", "ntske", "test"
-                    );
-
-                    return Remember(Failed($"The key exchange failed: {keyExchange.ErrorMessage}",
-                                           new JProperty("step",           "ntske"),
-                                           new JProperty("errorCategory",  keyExchange.ErrorCategory.ToString())));
-
-                }
-
-                var response = keyExchange.Response;
-
-                foreach (var warning in response.WarningMessages)
-                    Log.Warning($"NTS: the key exchange with {client.Hostname} warned: {warning}", "nts", "ntske", "test");
-
-                Log.Info(
-                    $"NTS: the key exchange with {client.Hostname} succeeded in {stopwatch.ElapsedMilliseconds} ms - " +
-                    $"{response.AEADAlgorithm}, {response.Cookies.Count()} cookie(s)" +
-                    (response.NTPv4ServerNames.Any()
-                         ? $", NTP server(s): {String.Join(", ", response.NTPv4ServerNames)}"
-                         : "") + ".",
-                    "nts", "ntske", "test"
-                );
-
-                // The cookies are what the NTP request below spends, so they go
-                // into the pool before it is sent and not after.
-                client.SeedCookies(response);
-
-                #endregion
-
-                #region NTP over NTS
-
-                var afterKeyExchange = stopwatch.ElapsedMilliseconds;
-
-                Log.Info($"NTS: authenticated NTP request to {client.Hostname}:{client.NTP_Port} ...", "nts", "ntp", "test");
-
-                var query = await client.QueryTime(CancellationToken: CancellationToken);
+                var verdict = await group.Measure(timeEngine, dnsClient, CancellationToken);
 
                 stopwatch.Stop();
 
-                if (!query.Success || query.Response is null)
-                {
+                #region What the group concluded, and what each server said
 
-                    Log.Error(
-                        $"NTS: the NTP request to {client.Hostname} failed after {stopwatch.ElapsedMilliseconds} ms " +
-                        $"({query.ErrorCategory}): {query.ErrorMessage}",
-                        "nts", "ntp", "test"
-                    );
+                var servers = new JArray(
+                                  verdict.Results.Select(result => new JObject(
+                                      new JProperty("hostname",       result.ServerHostname.ToString()),
+                                      new JProperty("ok",             TimeSyncVerdict.CanBeTrusted(result)),
+                                      new JProperty("offset_ms",      result.NTP?.Offset.TotalMilliseconds),
+                                      new JProperty("roundTrip_ms",   result.NTP?.RoundTripDelay.TotalMilliseconds),
+                                      new JProperty("authenticated",  result.NTP?.NTSAuthenticationValid),
+                                      new JProperty("keyExchange",    result.NTSKEFromCache ? "reused" : "new"),
+                                      new JProperty("error",          result.ErrorMessage?.ToString())
+                                  ))
+                              );
 
-                    return Remember(Failed($"The NTP request failed: {query.ErrorMessage}",
-                                           new JProperty("step",           "ntp"),
-                                           new JProperty("errorCategory",  query.ErrorCategory.ToString()),
-                                           new JProperty("ntske",          new JObject(
-                                               new JProperty("runtime_ms",     afterKeyExchange),
-                                               new JProperty("aeadAlgorithm",  response.AEADAlgorithm.ToString()),
-                                               new JProperty("cookies",        response.Cookies.Count())
-                                           ))));
-
-                }
+                var groupJSON = new JObject(
+                                    new JProperty("name",               group.Name),
+                                    new JProperty("answered",           verdict.Answered),
+                                    new JProperty("required",           verdict.Required),
+                                    new JProperty("offset_ms",          verdict.Offset?.TotalMilliseconds),
+                                    new JProperty("spread_ms",          verdict.Spread?.TotalMilliseconds),
+                                    new JProperty("deviationExceeded",  verdict.DeviationExceeded)
+                                );
 
                 #endregion
 
-                var roundTrip = query.StopwatchRoundTripTime;
+                if (!verdict.IsUsable)
+                {
 
-                // What the exchange was actually for. The clock of this local controller
-                // is not stepped by it - see the remarks on this method - so
-                // the offset is the whole of the result: it is the difference
-                // between what this local controller believes and what a server that
-                // knows was saying at the same moment.
-                var offset    = query.Response?.ClockOffset;
+                    Log.Error($"NTS: group '{group.Name}' produced no time after {stopwatch.ElapsedMilliseconds} ms: {verdict}.", "nts", "test");
 
-                lastTimeCheck        = TimeProvider.GetUtcNow();
-                lastTimeCheckOffset  = offset;
-                lastTimeCheckServer  = client.Hostname.ToString();
+                    return Remember(Failed(
+                               verdict.Outcome == TimeSyncOutcome.NothingAnswered
+                                   ? "No time server answered."
+                                   : $"Only {verdict.Answered} of {verdict.Required} time server(s) answered.",
+                               new JProperty("runtime_ms",  stopwatch.ElapsedMilliseconds),
+                               new JProperty("group",       groupJSON),
+                               new JProperty("servers",     servers)
+                           ));
 
-                Log.Notice(
-                    $"NTS: {client.Hostname} answered in {stopwatch.ElapsedMilliseconds} ms" +
-                    (offset.HasValue ? $", this local controller's clock is {offset.Value.TotalMilliseconds:+0.0;-0.0;0} ms off" : "") +
-                    (roundTrip.HasValue ? $" (round trip {roundTrip.Value.TotalMilliseconds:F1} ms)" : "") +
-                    $", {query.RemainingCookiesAfterQuery} cookie(s) left.",
-                    "nts", "ntp", "test"
-                );
+                }
+
+                // What the asking was actually for. The clock of this local
+                // controller is not stepped by it - see the remarks on this
+                // method - so the offset is the whole of the result: it is the
+                // difference between what this controller believes and what
+                // servers that know were saying at the same moment.
+                lastTimeCheck          = TimeProvider.GetUtcNow();
+                lastTimeCheckOffset    = verdict.Offset;
+                lastTimeCheckAsked     = asked.Length;
+                lastTimeCheckAnswered  = verdict.Answered;
+
+                // A name only where naming one is the truth. Four servers
+                // answering is not "checked against ptbtime1", and picking one
+                // of them to print would be the nicer-looking lie.
+                lastTimeCheckServer    = asked.Length == 1
+                                             ? asked[0]
+                                             : null;
+
+                // Written down rather than acted on, which is what the white
+                // paper asks for: the disagreement belongs in the log book, and
+                // the time is still a time.
+                if (verdict.DeviationExceeded)
+                    Log.Warning(
+                        $"NTS: the time servers of group '{group.Name}' disagree by " +
+                        $"{verdict.Spread!.Value.TotalMilliseconds:F1} ms, which reaches the agreed deviation of " +
+                        $"{group.MaxDeviation.TotalSeconds:F0} s.",
+                        "nts", "test"
+                    );
+
+                Log.Notice($"NTS: group '{group.Name}' answered in {stopwatch.ElapsedMilliseconds} ms - {verdict}.", "nts", "test");
 
                 return Remember(new JObject(
-
-                           new JProperty("ok",             true),
-                           new JProperty("server",         client.Hostname.ToString()),
-                           new JProperty("remote",         query.RemoteDescription),
-                           new JProperty("at",             TimeProvider.GetUtcNow().ToString("o")),
-                           new JProperty("runtime_ms",     stopwatch.ElapsedMilliseconds),
-
-                           new JProperty("ntske",          new JObject(
-                               new JProperty("runtime_ms",         afterKeyExchange),
-                               new JProperty("aeadAlgorithm",      response.AEADAlgorithm.ToString()),
-                               new JProperty("cookies",            response.Cookies.Count()),
-                               new JProperty("ntpServers",         new JArray(response.NTPv4ServerNames)),
-                               new JProperty("warnings",           new JArray(response.WarningMessages))
-                           )),
-
-                           new JProperty("offset_ms",      offset?.TotalMilliseconds),
-
-                           new JProperty("ntp",            new JObject(
-                               new JProperty("attempts",           query.Attempts),
-                               new JProperty("roundTrip_ms",       roundTrip?.TotalMilliseconds),
-                               new JProperty("newCookieReceived",  query.NewCookieReceived),
-                               new JProperty("cookiesLeft",        query.RemainingCookiesAfterQuery),
-                               new JProperty("kissOfDeath",        query.KissOfDeath?.ToString())
-                           ))
-
+                           new JProperty("ok",          true),
+                           new JProperty("server",      $"{group.Name}: {String.Join(", ", asked)}"),
+                           new JProperty("at",          TimeProvider.GetUtcNow().ToString("o")),
+                           new JProperty("runtime_ms",  stopwatch.ElapsedMilliseconds),
+                           new JProperty("offset_ms",   verdict.Offset?.TotalMilliseconds),
+                           new JProperty("group",       groupJSON),
+                           new JProperty("servers",     servers)
                        ));
 
             }
@@ -401,7 +368,7 @@ namespace cloud.charging.open.LocalController
 
                 stopwatch.Stop();
 
-                Log.Error($"NTS: the exchange with {client.Hostname} failed after {stopwatch.ElapsedMilliseconds} ms: {e.Message}", "nts", "test");
+                Log.Error($"NTS: asking group '{group.Name}' failed after {stopwatch.ElapsedMilliseconds} ms: {e.Message}", "nts", "test");
 
                 return Remember(Failed(e.Message));
 

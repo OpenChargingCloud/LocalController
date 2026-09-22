@@ -26,6 +26,8 @@ using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 using org.GraphDefined.Vanaheimr.Hermod.Mail;
 using NullMailer = org.GraphDefined.Vanaheimr.Hermod.SMTP.NullMailer;
 using org.GraphDefined.Vanaheimr.Norn.NTS;
+using org.GraphDefined.Vanaheimr.Norn.Monitoring;
+using org.GraphDefined.Vanaheimr.Norn.TimeSync;
 
 using cloud.charging.open.protocols.WWCP.NetworkingNode;
 
@@ -130,6 +132,8 @@ namespace cloud.charging.open.LocalController
 
         private readonly  DNSClient                       dnsClient;
         private           NTSClient                       ntsClient;
+        private           TimeSourceGroup                 timeSources;
+        private readonly  MeasurementEngine               timeEngine;
 
         /// <summary>
         /// The name servers this local controller would ask, whether or not
@@ -166,6 +170,18 @@ namespace cloud.charging.open.LocalController
         /// </remarks>
         private           DateTimeOffset?                 lastTimeCheck;
         private           TimeSpan?                       lastTimeCheckOffset;
+
+        /// <summary>
+        /// How many time servers the last check asked, and how many of them
+        /// answered well enough to count.
+        /// </summary>
+        /// <remarks>
+        /// Both, because either alone is misleading: "4 answered" says nothing
+        /// without knowing four of how many, and "4 asked" says nothing about
+        /// whether the answer is worth anything.
+        /// </remarks>
+        private           Int32?                          lastTimeCheckAsked;
+        private           Int32?                          lastTimeCheckAnswered;
         private           String?                         lastTimeCheckServer;
 
         /// <summary>
@@ -299,6 +315,12 @@ namespace cloud.charging.open.LocalController
         /// </remarks>
         public NTSClient              NTSClient
             => ntsClient;
+
+        /// <summary>
+        /// The time servers of this local controller, as a group.
+        /// </summary>
+        public TimeSourceGroup  TimeSources
+            => timeSources;
 
         /// <summary>
         /// Whether this local controller resolves names at all.
@@ -502,6 +524,26 @@ namespace cloud.charging.open.LocalController
                                                      DNSClient:       dnsClient,
                                                      TimeProvider:    this.TimeProvider
                                                  );
+
+            this.timeEngine    = new MeasurementEngine(
+                                     new MonitoringConfig {
+                                         DroneId       = "localController",
+                                         NTPTimeout    = TimeSpan.FromSeconds(5),
+                                         NTSKETimeout  = TimeSpan.FromSeconds(10)
+                                     },
+                                     this.TimeProvider
+                                 );
+
+            // A group of one until the file says otherwise, which is what a
+            // controller that was handed a client and nothing else has.
+            this.timeSources   = new TimeSourceGroup(
+                                     "legal",
+                                     [ new NTSServerEndpoint(
+                                           this.ntsClient.Hostname,
+                                           this.ntsClient.NTSKE_Port,
+                                           this.ntsClient.NTP_Port
+                                       ) ]
+                                 );
 
             // Last, and that is the whole precedence rule: what this
             // constructor was handed holds until the file says otherwise, and

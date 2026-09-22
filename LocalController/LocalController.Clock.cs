@@ -122,8 +122,14 @@ namespace cloud.charging.open.LocalController
                                  TimeCheckEvery
                              );
 
+            // Named rather than counted, because this is written once at a
+            // start and somebody reading it is checking that the file took
+            // effect. "4 time servers" would not tell them which four.
+            var asking = timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.ToString()).ToArray();
+
             Log.Info(
-                $"The clock of this local controller will be checked against {ntsClient.Hostname} every {TimeCheckEvery.TotalMinutes:F0} minute(s)" +
+                $"The clock of this local controller will be checked against {String.Join(", ", asking)} every {TimeCheckEvery.TotalMinutes:F0} minute(s)" +
+                (asking.Length > 1 ? $", at least {timeSources.MinServers} of which must answer" : "") +
                 (LegalTimeAuthority is not null ? $", which the operator says is {LegalTimeAuthority}." : "."),
                 "nts", "clock"
             );
@@ -184,6 +190,7 @@ namespace cloud.charging.open.LocalController
         {
 
             var now       = TimeProvider.GetUtcNow();
+            var asked     = timeSources.Bands().SelectMany(band => band).ToArray();
             var checkedAt = lastTimeCheck;
             var offset    = lastTimeCheckOffset;
             var age       = checkedAt.HasValue ? now - checkedAt.Value : (TimeSpan?) null;
@@ -208,8 +215,13 @@ namespace cloud.charging.open.LocalController
 
                        new JProperty("nts",             new JObject(
                            new JProperty("enabled",       NTSEnabled),
-                           new JProperty("server",        NTSEnabled ? ntsClient.Hostname.ToString() : null),
+                           new JProperty("server",        NTSEnabled && asked.Length == 1
+                                                              ? asked[0].Hostname.ToString()
+                                                              : null),
+                           new JProperty("servers",       new JArray(asked.Select(source => source.Hostname.ToString()))),
                            new JProperty("lastServer",    lastTimeCheckServer),
+                           new JProperty("asked",         lastTimeCheckAsked),
+                           new JProperty("answered",      lastTimeCheckAnswered),
                            new JProperty("checkedAt",     checkedAt?.ToString("o")),
                            new JProperty("ageSeconds",    age.HasValue ? Math.Round(age.Value.TotalSeconds, 1) : null),
                            new JProperty("offset_ms",     offset.HasValue ? Math.Round(offset.Value.TotalMilliseconds, 1) : null),

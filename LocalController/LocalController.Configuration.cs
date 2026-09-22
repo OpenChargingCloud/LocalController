@@ -23,6 +23,8 @@ using Newtonsoft.Json.Linq;
 
 using org.GraphDefined.Vanaheimr.Hermod.DNS;
 using org.GraphDefined.Vanaheimr.Norn.NTS;
+using org.GraphDefined.Vanaheimr.Norn.Monitoring;
+using org.GraphDefined.Vanaheimr.Norn.TimeSync;
 
 using cloud.charging.open.LocalController.Configuration;
 
@@ -341,6 +343,33 @@ namespace cloud.charging.open.LocalController
                                                                             ))
                        )),
 
+                       // What the group is actually doing, which is what checks
+                       // this controller's clock. The single client reported
+                       // above is the one the detailed test configures itself
+                       // from, and its cookie pool is not what a check spends.
+                       new JProperty("timeSources",  new JArray(
+                           timeSources.Bands().SelectMany(band => band).Select(source => {
+
+                               var held = timeEngine.KeyExchanges.TryGetValue(source.Hostname, out var state) ? state : null;
+
+                               return new JObject(
+                                          new JProperty("hostname",       source.Hostname.ToString()),
+                                          new JProperty("priority",       source.Priority),
+                                          new JProperty("enabled",        source.Enabled),
+                                          new JProperty("cookies",        held?.RemainingCookies),
+                                          new JProperty("lastExchange",   held?.LastRefreshed.ToString("o")),
+                                          new JProperty("aeadAlgorithm",  held?.NTSKEResponse?.AEADAlgorithm.ToString())
+                                      );
+
+                           })
+                       )),
+
+                       new JProperty("group",        new JObject(
+                           new JProperty("name",                 timeSources.Name),
+                           new JProperty("minServers",           timeSources.MinServers),
+                           new JProperty("maxDeviationSeconds",  timeSources.MaxDeviation.TotalSeconds)
+                       )),
+
                        new JProperty("lastSync",     lastTimeSync),
 
                        new JProperty("limits",       new JObject(
@@ -412,6 +441,22 @@ namespace cloud.charging.open.LocalController
             ntsSettings = Configuration;
 
             var changed  = new List<String>();
+
+            #region The group of time servers
+
+            // Rebuilt from the section rather than patched: it is a list, and
+            // working out which entry changed in order to report it would say
+            // less than naming the servers, which is what happens below.
+            var wasAsking  = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.ToString()));
+
+            timeSources    = Configuration.ToGroup(Configuration.Hostname ?? ntsClient.Hostname);
+
+            var nowAsking  = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.ToString()));
+
+            if (wasAsking != nowAsking)
+                changed.Add($"time servers = {nowAsking}");
+
+            #endregion
 
             var hostname = Configuration.Hostname  ?? ntsClient.Hostname;
             var ntsKE    = Configuration.NTSKEPort ?? ntsClient.NTSKE_Port;

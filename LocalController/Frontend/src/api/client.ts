@@ -205,6 +205,17 @@ export interface NTSConfiguration {
         compliantExporterContext:  boolean;
         lastExchange:              { error: string | null; warnings: string[]; servers: string[] } | null;
     };
+    /** One entry per time server of the group, in the order they are asked. */
+    timeSources?: {
+        hostname:       string;
+        priority:       number;
+        enabled:        boolean;
+        cookies:        number | null;
+        lastExchange:   string | null;
+        aeadAlgorithm:  string | null;
+    }[];
+    /** What the group as a whole requires of them. */
+    group?:    { name: string; minServers: number; maxDeviationSeconds: number };
     lastSync:  NTSSyncResult | null;
     limits:    { maxTimeout: number };
     file:      string;
