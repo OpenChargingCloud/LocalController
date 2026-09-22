@@ -72,7 +72,15 @@ namespace cloud.charging.open.LocalController.Tests
             directory = TestControllers.TemporaryDirectory("tls");
             Directory.CreateDirectory(directory);
 
-            ca        = TestCA.Create("Test CA", WithIntermediate: true);
+            // A name of its own per run, and not for tidiness: Windows
+            // caches chain building by issuer name, so a second authority
+            // called what a previous run called its own is looked up,
+            // found, and does not fit - after which the server cannot
+            // build the context for its own certificate and drops every
+            // handshake before sending it. That is one machine-wide cache
+            // deciding whether a test passes, and it is why these two came
+            // and went. ServableChainTests had it right already.
+            ca        = TestCA.Create($"Test CA {Guid.NewGuid()}", WithIntermediate: true);
             port      = TestControllers.FreePort();
 
             #region A key and a certificate, put there before anything starts
