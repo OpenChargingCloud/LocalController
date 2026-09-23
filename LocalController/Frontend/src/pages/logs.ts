@@ -90,6 +90,19 @@ export const logsPage: Page = {
 
         let renderedTags = '';
 
+        /**
+         * What the browser would not take of the last correction.
+         *
+         * scrollTop snaps to whole device pixels, so asking for 24.32 px on a
+         * screen of one and a half sets 24 and drops the rest. Every line of a
+         * log is the same height, so the same fraction is dropped every time -
+         * this is not noise that cancels itself out but a drift in one
+         * direction, a third of a pixel a line, a screenful over a busy
+         * evening. Kept here and added to the next correction, where the
+         * browser can finally take it.
+         */
+        let unusedScroll = 0;
+
 
         function matches(entry: LogEntry): boolean {
 
@@ -144,11 +157,15 @@ export const logsPage: Page = {
 
         function scrollToTop(): void {
             list.scrollTop = 0;
+            unusedScroll   = 0;
             toTop.hidden   = true;
         }
 
         /** Everything again: after a reload, or when a filter changed. */
         function redraw(): void {
+
+            // Everything is drawn again, so nothing is owed from before.
+            unusedScroll = 0;
 
             // The store keeps its entries oldest first, because that is the
             // order their ids come in and the order the next batch continues;
@@ -176,16 +193,28 @@ export const logsPage: Page = {
 
                 list.querySelector('.log-empty')?.remove();
 
-                // Measured with the empty-notice already gone and the trimming
-                // below not yet done, so this is the height the new lines added
-                // and nothing else.
-                const before = list.scrollHeight;
+                // Whatever goes in above the line that is first right now
+                // pushes that line down by its own height, so asking the line
+                // how far it moved is asking how much was added - and asking
+                // it this way answers in fractions of a pixel.
+                //
+                // The obvious way is the difference of two scrollHeights, and
+                // that one is rounded to whole pixels. Half a pixel lost per
+                // batch is invisible in any one of them and is still there
+                // after the next thousand, which on a busy log is an hour.
+                const anchor    = list.firstElementChild;
+                const anchorTop = anchor?.getBoundingClientRect().top ?? 0;
 
                 // Turned around inside the batch as well: a burst that arrives
                 // in one event would otherwise sit at the top back to front.
                 list.insertAdjacentHTML('afterbegin', wanted.reverse().map(lineHTML).join(''));
 
-                const grew = list.scrollHeight - before;
+                // Read before the trimming below, which takes its lines off
+                // the bottom - that moves nothing above it, but it can take
+                // the anchor itself when the store has just wrapped.
+                const grew = anchor
+                                 ? anchor.getBoundingClientRect().top - anchorTop
+                                 : 0;
 
                 // The local controller keeps a bounded log and so does this page; what
                 // fell out of the store has to leave the list as well - and that is
@@ -201,10 +230,21 @@ export const logsPage: Page = {
                     // them down, so the older line somebody stopped to read
                     // would walk off the screen at the speed the log fills.
                     // Put the view back where it was, by exactly what was
-                    // added; the trimming above only takes lines off the
-                    // bottom and moves nothing.
-                    list.scrollTop  += grew;
-                    toTop.hidden     = false;
+                    // added and whatever the last correction was short.
+                    const asked     = list.scrollTop + grew + unusedScroll;
+                    list.scrollTop  = asked;
+
+                    // What the browser took is not always what it was asked
+                    // for. Only the snapping is worth carrying: when it
+                    // refuses a larger jump than that - the list is at its end
+                    // already, or the trimming above took the ground away -
+                    // the difference is not a rounding error, and carrying it
+                    // would be arguing with the browser rather than with the
+                    // arithmetic.
+                    const refused   = asked - list.scrollTop;
+                    unusedScroll    = Math.abs(refused) < 1 ? refused : 0;
+
+                    toTop.hidden    = false;
                 }
 
             }
