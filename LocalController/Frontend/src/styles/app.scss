@@ -37,6 +37,21 @@ $sidebar-width:      15rem;
     box-sizing: border-box;
 }
 
+// An element that says it is hidden is hidden. The browser's own stylesheet
+// says so as well, but only at the strength of a single selector, so any rule
+// in this file that sets a display quietly overrules it - and a good many do.
+//
+// That went unnoticed for a long time in several of these projects, because
+// nothing complains: the attribute and the property go on reporting hidden
+// while the element sits there in plain sight, and only a screenshot or
+// getComputedStyle says otherwise. It was found four times and fixed with a
+// line per class, which is a line somebody has to remember to add.
+//
+// The one !important in this stylesheet, and the reason it earns one.
+[hidden] {
+    display: none !important;
+}
+
 html, body {
     margin:       0;
     height:       100%;
@@ -101,17 +116,6 @@ h1, h2 {
     &:disabled {
         opacity:  0.6;
         cursor:   default;
-    }
-
-    // The hidden attribute is a rule of the browser's own stylesheet, and any
-    // rule in this one beats it - so the display above quietly puts a button
-    // that has set hidden back on the screen, and the attribute keeps saying
-    // it is gone. Said again here, with the attribute in the selector, it wins
-    // on specificity and means what it says. Only the Logs page uses hidden
-    // today, and only on a .btn; a hidden element that is not one would need
-    // the same line of its own.
-    &[hidden] {
-        display:  none;
     }
 
     &.primary {
