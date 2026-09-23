@@ -850,6 +850,13 @@ table.records {
     overflow-y:  auto;
     overflow-x:  hidden;
     padding:     0.35rem 0;
+
+    // The newest line goes in at the top, so every line already there moves
+    // down by its height. Chrome and Firefox would undo that by themselves and
+    // Safari would not, which is the worst of the three outcomes: the page
+    // cannot then know whether it still has to. So it always does, and the
+    // browser is asked to keep out of it.
+    overflow-anchor: none;
     font-family: $font-mono;
     font-size:   0.82rem;
     line-height: 1.55;
