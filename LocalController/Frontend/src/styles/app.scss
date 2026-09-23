@@ -841,6 +841,33 @@ table.records {
 
 }
 
+// The list and the button that floats over it. The button points at the top
+// now, so that is where it belongs - and floating rather than in a row of its
+// own, because a button that is only there when it is needed would otherwise
+// shove the whole list down the moment it appears.
+.log-pane {
+
+    position:         relative;
+    flex:             1;
+    min-height:       0;
+    display:          flex;
+    flex-direction:   column;
+
+}
+
+.jump-newest {
+
+    position:       absolute;
+    top:            0.6rem;
+    left:           50%;
+    transform:      translateX(-50%);
+    z-index:        2;
+    border-color:   $color-accent;
+    color:          $color-accent;
+    box-shadow:     0 2px 10px rgba(15, 23, 42, 0.18);
+
+}
+
 .log {
 
     @include panel;

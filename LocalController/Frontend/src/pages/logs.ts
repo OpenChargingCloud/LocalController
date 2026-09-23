@@ -58,11 +58,19 @@ export const logsPage: Page = {
 
             <div id="tags" class="tag-filters"></div>
 
-            <div id="log" class="log" role="log" aria-live="polite" tabindex="0"></div>
+            <div class="log-pane">
+
+                <button type="button" id="to-top" class="btn small jump-newest" hidden>
+                    <i class="fa-solid fa-arrow-up"></i>
+                    Jump to the newest
+                </button>
+
+                <div id="log" class="log" role="log" aria-live="polite" tabindex="0"></div>
+
+            </div>
 
             <div class="log-foot small muted">
                 <span id="counts"></span>
-                <button type="button" id="to-top" class="btn small" hidden>Jump to the newest</button>
             </div>
 
         `);
@@ -219,7 +227,14 @@ export const logsPage: Page = {
         function drawTags(): void {
 
             const all = [...new Set([...logLevels, ...logs.tags])].sort();
-            const key = all.join(' ') + '|' + [...chosenTags].sort().join(' ');
+
+            // NUL as the separator, written as an escape rather than as the
+            // byte itself - the byte made this file binary to git, which shows
+            // every change to it as a blob instead of a diff, and to grep,
+            // which then skips it without a word. A tag may hold anything a
+            // tag may hold, so the separator has to be the one thing it
+            // cannot contain, or two different sets could share a key.
+            const key = all.join('\0') + '|' + [...chosenTags].sort().join('\0');
 
             if (key === renderedTags)
                 return;
