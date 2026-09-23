@@ -1,5 +1,6 @@
 import { logLevels, type LogEntry, type LogLevel } from '../api/client';
 import { escapeHTML, html, must, render } from '../html';
+import { drawOrder, entryAt } from '../logs/order';
 import { logs } from '../logs/store';
 import type { Page } from '../router';
 import { shell } from '../shell';
@@ -14,6 +15,10 @@ import { formatTime, formatTimestamp, isAtLeast } from '../ui';
  * nothing and asks the local controller for nothing. A list that is scrolled
  * to the top follows along; scrolling down stops that, which is what somebody
  * reading an older line wants - and the button at the bottom brings them back.
+ *
+ * The store keeps its entries oldest first and is left alone: that order is
+ * what its own de-duplication and its bounded trim are written against. Only
+ * what is drawn is reversed, at the three places that map a line to an entry.
  */
 export const logsPage: Page = {
 
@@ -65,7 +70,13 @@ export const logsPage: Page = {
                     Jump to the newest
                 </button>
 
-                <div id="log" class="log" role="log" aria-live="polite" tabindex="0"></div>
+                <div id="log" class="log" role="log" aria-live="polite" tabindex="0">
+                    <div id="log-lines"></div>
+                    <div id="log-error" class="line error" hidden></div>
+                    <div id="log-empty" class="log-empty" hidden>
+                        Nothing to show. The local controller has been quiet, or the filters are too narrow.
+                    </div>
+                </div>
 
             </div>
 
@@ -76,6 +87,9 @@ export const logsPage: Page = {
         `);
 
         const list        = must<HTMLElement>       (content, '#log');
+        const lineBox     = must<HTMLElement>       (content, '#log-lines');
+        const emptyNote   = must<HTMLElement>       (content, '#log-empty');
+        const errorNote   = must<HTMLElement>       (content, '#log-error');
         const tagBox      = must<HTMLElement>       (content, '#tags');
         const counts      = must<HTMLElement>       (content, '#counts');
         const toTop       = must<HTMLButtonElement> (content, '#to-top');
@@ -89,6 +103,9 @@ export const logsPage: Page = {
         const chosenTags = new Set<string>();
 
         let renderedTags = '';
+
+        /** How many lines the filters are letting through, for the count below. */
+        let shown = 0;
 
         /**
          * What the last correction still owes the view.
@@ -161,7 +178,13 @@ export const logsPage: Page = {
             toTop.hidden   = true;
         }
 
-        /** Everything again: after a reload, or when a filter changed. */
+        /**
+         * Everything from the store, drawn once.
+         *
+         * Only for the two moments when what is held has actually changed
+         * underneath: a snapshot reloaded from the local controller, and "Clear view".
+         * Changing a filter is not one of them - see applyFilters below.
+         */
         function redraw(): void {
 
             // Everything is drawn again, so nothing is owed from before.
@@ -169,94 +192,181 @@ export const logsPage: Page = {
 
             // The store keeps its entries oldest first, because that is the
             // order their ids come in and the order the next batch continues;
-            // only what is shown is turned around. Reversing the copy that
-            // filter() just made, never the store itself.
-            list.innerHTML = logs.entries.filter(matches).reverse().map(lineHTML).join('') ||
-                             '<div class="log-empty">Nothing to show. The local controller has been quiet, or the filters are too narrow.</div>';
+            // only what is drawn is turned around.
+            lineBox.innerHTML = drawOrder(logs.entries).map(lineHTML).join('');
+
+            applyFilters();
 
             if (follow.checked)
                 scrollToTop();
 
-            updateCounts();
             drawTags();
+
+        }
+
+        /**
+         * Which of the lines already drawn are wanted.
+         *
+         * A filter used to rebuild the whole list, and most of that was work
+         * already done: the same lines built again from the same entries, and
+         * every timestamp put through the locale formatter twice more. At 2207
+         * entries that was 144 ms of JavaScript for one keystroke in the search
+         * box, and it grows with the log - on a page whose whole point is that
+         * filtering costs nothing.
+         *
+         * A line is now made once and then only told whether it is wanted,
+         * which measured 2 ms for the same 2207. What the browser spends laying
+         * the list out again afterwards is untouched, and was 47 ms either way:
+         * this buys back the work the page was doing twice, not the work of
+         * showing the answer.
+         */
+        function applyFilters(): void {
+
+            // What is shown changes wholesale, so the fraction the last
+            // correction was short is about a layout that no longer exists.
+            scrollDebt = 0;
+
+            const lines = lineBox.children;
+            const many  = Math.min(lines.length, logs.entries.length);
+
+            shown = 0;
+
+            for (let index = 0; index < many; index++) {
+
+                // Line 0 is the newest entry, which is the last one the store
+                // holds. Lines and entries are kept the same length, so this
+                // pairing stays exact - and it is the same function the drawing
+                // above goes by, which is the point of it being one.
+                const wanted = matches(entryAt(logs.entries, index)!);
+
+                lines[index]!.classList.toggle('filtered-out', !wanted);
+
+                if (wanted)
+                    shown++;
+
+            }
+
+            emptyNote.hidden = shown > 0;
+
+            updateCounts();
 
         }
 
         /** Only what is new: the usual case, and the cheap one. */
         function prepend(added: LogEntry[]): void {
 
-            const wanted = added.filter(matches);
-
-            if (wanted.length > 0) {
+            if (added.length > 0) {
 
                 const stick = follow.checked && atTop();
 
-                list.querySelector('.log-empty')?.remove();
-
-                // Whatever goes in above the line that is first right now
-                // pushes that line down by its own height, so asking the line
-                // how far it moved is asking how much was added - and asking
-                // it this way answers in fractions of a pixel.
+                // Where the line that is at the top sits right now. Everything
+                // below it is about to be pushed down by whatever goes in
+                // above, and how far this one moved is that distance - and
+                // asking it this way answers in fractions of a pixel.
                 //
                 // The obvious way is the difference of two scrollHeights, and
                 // that one is rounded to whole pixels. Half a pixel lost per
                 // batch is invisible in any one of them and is still there
-                // after the next thousand, which on a busy log is an hour.
-                const anchor    = list.firstElementChild;
-                const anchorTop = anchor?.getBoundingClientRect().top ?? 0;
+                // after the next thousand, which on a busy log is an hour. Nor
+                // would it be the right number any more: the trimming below
+                // takes lines off the bottom, and the filtering hides some of
+                // what just went in.
+                const anchor    = lineBox.firstElementChild;
+                const anchorWas = anchor?.getBoundingClientRect().top ?? 0;
 
                 // Turned around inside the batch as well: a burst that arrives
                 // in one event would otherwise sit at the top back to front.
-                list.insertAdjacentHTML('afterbegin', wanted.reverse().map(lineHTML).join(''));
+                const batch = [...added].reverse();
 
-                // Read before the trimming below, which takes its lines off
-                // the bottom - that moves nothing above it, but it can take
-                // the anchor itself when the store has just wrapped.
-                const grew = anchor
-                                 ? anchor.getBoundingClientRect().top - anchorTop
-                                 : 0;
+                lineBox.insertAdjacentHTML('afterbegin', batch.map(lineHTML).join(''));
 
                 // The local controller keeps a bounded log and so does this page; what
                 // fell out of the store has to leave the list as well - and that is
                 // the oldest, which is now the last line rather than the first.
-                while (list.childElementCount > logs.entries.length)
-                    list.lastElementChild?.remove();
+                // The lines and the entries stay the same length, which is what
+                // lets a filter be applied by position above.
+                while (lineBox.childElementCount > logs.entries.length) {
 
-                if (stick)
-                    scrollToTop();
+                    if (lineBox.lastElementChild?.classList.contains('filtered-out') === false)
+                        shown--;
 
-                else {
-                    // Lines going in above the viewport push everything below
-                    // them down, so the older line somebody stopped to read
-                    // would walk off the screen at the speed the log fills.
-                    // Put the view back where it was, by exactly what was
-                    // added and whatever the last correction was short.
-                    const asked     = list.scrollTop + grew + scrollDebt;
-                    list.scrollTop  = asked;
+                    lineBox.lastElementChild?.remove();
 
-                    // What the browser took is not always what it was asked
-                    // for. Only the snapping is worth carrying: when it
-                    // refuses a larger jump than that - the list is at its end
-                    // already, or the trimming above took the ground away -
-                    // the difference is not a rounding error, and carrying it
-                    // would be arguing with the browser rather than with the
-                    // arithmetic.
-                    const refused   = asked - list.scrollTop;
-                    scrollDebt      = Math.abs(refused) < 1 ? refused : 0;
-
-                    toTop.hidden    = false;
                 }
+
+                // Only the new lines are asked about, and they are the first
+                // ones now. Asking the whole list again would put the cost of
+                // a filter change on every single line the local controller writes.
+                let any = false;
+
+                batch.forEach((entry, index) => {
+
+                    const wanted = matches(entry);
+
+                    lineBox.children[index]?.classList.toggle('filtered-out', !wanted);
+
+                    if (wanted) {
+                        shown++;
+                        any = true;
+                    }
+
+                });
+
+                emptyNote.hidden = shown > 0;
+
+                if (any) {
+
+                    if (stick)
+                        scrollToTop();
+
+                    else {
+                        // Lines going in above the viewport push everything
+                        // below them down, so the older line somebody stopped
+                        // to read would walk off the screen at the speed the
+                        // log fills. Put the view back where it was, by
+                        // exactly how far that line moved and whatever the
+                        // last correction was short.
+                        //
+                        // Asked after the filtering above rather than before
+                        // it: a hidden line has no height, so a batch the
+                        // filters swallowed moved nothing and is owed nothing.
+                        // And asked of the line itself, which the trimming can
+                        // have taken when the store has just wrapped - then
+                        // there is nothing left to hold still.
+                        if (anchor?.isConnected) {
+
+                            const asked    = list.scrollTop + scrollDebt +
+                                             anchor.getBoundingClientRect().top - anchorWas;
+
+                            list.scrollTop = asked;
+
+                            // What the browser took is not always what it
+                            // was asked for. Only the snapping is worth
+                            // carrying: when it refuses a larger jump than
+                            // that - the list is at its end already, or the
+                            // trimming above took the ground away - the
+                            // difference is not a rounding error, and carrying
+                            // it would be arguing with the browser rather than
+                            // with the arithmetic.
+                            const refused  = asked - list.scrollTop;
+                            scrollDebt     = Math.abs(refused) < 1 ? refused : 0;
+
+                        }
+
+                        toTop.hidden = false;
+                    }
+
+                }
+
+                updateCounts();
 
             }
 
-            updateCounts();
             drawTags();
 
         }
 
         function updateCounts(): void {
-
-            const shown = list.querySelectorAll('.line').length;
 
             counts.textContent = `${shown} of ${logs.entries.length} entries` +
                                  (logs.capacity > 0 ? ` (the local controller keeps the last ${logs.capacity})` : '');
@@ -315,12 +425,13 @@ export const logsPage: Page = {
                 chosenTags.add(tag);
 
             renderedTags = '';
-            redraw();
+            applyFilters();
+            drawTags();
 
         });
 
-        search  .addEventListener('input',  () => redraw());
-        level   .addEventListener('change', () => redraw());
+        search  .addEventListener('input',  () => applyFilters());
+        level   .addEventListener('change', () => applyFilters());
         follow  .addEventListener('change', () => { if (follow.checked) scrollToTop(); });
         toTop   .addEventListener('click',  () => scrollToTop());
         clear   .addEventListener('click',  () => logs.clear());
@@ -339,6 +450,7 @@ export const logsPage: Page = {
                     break;
 
                 case 'reloaded':
+                    errorNote.hidden = true;
                     redraw();
                     break;
 
@@ -347,7 +459,8 @@ export const logsPage: Page = {
                     break;
 
                 case 'error':
-                    list.insertAdjacentHTML('afterbegin', `<div class="line error"><span class="message">${escapeHTML(event.text)}</span></div>`);
+                    errorNote.innerHTML = `<span class="message">${escapeHTML(event.text)}</span>`;
+                    errorNote.hidden    = false;
                     break;
 
             }

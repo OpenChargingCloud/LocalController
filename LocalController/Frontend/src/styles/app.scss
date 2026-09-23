@@ -910,6 +910,12 @@ table.records {
         font-size:    0.9rem;
     }
 
+    // A line the filters are not letting through. It stays where it is rather
+    // than being taken out and built again the next time it is wanted.
+    .line.filtered-out {
+        display: none;
+    }
+
 }
 
 .line {
