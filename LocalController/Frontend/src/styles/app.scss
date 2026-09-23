@@ -103,6 +103,17 @@ h1, h2 {
         cursor:   default;
     }
 
+    // The hidden attribute is a rule of the browser's own stylesheet, and any
+    // rule in this one beats it - so the display above quietly puts a button
+    // that has set hidden back on the screen, and the attribute keeps saying
+    // it is gone. Said again here, with the attribute in the selector, it wins
+    // on specificity and means what it says. Only the Logs page uses hidden
+    // today, and only on a .btn; a hidden element that is not one would need
+    // the same line of its own.
+    &[hidden] {
+        display:  none;
+    }
+
     &.primary {
         background:    $color-accent;
         border-color:  $color-accent;
