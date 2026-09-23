@@ -91,17 +91,17 @@ export const logsPage: Page = {
         let renderedTags = '';
 
         /**
-         * What the browser would not take of the last correction.
+         * What the last correction still owes the view.
          *
          * scrollTop snaps to whole device pixels, so asking for 24.32 px on a
          * screen of one and a half sets 24 and drops the rest. Every line of a
          * log is the same height, so the same fraction is dropped every time -
          * this is not noise that cancels itself out but a drift in one
          * direction, a third of a pixel a line, a screenful over a busy
-         * evening. Kept here and added to the next correction, where the
+         * evening. Carried here and added to the next correction, where the
          * browser can finally take it.
          */
-        let unusedScroll = 0;
+        let scrollDebt = 0;
 
 
         function matches(entry: LogEntry): boolean {
@@ -157,7 +157,7 @@ export const logsPage: Page = {
 
         function scrollToTop(): void {
             list.scrollTop = 0;
-            unusedScroll   = 0;
+            scrollDebt     = 0;
             toTop.hidden   = true;
         }
 
@@ -165,7 +165,7 @@ export const logsPage: Page = {
         function redraw(): void {
 
             // Everything is drawn again, so nothing is owed from before.
-            unusedScroll = 0;
+            scrollDebt = 0;
 
             // The store keeps its entries oldest first, because that is the
             // order their ids come in and the order the next batch continues;
@@ -231,7 +231,7 @@ export const logsPage: Page = {
                     // would walk off the screen at the speed the log fills.
                     // Put the view back where it was, by exactly what was
                     // added and whatever the last correction was short.
-                    const asked     = list.scrollTop + grew + unusedScroll;
+                    const asked     = list.scrollTop + grew + scrollDebt;
                     list.scrollTop  = asked;
 
                     // What the browser took is not always what it was asked
@@ -242,7 +242,7 @@ export const logsPage: Page = {
                     // would be arguing with the browser rather than with the
                     // arithmetic.
                     const refused   = asked - list.scrollTop;
-                    unusedScroll    = Math.abs(refused) < 1 ? refused : 0;
+                    scrollDebt      = Math.abs(refused) < 1 ? refused : 0;
 
                     toTop.hidden    = false;
                 }
