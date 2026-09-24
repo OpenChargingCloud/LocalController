@@ -382,6 +382,41 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region AChangeToOneServerIsWrittenDown()
+
+        /// <summary>
+        /// A server given another priority or a port of its own is a change to
+        /// the group, and the log book hears of it.
+        /// </summary>
+        /// <remarks>
+        /// The log compared the names of the servers switched on, in the order
+        /// they are asked. A priority that put a server into a band of its own
+        /// at the end, and a port of its own, left those just as they were -
+        /// and so the group changed without a line saying so.
+        /// </remarks>
+        [Test]
+        public async Task AChangeToOneServerIsWrittenDown()
+        {
+
+            await using var controller = Controller("""{ "nts": { "servers": [ "a.example", "b.example" ] } }""");
+
+            var before = controller.Log.LastId;
+
+            Assert.That(controller.TryUpdateNTSConfiguration(JObject.Parse("""
+                            { "servers": [ "a.example", { "hostname": "b.example", "priority": 5, "ntsKEPort": 4461 } ] }
+                            """), out var error),
+                        Is.True,
+                        error);
+
+            var said = controller.Log.Recent(50, before, null).Select(entry => entry.Message).ToArray();
+
+            Assert.That(said,  Has.Some.Contains("time servers = a.example, b.example (priority 5, NTS-KE port 4461)"),
+                        String.Join(" | ", said));
+
+        }
+
+        #endregion
+
         #region ADeviationStaysWhenTheServersChange()
 
         /// <summary>

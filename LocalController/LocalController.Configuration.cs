@@ -466,6 +466,38 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
+        #region (private static) Described(Group)
+
+        /// <summary>
+        /// A group of time servers as a log line names it: every server in the
+        /// order configured, with whatever about it is not the usual.
+        /// </summary>
+        /// <remarks>
+        /// All of them, and all of that, because this is also what a change is
+        /// found by. It used to be the names of the servers switched on, in the
+        /// order they are asked: a server given another priority or a port of
+        /// its own was a change the log book never heard of, and one switched
+        /// off simply went missing from the line.
+        /// </remarks>
+        private static String Described(TimeSourceGroup Group)
+
+            => String.Join(", ", Group.Sources.Select(source => {
+
+                   var unusual = new List<String>();
+
+                   if (source.Priority  != 0)                            unusual.Add($"priority {source.Priority}");
+                   if (source.NTSKEPort != NTSClient.DefaultNTSKE_Port)  unusual.Add($"NTS-KE port {source.NTSKEPort}");
+                   if (source.NTPPort   != NTSClient.DefaultNTP_Port)    unusual.Add($"NTP port {source.NTPPort}");
+                   if (!source.Enabled)                                  unusual.Add("switched off");
+
+                   return unusual.Count == 0
+                              ? source.Hostname.Trimmed
+                              : $"{source.Hostname.Trimmed} ({String.Join(", ", unusual)})";
+
+               }));
+
+        #endregion
+
         #region (private) TryCheckNTSQuorum(Configuration, out Error)
 
         /// <summary>
@@ -533,7 +565,7 @@ namespace cloud.charging.open.LocalController
 
             #region The group of time servers
 
-            var wasAsking     = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.Trimmed));
+            var wasServers    = Described(timeSources);
             var wasQuorum     = timeSources.MinServers;
             var wasDeviation  = timeSources.MaxDeviation;
 
@@ -568,10 +600,10 @@ namespace cloud.charging.open.LocalController
                                     Configuration.MaxDeviation ?? timeSources.MaxDeviation
                                 );
 
-            var nowAsking     = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.Trimmed));
+            var nowServers    = Described(timeSources);
 
-            if (wasAsking != nowAsking)
-                changed.Add($"time servers = {nowAsking}");
+            if (wasServers != nowServers)
+                changed.Add($"time servers = {nowServers}");
 
             if (wasQuorum != timeSources.MinServers)
                 changed.Add($"quorum = {timeSources.MinServers}");
