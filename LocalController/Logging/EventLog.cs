@@ -83,6 +83,20 @@ namespace cloud.charging.open.LocalController.Logging
         public TimeProvider  TimeProvider  { get; }
 
         /// <summary>
+        /// What puts a complaint of this log about itself on the console as one
+        /// piece - see <see cref="Complain"/>. By default it just writes it.
+        /// </summary>
+        /// <remarks>
+        /// Settable for the reason the console log's WriteBlock is: once a
+        /// command line is being typed on the same console, whatever is written
+        /// there has to go around that line, and only whoever draws the line
+        /// knows how. The local controller puts the same block here as on its
+        /// console log, so that a complaint lands neither in the middle of an
+        /// entry nor past a command somebody is typing.
+        /// </remarks>
+        public Action<Action>  ComplaintBlock  { get; set; } = write => write();
+
+        /// <summary>
         /// The number of the newest entry; 0 when nothing has been logged yet.
         /// </summary>
         public UInt64  LastId
@@ -126,8 +140,8 @@ namespace cloud.charging.open.LocalController.Logging
         /// <summary>
         /// Sent for every new entry, while the caller of <see cref="Log"/>
         /// waits - so a listener has to be quick and must not throw. One that
-        /// does throw is caught here: a broken listener must not swallow the
-        /// event that was being logged.
+        /// does throw is caught here and complained about: a broken listener
+        /// must not swallow the event that was being logged.
         /// </summary>
         public event Action<LogEntry>? OnLogged;
 
@@ -225,9 +239,8 @@ namespace cloud.charging.open.LocalController.Logging
                     }
                     catch (Exception e)
                     {
-                        // Logging the failure of a log listener through the log
-                        // would be a fine way to spend an afternoon in a loop.
-                        Console.Error.WriteLine($"An event log listener failed: {e.Message}");
+                        // Beside the log and not through it - see Complain.
+                        Complain($"An event log listener failed: {e.Message}");
                     }
                 }
             }
@@ -282,6 +295,59 @@ namespace cloud.charging.open.LocalController.Logging
 
         #endregion
 
+
+        #region Complain(Complaint)
+
+        /// <summary>
+        /// Say on stderr what is wrong with this log itself: a listener that
+        /// failed, a file that cannot be written.
+        /// </summary>
+        /// <remarks>
+        /// On stderr and not through the log, because a complaint about the log
+        /// that went through the log would come back to whatever failed and fail
+        /// again - a fine way to spend an afternoon in a loop. And through the
+        /// <see cref="ComplaintBlock"/>, because the console may have a command
+        /// line on it that somebody is typing.
+        ///
+        /// Never with an exception, since a complaint is made where something
+        /// has gone wrong already - and often what went wrong is the console: a
+        /// listener fails because the command line could not draw itself, and
+        /// then the block fails as well. The complaint is written without it
+        /// rather than not at all, and not a second time when the block got as
+        /// far as writing it. One that cannot be written anywhere is dropped;
+        /// there is nobody left to tell.
+        /// </remarks>
+        /// <param name="Complaint">One line, as somebody would read it.</param>
+        public void Complain(String Complaint)
+        {
+
+            var written = false;
+
+            try
+            {
+                ComplaintBlock(() => {
+                    Console.Error.WriteLine(Complaint);
+                    written = true;
+                });
+            }
+            catch
+            {
+
+                if (!written)
+                {
+                    try
+                    {
+                        Console.Error.WriteLine(Complaint);
+                    }
+                    catch
+                    { }
+                }
+
+            }
+
+        }
+
+        #endregion
 
         #region Recent(Limit, After = null, Tag = null)
 
