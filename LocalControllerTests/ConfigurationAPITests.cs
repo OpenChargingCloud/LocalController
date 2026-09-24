@@ -339,12 +339,18 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 // Switched off by the fixture, so that no test reaches the
-                // network - the server it would ask is still named.
+                // network - the servers it would ask are still named.
                 Assert.That(nts.Value<Boolean>("enabled"),                Is.False);
-                Assert.That(nts["server"]?.Value<String>("hostname"),     Is.Not.Null.And.Not.Empty);
-                Assert.That(nts["cookies"],                               Is.Not.Null);
-                Assert.That(nts["keyExchange"],                           Is.Not.Null);
                 Assert.That(nts.Value<String>("file"),                    Is.EqualTo(Controller.ConfigFile.Path));
+
+                // What the page draws its list of time servers from. A
+                // controller nobody has configured asks the PTB's four, so the
+                // list has four to draw rather than nothing.
+                Assert.That(nts["timeSources"],                           Is.Not.Null.And.Count.EqualTo(4));
+                Assert.That(nts["timeSources"]?[0]?.Value<String>("hostname"),
+                                                                          Is.EqualTo(Controller.NTSClient.Hostname.ToString()));
+                Assert.That(nts["group"]?.Value<String>("name"),          Is.EqualTo("legal"));
+                Assert.That(nts["group"]?.Value<Byte>  ("minServers"),    Is.EqualTo(2));
             });
 
         }

@@ -460,6 +460,16 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(time?["lastSync"]?.      Type,       Is.EqualTo(JTokenType.Null));
                 Assert.That(time?["lastSyncResult"]?.Type,       Is.EqualTo(JTokenType.Null));
 
+                // Nor does the NTS answer carry the single client any more:
+                // its host, its cookie pool and its last key exchange read as
+                // this controller's time server and the cookies it checks its
+                // clock with, and were neither.
+                var nts = controller.NTSConfigurationJSON();
+
+                Assert.That(nts.ContainsKey("server"),           Is.False);
+                Assert.That(nts.ContainsKey("cookies"),          Is.False);
+                Assert.That(nts.ContainsKey("keyExchange"),      Is.False);
+
             });
 
         }
