@@ -456,11 +456,11 @@ namespace cloud.charging.open.LocalController
                 // Rebuilt from the section rather than patched: it is a list, and
                 // working out which entry changed in order to report it would say
                 // less than naming the servers, which is what happens below.
-                var wasAsking  = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.ToString()));
+                var wasAsking  = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.Trimmed));
 
                 timeSources    = Configuration.ToGroup(Configuration.Hostname ?? ntsClient.Hostname);
 
-                var nowAsking  = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.ToString()));
+                var nowAsking  = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.Trimmed));
 
                 if (wasAsking != nowAsking)
                     changed.Add($"time servers = {nowAsking}");

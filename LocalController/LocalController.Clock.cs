@@ -125,7 +125,12 @@ namespace cloud.charging.open.LocalController
             // Named rather than counted, because this is written once at a
             // start and somebody reading it is checking that the file took
             // effect. "4 time servers" would not tell them which four.
-            var asking = timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.ToString()).ToArray();
+            //
+            // Trimmed, because this is a sentence somebody reads. The root
+            // dot belongs on a name going back into a file - see how the
+            // configuration is written - and not in the middle of a line of
+            // prose, where it reads as a typing mistake.
+            var asking = timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.Trimmed).ToArray();
 
             Log.Info(
                 $"The clock of this local controller will be checked against {String.Join(", ", asking)} every {TimeCheckEvery.TotalMinutes:F0} minute(s)" +

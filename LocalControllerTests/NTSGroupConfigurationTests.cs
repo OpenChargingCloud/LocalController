@@ -347,6 +347,38 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region TheClockLineNamesTheServersAsTheyAreRead()
+
+        /// <summary>
+        /// The line a start writes about the clock names the servers as a
+        /// sentence names them - without the root's dot, which a domain name
+        /// prints itself with and which, four times in a row, reads as four
+        /// typing mistakes.
+        /// </summary>
+        /// <remarks>
+        /// Started, because that is when the line is written; the first check
+        /// is a minute after that, and the controller is gone long before.
+        /// </remarks>
+        [Test]
+        public async Task TheClockLineNamesTheServersAsTheyAreRead()
+        {
+
+            await using var controller = TestControllers.New(directory);
+
+            await controller.Start();
+
+            var line = controller.Log.Recent(200).
+                                      Select(entry => entry.Message).
+                                      FirstOrDefault(message => message.Contains("will be checked against"));
+
+            Assert.That(line,  Is.EqualTo("The clock of this local controller will be checked against " +
+                                          "ptbtime1.ptb.de, ptbtime2.ptb.de, ptbtime3.ptb.de, ptbtime4.ptb.de " +
+                                          "every 15 minute(s), at least 2 of which must answer."));
+
+        }
+
+        #endregion
+
         #region ASectionThatOnlySwitchesNTSLeavesTheServersAlone()
 
         /// <summary>
