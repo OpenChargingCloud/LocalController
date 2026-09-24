@@ -21,7 +21,9 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.DNS;
+using org.GraphDefined.Vanaheimr.Norn.NTS;
 
 using cloud.charging.open.LocalController.Configuration;
 
@@ -150,6 +152,46 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region TheDefaultIsFourPeersAndAQuorumOfTwo()
+
+        /// <summary>
+        /// What a local controller asks when its configuration says nothing
+        /// at all.
+        /// </summary>
+        /// <remarks>
+        /// One band rather than two: the PTB's four are peers, and splitting
+        /// them into a first choice and a fallback would say something about
+        /// them that is not true. A quorum of two, so that one host being away
+        /// is survivable and one host being wrong is visible.
+        /// </remarks>
+        [Test]
+        public void TheDefaultIsFourPeersAndAQuorumOfTwo()
+        {
+
+            var group = NTSConfiguration.DefaultGroup();
+            var bands = group.Bands();
+
+            Assert.Multiple(() => {
+
+                Assert.That(bands,             Has.Count.EqualTo(1),  "peers, not a first choice and a fallback");
+                Assert.That(bands[0],          Has.Count.EqualTo(4));
+                Assert.That(group.MinServers,  Is.EqualTo(2));
+
+                Assert.That(bands[0].Select(source => source.Hostname.ToString()),
+                            Is.EqualTo(new[] { "ptbtime1.ptb.de.", "ptbtime2.ptb.de.",
+                                               "ptbtime3.ptb.de.", "ptbtime4.ptb.de." }));
+
+                // The single-server default is the first of them, so a client
+                // built the old way and this group cannot name different hosts.
+                Assert.That(bands[0][0].Hostname.ToString(),
+                            Is.EqualTo(DomainName.Parse(NTSConfiguration.DefaultHostname).ToString()));
+
+            });
+
+        }
+
+        #endregion
+
         #region AnEmptySectionFallsBackToTheGivenServer()
 
         [Test]
@@ -270,28 +312,94 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region AGroupOfOneIsWhatAControllerStartsWith()
+        #region TheDefaultFourAreWhatAControllerStartsWith()
 
         /// <summary>
-        /// A station handed nothing but a time client has a group of one, so
-        /// that everything reading the group reads something rather than
-        /// checking for null first.
+        /// A local controller nobody has configured asks the PTB's four.
         /// </summary>
         /// <remarks>
-        /// This is the case every existing installation is in, and the one a
-        /// port to groups is likeliest to break: the controller is built the way
-        /// it has always been built, with no "nts" section at all.
+        /// This is the case every existing installation is in - built the way
+        /// it has always been built, with no "nts" section at all - and it
+        /// used to be a group of one. Four is the better default for a clock
+        /// the charging stations below are billed by: one host being rebooted
+        /// no longer leaves the controller without a time, and two that agree
+        /// catch what one cannot, a server that is wrong rather than absent.
+        ///
+        /// The first of the four is still what the single-server client points
+        /// at, so the group and the client cannot name different hosts - which
+        /// is what the third assertion is for, and why it reads the same as it
+        /// did when there was only one.
         /// </remarks>
         [Test]
-        public async Task AGroupOfOneIsWhatAControllerStartsWith()
+        public async Task TheDefaultFourAreWhatAControllerStartsWith()
         {
 
             await using var controller = TestControllers.New(directory);
 
             Assert.Multiple(() => {
+                Assert.That(controller.TimeSources.Bands(),                 Has.Count.EqualTo(1),  "peers, asked together");
+                Assert.That(controller.TimeSources.Bands()[0],              Has.Count.EqualTo(4));
+                Assert.That(controller.TimeSources.Bands()[0][0].Hostname,  Is.EqualTo(controller.NTSClient.Hostname));
+                Assert.That(controller.TimeSources.MinServers,              Is.EqualTo(2));
+            });
+
+        }
+
+        #endregion
+
+        #region ASectionThatOnlySwitchesNTSLeavesTheServersAlone()
+
+        /// <summary>
+        /// A section that says nothing but "enabled" says nothing about the
+        /// servers, and leaves the four alone - rather than quietly reducing
+        /// them to the one the single-server client points at, which is what
+        /// rebuilding the group from every section used to do.
+        /// </summary>
+        /// <remarks>
+        /// The very section every test fixture here starts its controller with.
+        /// </remarks>
+        [Test]
+        public async Task ASectionThatOnlySwitchesNTSLeavesTheServersAlone()
+        {
+
+            await using var controller = TestControllers.New(directory, TestControllers.Offline);
+
+            Assert.Multiple(() => {
+                Assert.That(controller.NTSEnabled,                          Is.False);
+                Assert.That(controller.TimeSources.Bands()[0],              Has.Count.EqualTo(4));
+                Assert.That(controller.TimeSources.MinServers,              Is.EqualTo(2));
+            });
+
+        }
+
+        #endregion
+
+        #region AControllerHandedAClientAsksThatServerAlone()
+
+        /// <summary>
+        /// A caller that hands in its own time client means that server, and
+        /// gets a group of one built from it: four others beside it would be a
+        /// report about somebody else's clock.
+        /// </summary>
+        [Test]
+        public async Task AControllerHandedAClientAsksThatServerAlone()
+        {
+
+            Directory.CreateDirectory(directory);
+
+            await using var controller = new LocalController(
+                                             HTTPPort:        IPPort.Parse(TestControllers.FreePort()),
+                                             AccountsPath:    Path.Combine(directory, "accounts"),
+                                             ConfigFile:      new ControllerConfigFile(Path.Combine(directory, "configuration.json")),
+                                             NTSClient:       new NTSClient(DomainName.Parse("time.example.org")),
+                                             LogToConsole:    false,
+                                             BridgeDebugLog:  false
+                                         );
+
+            Assert.Multiple(() => {
                 Assert.That(controller.TimeSources.Bands(),                 Has.Count.EqualTo(1));
                 Assert.That(controller.TimeSources.Bands()[0],              Has.Count.EqualTo(1));
-                Assert.That(controller.TimeSources.Bands()[0][0].Hostname,  Is.EqualTo(controller.NTSClient.Hostname));
+                Assert.That(controller.TimeSources.Bands()[0][0].Hostname,  Is.EqualTo(DomainName.Parse("time.example.org")));
                 Assert.That(controller.TimeSources.MinServers,              Is.EqualTo(1));
             });
 

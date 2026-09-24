@@ -444,17 +444,28 @@ namespace cloud.charging.open.LocalController
 
             #region The group of time servers
 
-            // Rebuilt from the section rather than patched: it is a list, and
-            // working out which entry changed in order to report it would say
-            // less than naming the servers, which is what happens below.
-            var wasAsking  = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.ToString()));
+            // Only when the section says something about them. That is this
+            // method's rule everywhere else, and it earns its place here now
+            // that the servers have a default worth keeping: a section
+            // mentioning nothing but "enabled" would otherwise quietly reduce
+            // four servers to one.
+            if (Configuration.Servers  is not null ||
+                Configuration.Hostname is not null)
+            {
 
-            timeSources    = Configuration.ToGroup(Configuration.Hostname ?? ntsClient.Hostname);
+                // Rebuilt from the section rather than patched: it is a list, and
+                // working out which entry changed in order to report it would say
+                // less than naming the servers, which is what happens below.
+                var wasAsking  = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.ToString()));
 
-            var nowAsking  = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.ToString()));
+                timeSources    = Configuration.ToGroup(Configuration.Hostname ?? ntsClient.Hostname);
 
-            if (wasAsking != nowAsking)
-                changed.Add($"time servers = {nowAsking}");
+                var nowAsking  = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.ToString()));
+
+                if (wasAsking != nowAsking)
+                    changed.Add($"time servers = {nowAsking}");
+
+            }
 
             #endregion
 

@@ -110,6 +110,37 @@ namespace cloud.charging.open.LocalController.Configuration
         public const String  DefaultHostname      = "ptbtime1.ptb.de";
 
         /// <summary>
+        /// The time servers this local controller asks when its configuration
+        /// names none.
+        /// </summary>
+        /// <remarks>
+        /// All four of the PTB's, as one band: they are peers, not a first
+        /// choice and a fallback, and putting them in separate bands would say
+        /// something about them that is not true.
+        ///
+        /// Four rather than one because one host being rebooted should not
+        /// leave this controller without a clock, and because two servers that
+        /// agree catch what one server cannot: a server that is wrong rather
+        /// than absent.
+        ///
+        /// <see cref="DefaultHostname"/> is the first of them, and is what a
+        /// single-server client still uses.
+        /// </remarks>
+        public static readonly IReadOnlyList<String>  DefaultHostnames = [
+                                                          "ptbtime1.ptb.de",
+                                                          "ptbtime2.ptb.de",
+                                                          "ptbtime3.ptb.de",
+                                                          "ptbtime4.ptb.de"
+                                                      ];
+
+        /// <summary>
+        /// How many of them have to answer, when the configuration says
+        /// nothing: two, so that one host being away is survivable and one
+        /// host being wrong is visible.
+        /// </summary>
+        public const Byte  DefaultMinServers = 2;
+
+        /// <summary>
         /// The longest an exchange may be allowed to take, in seconds. An hour
         /// is not a timeout any more, and zero is not one either.
         /// </summary>
@@ -216,6 +247,19 @@ namespace cloud.charging.open.LocalController.Configuration
             return true;
 
         }
+
+        #endregion
+
+        #region (static) DefaultGroup()
+
+        /// <summary>
+        /// The group a local controller asks when nothing has said otherwise.
+        /// </summary>
+        public static TimeSourceGroup DefaultGroup()
+
+            => new ("legal",
+                    DefaultHostnames.Select(hostname => new NTSServerEndpoint(DomainName.Parse(hostname))),
+                    DefaultMinServers);
 
         #endregion
 
