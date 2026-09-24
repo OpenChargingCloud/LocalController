@@ -15,5 +15,10 @@
     "sourceMap": true,
     "newLine": "lf"
   },
-  "include": [ "src/**/*.ts" ]
+  "include": [ "src/**/*.ts" ],
+
+  // The tests are read by Node rather than by webpack, and spell their imports
+  // the way Node wants them - with the extension - which ts-loader's own
+  // settings may not allow. They are checked by tsconfig.test.json instead.
+  "exclude": [ "src/**/*.test.ts" ]
 }

@@ -1,0 +1,15 @@
+{
+  // The same rules as the page, for the files Node runs rather than webpack:
+  // they import with the extension spelled out, which needs saying, and they
+  // are never emitted.
+  "extends": "./tsconfig.json",
+
+  "compilerOptions": {
+    "types":                      [ "node" ],
+    "noEmit":                     true,
+    "allowImportingTsExtensions": true
+  },
+
+  "include": [ "src/**/*.test.ts" ],
+  "exclude": []
+}

@@ -10,7 +10,9 @@
   "scripts": {
     "build": "webpack --mode production",
     "watch": "webpack --mode development --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "devDependencies": {
     "css-loader": "^7.1.5",

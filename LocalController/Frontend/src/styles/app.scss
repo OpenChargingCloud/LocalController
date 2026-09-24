@@ -512,6 +512,26 @@ input, textarea, select {
     grid-column: 1 / -1;
 }
 
+// One card under the other, each as wide as the page: for a page that is read
+// from the top down rather than taken in at a glance. What is inside keeps to
+// a width that can be read - a form, or names beside their values, stretched
+// across a wide screen puts a label a screen away from what it labels, and a
+// name server's buttons a screen away from its address.
+.cards.stacked {
+
+    grid-template-columns: minmax(0, 1fr);
+
+    .form-stack,
+    .kv-list {
+        max-width: 36rem;
+    }
+
+    .server-list {
+        max-width: 44rem;
+    }
+
+}
+
 .kv-list {
     display:         flex;
     flex-direction:  column;
@@ -629,6 +649,151 @@ input, textarea, select {
 
     input.port {
         width: 5.5rem;
+    }
+
+}
+
+// A path in a sentence, which has no spaces for a line to break at and would
+// otherwise run out of its card.
+.path {
+    overflow-wrap:  anywhere;
+}
+
+// The time servers of the NTS page.
+//
+// One row per server, with what it said the last time it was asked, the root
+// its last key exchange ended at, and what can be done with it on the right;
+// "Sync now" in a card of its own below, big, because asking all of them is
+// what the page is mostly for.
+.btn.large {
+    padding:    0.65rem 1.3rem;
+    font-size:  1.05rem;
+}
+
+.sync-bar {
+
+    display:      flex;
+    align-items:  center;
+    gap:          1rem;
+    flex-wrap:    wrap;
+
+    .hint {
+        flex:  1 1 18rem;
+    }
+
+}
+
+.sync-verdict {
+    margin-top:  0.75rem;
+}
+
+// Measured by its own width rather than the window's, which is what the rows
+// below lay themselves out by: the same window leaves this list more room
+// with the menu along the top than beside it.
+.time-server-list {
+    display:         flex;
+    flex-direction:  column;
+    margin:          0 0 0.25rem;
+    container-type:  inline-size;
+}
+
+.time-server-row {
+
+    display:                grid;
+    grid-template-columns:  minmax(10rem, 1fr) minmax(12rem, 1.3fr) minmax(14rem, 1.3fr) auto;
+    grid-template-areas:    "who said root actions";
+    gap:                    0.4rem 1rem;
+    align-items:            center;
+    padding:                0.6rem 0.25rem;
+
+    + .time-server-row {
+        border-top: 1px solid $color-border;
+    }
+
+    .who, .said, .root-ca {
+        display:         flex;
+        flex-direction:  column;
+        gap:             0.1rem;
+        min-width:       0;
+    }
+
+    .who      { grid-area: who;     }
+    .said     { grid-area: said;    }
+    .root-ca  { grid-area: root;    }
+    .actions  { grid-area: actions; }
+
+    // The root CA's fingerprint is compared character by character with a
+    // pinned one, so it is shown whole - in a typewriter face, and allowed to
+    // break anywhere, because 64 characters have nowhere else to break.
+    .fingerprint {
+        font-family:    $font-mono;
+        font-size:      0.75rem;
+        color:          $color-muted;
+        overflow-wrap:  anywhere;
+    }
+
+    .name {
+        font-weight:  600;
+        word-break:   break-all;
+    }
+
+    .answer.ok  { color: $color-ok;    }
+    .answer.bad { color: $color-error; }
+
+    .actions {
+        display:  flex;
+        gap:      0.4rem;
+    }
+
+    // Still in the list, and not asked: there, but quieter.
+    &.off .name {
+        color:            $color-muted;
+        text-decoration:  line-through;
+    }
+
+}
+
+// Narrower, the root CA goes under what the server said rather than pushing
+// the buttons out of the card.
+@container (max-width: 56rem) {
+    .time-server-row {
+        grid-template-columns:  minmax(10rem, 1fr) minmax(12rem, 1.6fr) auto;
+        grid-template-areas:    "who said actions"
+                                "who root actions";
+    }
+}
+
+// On a phone the row stacks: name, what it said, the root CA, then the button.
+@container (max-width: 34rem) {
+    .time-server-row {
+        grid-template-columns:  1fr;
+        grid-template-areas:    "who" "said" "root" "actions";
+    }
+}
+
+// The dialog a time server is added, changed or deleted in.
+.server-dialog {
+
+    width:            min(30rem, 92vw);
+    max-height:       82vh;
+    overflow-y:       auto;
+    border:           1px solid $color-border;
+    border-radius:    $radius;
+    padding:          1.1rem 1.25rem;
+    background:       $color-surface;
+    color:            $color-text;
+    box-shadow:       0 12px 40px rgba(0, 0, 0, 0.22);
+
+    &::backdrop {
+        background:   rgba(15, 23, 42, 0.45);
+    }
+
+    h2 {
+        margin:       0 0 0.85rem;
+        font-size:    1.05rem;
+        display:      flex;
+        align-items:  center;
+        gap:          0.5rem;
     }
 
 }
