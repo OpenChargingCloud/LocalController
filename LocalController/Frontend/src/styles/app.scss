@@ -546,8 +546,14 @@ input, textarea, select {
     align-items:            baseline;
     font-size:              0.9rem;
 
+    // Allowed to break where it has to. A grid cell does not shrink below
+    // what its text needs, so a name with nothing to break at - a library's,
+    // a host's - ran out of its column and was drawn across the value beside
+    // it.
     .k, dt {
-        color: $color-muted;
+        color:          $color-muted;
+        min-width:      0;
+        overflow-wrap:  anywhere;
     }
 
     .v {
