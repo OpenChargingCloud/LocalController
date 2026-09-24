@@ -42,9 +42,10 @@ namespace cloud.charging.open.LocalController.Logging
     ///
     /// The tags are guessed from the text, by the table in
     /// <see cref="TagsFor"/> - a short, deliberate list of the protocol names
-    /// that matter here, and not an attempt to understand the line. A line
-    /// nothing matches is tagged "trace" alone, which is also how it can be
-    /// filtered away. What a local controller overhears is mostly OCPP going
+    /// that matter here, and not an attempt to understand the line. A name
+    /// counts where a word of its own could begin, not inside a word written in
+    /// lower case; see <see cref="Mentions"/>. A line nothing matches is tagged
+    /// "trace" alone, which is also how it can be filtered away. What a local controller overhears is mostly OCPP going
     /// past it in both directions, so the table leans that way: which side a
     /// line is about - the CSMS above or a charging station below - is worth
     /// more here than which layer it came from.
@@ -234,7 +235,7 @@ namespace cloud.charging.open.LocalController.Logging
 
         #endregion
 
-        #region (private static) TagsFor(Line) / LevelFor(Line)
+        #region (private static) TagsFor(Line) / Mentions(Line, Needle) / LevelFor(Line)
 
         /// <summary>
         /// What a bridged line is about, as far as its text gives it away.
@@ -246,7 +247,7 @@ namespace cloud.charging.open.LocalController.Logging
 
             foreach (var (needle, tag) in tagTable)
             {
-                if (Line.Contains(needle, StringComparison.OrdinalIgnoreCase) &&
+                if (Mentions(Line, needle) &&
                     !tags.Contains(tag))
                 {
                     tags.Add(tag);
@@ -254,6 +255,39 @@ namespace cloud.charging.open.LocalController.Logging
             }
 
             return [.. tags];
+
+        }
+
+        /// <summary>
+        /// Whether the line names the needle where a word of its own could
+        /// begin, rather than inside another word.
+        /// </summary>
+        /// <remarks>
+        /// Found anywhere, "nts" tagged every line that said "accounts",
+        /// "clients" or "events" as one about the time servers - the first
+        /// start's complaint about the account store among them. So a place
+        /// inside a word written in lower case does not count: the character
+        /// before it is a lower-case letter and so is its own first one.
+        /// Everything else still does - the start of the line, after a digit or
+        /// a sign, and at a capital, which is where "mDNS" and
+        /// "OCPPWebSocketServer" begin the words that matter. What follows the
+        /// name is not looked at, so that "OCPPv2.1", "https" and "certificates"
+        /// count as they did.
+        /// </remarks>
+        private static Boolean Mentions(String Line, String Needle)
+        {
+
+            for (var at = Line.IndexOf(Needle, StringComparison.OrdinalIgnoreCase);
+                 at >= 0;
+                 at = Line.IndexOf(Needle, at + 1, StringComparison.OrdinalIgnoreCase))
+            {
+
+                if (at == 0 || !Char.IsLower(Line[at - 1]) || !Char.IsLower(Line[at]))
+                    return true;
+
+            }
+
+            return false;
 
         }
 
