@@ -357,13 +357,14 @@ namespace cloud.charging.open.LocalController.Tests
         /// <remarks>
         /// Seen through the line the timer writes whenever it is set: a
         /// started controller writes it once at its start and again for each
-        /// change that reaches it.
+        /// change that reaches it. On a clock whose timers never fire, so that
+        /// the checks those lines announce are never made.
         /// </remarks>
         [Test]
         public async Task ANewIntervalReachesTheRunningClockCheckAtOnce()
         {
 
-            await using var controller = Controller();
+            await using var controller = TestControllers.New(directory, Clock: ClockWithoutTimers.Instance);
 
             await controller.Start();
 

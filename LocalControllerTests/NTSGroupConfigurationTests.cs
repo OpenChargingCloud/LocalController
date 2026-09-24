@@ -435,14 +435,15 @@ namespace cloud.charging.open.LocalController.Tests
         /// typing mistakes.
         /// </summary>
         /// <remarks>
-        /// Started, because that is when the line is written; the first check
-        /// is a minute after that, and the controller is gone long before.
+        /// Started, because that is when the line is written - on a clock
+        /// whose timers never fire, so that the check the line announces is
+        /// never made.
         /// </remarks>
         [Test]
         public async Task TheClockLineNamesTheServersAsTheyAreRead()
         {
 
-            await using var controller = TestControllers.New(directory);
+            await using var controller = TestControllers.New(directory, Clock: ClockWithoutTimers.Instance);
 
             await controller.Start();
 

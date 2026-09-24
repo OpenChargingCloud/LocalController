@@ -114,9 +114,12 @@ controller somebody has running on 2350 while they work.
 
 **They never touch the network.** The configuration written before each
 controller is built switches the time client off, which is what stops the
-clock check from being scheduled at all, and the DNS client is only ever asked
-what it is configured as. A test suite that needs a name server to answer is a
-test suite that fails on a train.
+clock check from being scheduled at all - and the few tests that need it on, to
+read what a start writes about the clock, run on a clock whose timers never
+fire. A synchronisation a test asks for goes to an address on a port nobody
+listens on, and the DNS client is only ever asked what it is configured as. A
+test suite that needs a name server to answer is a test suite that fails on a
+train.
 
 
 ## Name resolution and the time servers
