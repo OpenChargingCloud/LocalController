@@ -30,7 +30,7 @@ somebody can see what the box is doing without having a back end to ask.
 |------|-----------------|------------|
 | Configuration | nothing - it answers "what am I running" | `readConfiguration` |
 | DNS client | the name servers and how they are asked; a test lookup | `changeNetworkSettings`, `runDiagnostics` |
-| NTS client | the time server and how it is asked; a synchronisation | `changeNetworkSettings`, `runDiagnostics` |
+| NTS client | the time servers and the rules for believing them; a synchronisation | `changeNetworkSettings`, `runDiagnostics` |
 | Logs | nothing - it reads | `readConfiguration` |
 
 Everything on the DNS and NTS pages takes effect the moment it is saved, for
@@ -119,6 +119,87 @@ what it is configured as. A test suite that needs a name server to answer is a
 test suite that fails on a train.
 
 
+## Name resolution and the time servers
+
+Both are read from `configuration.json`, in the same two sections the vehicle,
+the charging station and the energy meter use, so one file can be written once
+and copied between them:
+
+```json
+{
+  "dns": { "enabled": true, "servers": [ "192.168.1.1" ] },
+  "nts": { "enabled": true,
+           "servers": [ "ptbtime1.ptb.de", "ptbtime2.ptb.de",
+                        "ptbtime3.ptb.de", "ptbtime4.ptb.de" ],
+           "minServers": 2,
+           "checkEverySeconds": 900,
+           "legalTimeAuthority": "PTB" }
+}
+```
+
+That `dns` block is one name server, asked over UDP on port 53. An entry of its
+`servers` is an address or a host name, or an object saying more than that -
+the form the DNS page writes the list back in:
+
+```json
+{ "address": "192.168.1.1", "port": 53, "transport": "UDP", "queryTimeoutSeconds": 2 }
+```
+
+`udp://192.168.1.1:53` is how the log names a name server, not a form the file
+takes. A file saying it is refused at the start, with the entry named.
+
+That `nts` block is what a local controller asks when the file says nothing at
+all: the PTB's four, of which two have to answer. Naming them changes nothing;
+it is written out here because a file that names its time servers is a file
+somebody can check.
+
+Every key of the section, and what it is when absent:
+
+| Key | Default | |
+|---|---|---|
+| `enabled` | `true` | whether to ask at all |
+| `servers` | the four above | a list, see below |
+| `minServers` | `2`, or all of them when fewer | how many must answer for the group to have a time |
+| `maxDeviationSeconds` | `60` | how far apart they may be before it is written down |
+| `hostname` | - | one server instead of a list |
+| `ntsKEPort`, `ntpPort` | `4460`, `123` | for that one server |
+| `timeoutSeconds` | `10` | per request of that one server |
+| `checkEverySeconds` | `900` | how often the clock is checked |
+| `legalTimeAuthority` | - | who the operator says stands behind it |
+| `legalTimeToleranceSeconds` | `1` | how far off the clock may be |
+| `legalTimeMaxAgeSeconds` | `3600` | how old the last check may be |
+
+An entry of `servers` is a host name, or an object saying more than the name:
+
+```json
+{ "hostname": "time.local", "priority": 0, "ntsKEPort": 4460, "enabled": true }
+```
+
+Servers sharing a priority are **one band** and are asked together; a lower
+priority is asked first. The four above share priority 0, because they are
+peers - putting them in separate bands would say something about them that is
+not true.
+
+A section naming a single `hostname` and no list becomes a group of one, which
+is what every file written before there were groups says, and it keeps working.
+A group of one is held to a quorum of one, and a section asking two of it is
+refused.
+
+A section that is absent is not a section set to nothing: it means the file has
+no opinion, and what the constructor was handed stands. The same holds key by
+key - a section mentioning nothing but `enabled` leaves the servers alone
+rather than quietly reducing four to one, and one mentioning nothing but
+`minServers` or `maxDeviationSeconds` holds the servers the controller already
+has to it. A quorum those servers could never reach is refused: at the start,
+before anything is asked, and over the API, before anything is written into
+the file - as is a save that would leave the file one the next start refuses.
+
+A host name written back into this file carries the root label -
+`ptbtime1.ptb.de.` - because that is the absolute form it was parsed into, and
+not a stray character. What the controller prints for somebody to read drops it
+again.
+
+
 ## The clock
 
 `LocalController` takes a `TimeProvider` as its last constructor parameter and
@@ -148,7 +229,7 @@ var up    = localController.TimeProvider.GetUtcNow() - at;   // 13 hours of upti
 ```
 
 **The clock is never set from NTS.** Every fifteen minutes the controller asks
-its time server what time it is, measures the difference and reports it - and
+its time servers what time it is, measures the difference and reports it - and
 leaves its own clock exactly where it was. Everything below this controller
 reads the time from here, so a jump backwards would put two meter readings out
 of order in a record written somewhere else entirely, with nothing in it to say
@@ -156,8 +237,9 @@ why.
 
 `GET /api/v1/configuration/time` is that measurement, and the one word it never
 guesses is "legal": that needs a claim the operator wrote into
-`nts.legalTimeAuthority`, a check against that very server, a recent one, and a
-small difference. Any of those missing and the answer says `unverified` and
+`nts.legalTimeAuthority`, a check against those very servers, a recent one, and a
+small difference. It names the group it is checked against, its servers and how
+many of them have to answer. Any of those missing and the answer says `unverified` and
 names which one in `why`.
 
 
