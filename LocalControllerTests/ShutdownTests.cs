@@ -206,6 +206,60 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region StopsAfterItsStreamHasSentAHeartbeat()
+
+        /// <summary>
+        /// One open event stream that has said ": keep-alive" at least once,
+        /// and then a stop.
+        /// </summary>
+        /// <remarks>
+        /// A stream that has sent a heartbeat is waiting for its next event
+        /// across it, with its question to the enumerator still open, and an
+        /// enumerator that is still waiting cannot be disposed: the stream
+        /// cancels it and waits for it to stop before it lets go. That is a stop
+        /// the other tests here never reach - their streams are stopped long
+        /// before the default heartbeat of 15 seconds is due.
+        ///
+        /// What this cannot turn into a failure of its own is a stream that
+        /// asks for the next event a second time instead. The channel's
+        /// iterator breaks under that, and tried on purpose it either hung the
+        /// run in a teardown that waits without a limit, or took the test host
+        /// down with a NullReferenceException on a pool thread - the same thing
+        /// Hermod's 524b3095 reports for its own streams. The run does not pass
+        /// either way; it only says less about why.
+        ///
+        /// A heartbeat of a second: longer than the quiet moment OpenAndSettle
+        /// leaves, so that it comes after the stream has settled rather than
+        /// while it does.
+        /// </remarks>
+        [Test]
+        public async Task StopsAfterItsStreamHasSentAHeartbeat()
+        {
+
+            var (controller, http) = await StartOne();
+
+            controller.API.EventStreamHeartbeat = TimeSpan.FromSeconds(1);
+
+            using (http)
+            {
+
+                using var stream = await EventStream.OpenAndSettle(controller, http);
+
+                Assert.That(await stream.ReadUntil(": keep-alive"), Is.True,
+                            $"No comment came down the stream within {EventStream.Timeout.TotalSeconds} seconds, so there was no heartbeat to stop after.");
+
+                var elapsed = await TimeTheStop(controller);
+
+                Assert.That(elapsed, Is.LessThan(MustStopWithin),
+                            $"A controller whose event stream had sent a heartbeat took {elapsed.TotalSeconds:F1} s to stop. " +
+                            "The stream is not stopping the enumerator it waits on.");
+
+            }
+
+        }
+
+        #endregion
+
         #region StoppingTwiceIsHarmless()
 
         /// <summary>
