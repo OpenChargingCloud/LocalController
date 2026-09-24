@@ -33,10 +33,10 @@ namespace cloud.charging.open.LocalController.Tests
     /// the console before it says it.
     /// </summary>
     /// <remarks>
-    /// Rare things - a listener that failed - and rare enough that for a while
-    /// they went straight past the command line: into the middle of a command
-    /// somebody was typing, where the command line did not know they were and
-    /// wrote over them. A command line cannot be driven without a terminal, so
+    /// Rare things - a listener that failed, a log file that cannot be written
+    /// - and rare enough that for a while they went straight past the command
+    /// line: into the middle of a command somebody was typing, where the
+    /// command line did not know they were and wrote over them. A command line cannot be driven without a terminal, so
     /// what is checked here is the promise it depends on: every one of these
     /// lines is written inside the block it was handed, and none of them beside
     /// it. The charging station's tests, and the vehicle's before them.
@@ -110,6 +110,19 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region (class) StoppedClock
+
+        /// <summary>
+        /// A clock that says the same time whenever it is asked, so that the
+        /// name of the day's log file is known in advance.
+        /// </summary>
+        private sealed class StoppedClock(DateTimeOffset Now) : TimeProvider
+        {
+            public override DateTimeOffset GetUtcNow() => Now;
+        }
+
+        #endregion
+
         #region Data
 
         private const String      Broken         = "An event log listener failed: The listener broke.";
@@ -179,6 +192,51 @@ namespace cloud.charging.open.LocalController.Tests
             log.Info("Something happened.", "test");
 
             Assert.That(console.Lines, Is.EqualTo(new[] { new Line(Broken, InBlock: true) }));
+
+        }
+
+        #endregion
+
+        #region AFileThatCannotBeWrittenIsComplainedAboutInsideTheBlock()
+
+        /// <summary>
+        /// The two things a log file says on stderr - that it cannot be written,
+        /// and that it is being written again - both inside the block.
+        /// </summary>
+        [Test]
+        public void AFileThatCannotBeWrittenIsComplainedAboutInsideTheBlock()
+        {
+
+            var log      = new EventLog(TimeProvider: new StoppedClock(new DateTimeOffset(2026, 9, 24, 13, 45, 1, TimeSpan.Zero))) {
+                               ComplaintBlock = console.Block
+                           };
+
+            // A directory where the day's file should be: refused on every
+            // platform, and gone again with one call.
+            var blocked  = Path.Combine(directory, "localcontroller-2026-09-24.log");
+
+            Directory.CreateDirectory(blocked);
+
+            using (new FileLog(log, directory))
+            {
+
+                log.Info("The entry the disk refuses.", "test");
+
+                Directory.Delete(blocked);
+
+                log.Info("The first one after it came back.", "test");
+
+            }
+
+            Assert.Multiple(() => {
+
+                Assert.That(console.Lines.Select(line => line.InBlock), Is.EqualTo(new[] { true, true }),
+                            "Not the two lines, both inside the block: " + String.Join(" | ", console.Lines));
+
+                Assert.That(console.Lines.ElementAtOrDefault(0).Text, Does.Contain("could not be written"));
+                Assert.That(console.Lines.ElementAtOrDefault(1).Text, Does.Contain("is being written again; 1 entry is missing from it."));
+
+            });
 
         }
 

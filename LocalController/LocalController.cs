@@ -92,6 +92,11 @@ namespace cloud.charging.open.LocalController
         public const String  DefaultAccountsDatabaseFile  = "users.db";
 
         /// <summary>
+        /// Where the log files go, unless another directory is given.
+        /// </summary>
+        public const String  DefaultLogPath               = "logs";
+
+        /// <summary>
         /// Where the HTTPExt API answers: accounts, groups and API keys.
         /// </summary>
         /// <remarks>
@@ -213,6 +218,7 @@ namespace cloud.charging.open.LocalController
         private           NTSConfiguration?               ntsSettings;
 
         private readonly  ConsoleLog?                     consoleLog;
+        private readonly  FileLog?                        fileLog;
         private readonly  TraceBridge?                    traceBridge;
 
         private readonly  OCPPv2_1_LC.TestLocalControllerNode  lc01;
@@ -227,6 +233,13 @@ namespace cloud.charging.open.LocalController
         /// Everything that happens inside this local controller.
         /// </summary>
         public EventLog               Log                    { get; }
+
+        /// <summary>
+        /// The directory the log files are written to, one per day, or null
+        /// when this controller writes none.
+        /// </summary>
+        public String?                LogPath
+            => fileLog?.Directory;
 
         /// <summary>
         /// Who may open the web interface: the accounts, the groups they are
@@ -438,6 +451,7 @@ namespace cloud.charging.open.LocalController
         /// <param name="Log">The event log; a new one by default.</param>
         /// <param name="LogToConsole">Whether the event log is also written to the console.</param>
         /// <param name="ConsoleLogLevel">What the console shows of it.</param>
+        /// <param name="LogPath">The directory the log files are written to, or null to write none.</param>
         /// <param name="BridgeDebugLog">Whether what the libraries below write with DebugX ends up in the log.</param>
         /// <param name="TimeProvider">Where this controller reads the time; the system clock by default.</param>
         public LocalController(DNSClient?             DNSClient         = null,
@@ -455,6 +469,7 @@ namespace cloud.charging.open.LocalController
                                EventLog?              Log               = null,
                                Boolean                LogToConsole      = true,
                                LogLevel               ConsoleLogLevel   = LogLevel.Info,
+                               String?                LogPath           = null,
                                Boolean                BridgeDebugLog    = true,
                                TimeProvider?          TimeProvider      = null)
         {
@@ -479,10 +494,18 @@ namespace cloud.charging.open.LocalController
                                     ? new ConsoleLog(this.Log, ConsoleLogLevel)
                                     : null;
 
-            // What the log says about itself - a listener that failed - goes to
-            // stderr, and through the same block as the entries, so that it
-            // cannot land in the middle of one. ShareConsoleWith moves both
-            // along together.
+            // Everything, and not what the console was told to show: a level
+            // is chosen to keep a console readable, and a file nobody is
+            // reading has no such problem. What is left out here cannot be
+            // asked for afterwards.
+            this.fileLog      = LogPath is not null
+                                    ? new FileLog(this.Log, LogPath)
+                                    : null;
+
+            // What the log says about itself - a listener that failed, a file
+            // that cannot be written - goes to stderr, and through the same
+            // block as the entries, so that it cannot land in the middle of
+            // one. ShareConsoleWith moves both along together.
             if (consoleLog is not null)
                 this.Log.ComplaintBlock = consoleLog.WriteBlock;
 
@@ -1152,6 +1175,7 @@ namespace cloud.charging.open.LocalController
                        new JProperty("lastId",         Log.LastId),
                        new JProperty("debugBridge",    traceBridge is not null),
                        new JProperty("console",        consoleLog is not null),
+                       new JProperty("files",          LogPath),
                        new JProperty("tags",           new JArray(Log.KnownTags))
                    )),
 
@@ -1300,10 +1324,10 @@ namespace cloud.charging.open.LocalController
         /// alternative of going quiet while a command line is open.
         ///
         /// The same goes for the few things the log says on stderr about
-        /// itself - a listener that failed. They are rare, which is how they
-        /// came to be written past the command line for a while without anybody
-        /// noticing, and they are handed over too - even by a controller whose
-        /// entries do not reach the console.
+        /// itself - a listener that failed, a log file that cannot be written.
+        /// They are rare, which is how they came to be written past the command
+        /// line for a while without anybody noticing, and they are handed over
+        /// too - even by a controller whose entries do not reach the console.
         /// </remarks>
         /// <param name="WriteBlock">Runs what it is given with the console to itself.</param>
         public void ShareConsoleWith(Action<Action> WriteBlock)
@@ -1321,7 +1345,8 @@ namespace cloud.charging.open.LocalController
         #region DisposeAsync()
 
         /// <summary>
-        /// Stop listening and let go of the console and the debug bridge.
+        /// Stop listening and let go of the console, the log file and the debug
+        /// bridge.
         /// </summary>
         public async ValueTask DisposeAsync()
         {
@@ -1330,6 +1355,7 @@ namespace cloud.charging.open.LocalController
 
             traceBridge?.Dispose();
             consoleLog? .Dispose();
+            fileLog?    .Dispose();
 
             ServerCertificates?.Dispose();
             ClientTrust?       .Dispose();

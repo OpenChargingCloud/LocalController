@@ -62,10 +62,12 @@ namespace cloud.charging.open.LocalController.Tests
         /// <param name="Configuration">What its configuration file says, or null for a controller nobody has configured.</param>
         /// <param name="Clock">Where it reads the time, for a test that needs to decide what time it is.</param>
         /// <param name="LogToConsole">Whether its log reaches the console, for a test about who gets to write there. Off otherwise, because a test run's console is for the test run.</param>
+        /// <param name="LogPath">A directory for its log files, for a test about those. None otherwise.</param>
         public static LocalController New(String         Directory,
                                           JObject?       Configuration   = null,
                                           TimeProvider?  Clock           = null,
-                                          Boolean        LogToConsole    = false)
+                                          Boolean        LogToConsole    = false,
+                                          String?        LogPath         = null)
         {
 
             System.IO.Directory.CreateDirectory(Directory);
@@ -80,6 +82,7 @@ namespace cloud.charging.open.LocalController.Tests
                        AccountsPath:     Path.Combine(Directory, "accounts"),
                        ConfigFile:       new ControllerConfigFile(configFile),
                        LogToConsole:     LogToConsole,
+                       LogPath:          LogPath,
                        BridgeDebugLog:   false,
                        TimeProvider:     Clock
                    );

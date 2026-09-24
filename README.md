@@ -273,6 +273,19 @@ inside the command nor waits for it:
 localController.ShareConsoleWith(cli.WriteBlock);   // line off, entry whole, line back
 ```
 
+The few things the log says on stderr about itself - a listener that failed, a
+log file that cannot be written - go around the line the same way.
+
+Three places keep it, because they answer different questions. The console
+shows it to whoever started the controller, at the level they chose; the Logs
+page keeps the last two thousand entries; and a `LogPath` handed to the
+constructor writes every entry, down to the debug ones, into one file per UTC
+day below it - `localcontroller-2026-09-24.log`, appended to and flushed after
+each entry. LocalControllerCLI does that below `logs/` unless told
+`--no-log-file`, since the other two are gone with the process. Nothing is
+ever deleted. A file that cannot be written is said once on stderr, and the
+file says how many entries it missed once it can be written again.
+
 The entries are numbered and the number only ever grows. A browser loads a
 snapshot from `/api/v1/logs`, which says how far it reaches, and then applies
 everything newer from `/api/v1/events` - so a reconnect that replays a few
