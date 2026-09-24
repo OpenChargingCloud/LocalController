@@ -260,6 +260,85 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region AListWithoutAQuorumIsHeldToTwo()
+
+        /// <summary>
+        /// Writing out the default servers must not make a weaker group than
+        /// leaving them out.
+        /// </summary>
+        /// <remarks>
+        /// A list without "minServers" used to be held to one: the PTB's four,
+        /// written out, believed whichever of them answered, where the same four
+        /// left to the default are held to two.
+        /// </remarks>
+        [Test]
+        public void AListWithoutAQuorumIsHeldToTwo()
+        {
+
+            var section = JObject.Parse("""
+                              {
+                                  "servers": [ "ptbtime1.ptb.de", "ptbtime2.ptb.de",
+                                               "ptbtime3.ptb.de", "ptbtime4.ptb.de" ]
+                              }
+                              """);
+
+            Assert.That(NTSConfiguration.TryParse(section, out var read, out var error),  Is.True,  error);
+
+            Assert.That(read!.ToGroup(DomainName.Parse("unused.example")).MinServers,
+                        Is.EqualTo(NTSConfiguration.DefaultGroup().MinServers));
+
+        }
+
+        #endregion
+
+        #region AQuorumNobodyNamedIsNeverMoreThanTheServersSwitchedOn()
+
+        /// <summary>
+        /// Two, unless there are fewer to ask.
+        /// </summary>
+        [Test]
+        public void AQuorumNobodyNamedIsNeverMoreThanTheServersSwitchedOn()
+        {
+
+            var section = JObject.Parse("""
+                              {
+                                  "servers": [
+                                      "a.example",
+                                      { "hostname": "b.example", "enabled": false }
+                                  ]
+                              }
+                              """);
+
+            Assert.That(NTSConfiguration.TryParse(section, out var read, out var error),  Is.True,  error);
+
+            Assert.That(read!.ToGroup(DomainName.Parse("unused.example")).MinServers,  Is.EqualTo(1),
+                        "a group that can never have a time");
+
+        }
+
+        #endregion
+
+        #region ALoneHostnameCannotBeHeldToAQuorumOfTwo()
+
+        /// <summary>
+        /// The same refusal as for a list, for the group of one that a lone
+        /// hostname is.
+        /// </summary>
+        [Test]
+        public void ALoneHostnameCannotBeHeldToAQuorumOfTwo()
+        {
+
+            var section = JObject.Parse("""{ "hostname": "ptbtime1.ptb.de", "minServers": 2 }""");
+
+            Assert.Multiple(() => {
+                Assert.That(NTSConfiguration.TryParse(section, out _, out var error),  Is.False);
+                Assert.That(error,                                                     Does.Contain("minServers"));
+            });
+
+        }
+
+        #endregion
+
         #region AnEmptyListIsRefused()
 
         /// <summary>

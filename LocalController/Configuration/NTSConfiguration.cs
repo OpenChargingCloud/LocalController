@@ -227,6 +227,16 @@ namespace cloud.charging.open.LocalController.Configuration
 
             }
 
+            // A lone hostname is a group of one (see ToGroup), and the same holds
+            // for it as for a list: a quorum it can never reach is worth saying
+            // while somebody is reading the file, not at the first
+            // synchronisation, which could only ever report one server short.
+            else if (hostname is not null && minServers > 1)
+            {
+                Error = $"'nts.minServers' is {minServers}, which is more servers than a lone 'nts.hostname' is.";
+                return false;
+            }
+
             #endregion
 
             Configuration = new NTSConfiguration(
@@ -280,20 +290,51 @@ namespace cloud.charging.open.LocalController.Configuration
         /// one. That is a worse arrangement than four servers and it is the one
         /// every existing configuration file already has, so it keeps working
         /// rather than becoming an error at the next start.
+        ///
+        /// A section that names no quorum is held to two, as the default group
+        /// is - or to all of its servers, when it has fewer switched on. It used
+        /// to be held to one, so that writing out the PTB's four, which are the
+        /// default, made a group that believed whichever of them answered.
         /// </remarks>
         /// <param name="FallbackHostname">The server to use when the section names none at all.</param>
         public TimeSourceGroup ToGroup(DomainName FallbackHostname)
+        {
 
-            => new ("legal",
-                    Servers is not null
-                        ? Servers.Select(server => server.ToEndpoint())
-                        : [ new NTSServerEndpoint(
-                                Hostname ?? FallbackHostname,
-                                NTSKEPort,
-                                NTPPort
-                            ) ],
-                    MinServers,
-                    MaxDeviation);
+            NTSServerEndpoint[] sources = Servers is not null
+                                              ? [.. Servers.Select(server => server.ToEndpoint())]
+                                              : [ new NTSServerEndpoint(
+                                                      Hostname ?? FallbackHostname,
+                                                      NTSKEPort,
+                                                      NTPPort
+                                                  ) ];
+
+            return new ("legal",
+                        sources,
+                        MinServers ?? QuorumFor(DefaultMinServers, sources),
+                        MaxDeviation);
+
+        }
+
+        #endregion
+
+        #region (static) QuorumFor(Wanted, Servers)
+
+        /// <summary>
+        /// The quorum a group of these servers can be held to: the one wanted,
+        /// or all of them when fewer are switched on.
+        /// </summary>
+        /// <remarks>
+        /// Lowered rather than refused, because this is for a quorum nobody
+        /// named in the section at hand - the default, or one an earlier section
+        /// set. A quorum a section names itself is checked against its servers
+        /// when it is read, and refused there.
+        /// </remarks>
+        /// <param name="Wanted">The quorum wanted.</param>
+        /// <param name="Servers">The servers of the group, switched on or not.</param>
+        public static Byte QuorumFor(Byte                            Wanted,
+                                     IEnumerable<NTSServerEndpoint>  Servers)
+
+            => (Byte) Math.Max(1, Math.Min(Wanted, Servers.Count(server => server.Enabled)));
 
         #endregion
 

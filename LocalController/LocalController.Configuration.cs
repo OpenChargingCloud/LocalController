@@ -408,6 +408,12 @@ namespace cloud.charging.open.LocalController
             try
             {
 
+                // Before the file, so that what is refused is not written down
+                // either - and inside the lock, because the servers a quorum on
+                // its own is checked against are the ones in effect.
+                if (!TryCheckNTSQuorum(configuration, out Error))
+                    return false;
+
                 if (!ConfigFile.TryMergeSection(NTSConfiguration.SectionName, configuration.ToJSON(), out Error))
                     return false;
 
@@ -420,6 +426,45 @@ namespace cloud.charging.open.LocalController
             {
                 reconfigureLock.Release();
             }
+
+        }
+
+        #endregion
+
+        #region (private) TryCheckNTSQuorum(Configuration, out Error)
+
+        /// <summary>
+        /// Whether a quorum named on its own can be met by the servers this
+        /// local controller asks.
+        /// </summary>
+        /// <remarks>
+        /// A section naming its servers as well had its quorum checked against
+        /// them when it was read. One naming only the quorum is about the
+        /// servers in effect, which the section cannot know and this controller
+        /// does.
+        /// </remarks>
+        private Boolean TryCheckNTSQuorum(NTSConfiguration                  Configuration,
+                                          [NotNullWhen(false)] out String?  Error)
+        {
+
+            Error = null;
+
+            if (Configuration.MinServers is Byte quorum &&
+                Configuration.Servers    is null        &&
+                Configuration.Hostname   is null)
+            {
+
+                var asked = timeSources.Sources.Count(source => source.Enabled);
+
+                if (quorum > asked)
+                {
+                    Error = $"'nts.minServers' is {quorum}, which is more servers than the {asked} this local controller asks.";
+                    return false;
+                }
+
+            }
+
+            return true;
 
         }
 
@@ -444,28 +489,51 @@ namespace cloud.charging.open.LocalController
 
             #region The group of time servers
 
-            // Only when the section says something about them. That is this
-            // method's rule everywhere else, and it earns its place here now
-            // that the servers have a default worth keeping: a section
+            var wasAsking     = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.Trimmed));
+            var wasQuorum     = timeSources.MinServers;
+            var wasDeviation  = timeSources.MaxDeviation;
+
+            if (Configuration.MinServers.HasValue)
+                ntsQuorum = Configuration.MinServers.Value;
+
+            // The servers only when the section says something about them. That
+            // is this method's rule everywhere else, and it earns its place here
+            // now that the servers have a default worth keeping: a section
             // mentioning nothing but "enabled" would otherwise quietly reduce
             // four servers to one.
-            if (Configuration.Servers  is not null ||
-                Configuration.Hostname is not null)
-            {
+            //
+            // Rebuilt from the section rather than patched when it does: it is a
+            // list, and working out which entry changed in order to report it
+            // would say less than naming the servers, which is what happens
+            // below.
+            var sources       = Configuration.Servers  is not null ||
+                                Configuration.Hostname is not null
+                                    ? Configuration.ToGroup(Configuration.Hostname ?? ntsClient.Hostname).Sources
+                                    : timeSources.Sources;
 
-                // Rebuilt from the section rather than patched: it is a list, and
-                // working out which entry changed in order to report it would say
-                // less than naming the servers, which is what happens below.
-                var wasAsking  = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.Trimmed));
+            // The quorum and the deviation by the same rule, and on their own as
+            // well. They used to count only beside a list or a hostname - and
+            // before the servers had a default, a section saying nothing but
+            // "minServers": 3 rebuilt the group from the single client, one
+            // server held to three; and a list without a quorum was held to one,
+            // whatever had been agreed before.
+            timeSources       = new TimeSourceGroup(
+                                    timeSources.Name,
+                                    sources,
+                                    NTSConfiguration.QuorumFor(ntsQuorum, sources),
+                                    Configuration.MaxDeviation ?? timeSources.MaxDeviation
+                                );
 
-                timeSources    = Configuration.ToGroup(Configuration.Hostname ?? ntsClient.Hostname);
+            var nowAsking     = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.Trimmed));
 
-                var nowAsking  = String.Join(", ", timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.Trimmed));
+            if (wasAsking != nowAsking)
+                changed.Add($"time servers = {nowAsking}");
 
-                if (wasAsking != nowAsking)
-                    changed.Add($"time servers = {nowAsking}");
+            if (wasQuorum != timeSources.MinServers)
+                changed.Add($"quorum = {timeSources.MinServers}");
 
-            }
+            if (wasDeviation != timeSources.MaxDeviation)
+                changed.Add($"agreed deviation = {timeSources.MaxDeviation.TotalSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} s");
 
             #endregion
 
