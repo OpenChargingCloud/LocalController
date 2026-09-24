@@ -92,16 +92,18 @@ namespace cloud.charging.open.LocalController.Tests
             using var http    = await SignedIn();
             using var stream  = await EventStream.Open(http);
 
-            // At once and not with the rest: without a comment there is no
-            // heartbeat to carry on after, and the stream the rest reads would
-            // be one this wait has already given up on.
+            // Each step is judged as soon as it is taken, and not with the
+            // rest: a read that waited in vain has closed the connection under
+            // the reader, and the next read would fail with an exception that
+            // says nothing about why.
             Assert.That(await stream.ReadUntil(": keep-alive"), Is.True,
                         $"No comment came down the stream in the {EventStream.Timeout.TotalSeconds} seconds nothing was logged.");
 
             var marker        = "A line for the event stream " + Guid.NewGuid().ToString("N")[..8];
             Controller.Log.Info(marker, "test");
 
-            var entry         = await stream.ReadUntil(marker);
+            Assert.That(await stream.ReadUntil(marker), Is.True,
+                        $"The entry logged after the heartbeat did not come down the stream within {EventStream.Timeout.TotalSeconds} seconds.");
 
             // And the one after it, to be sure the stream is still waiting for
             // entries and not only for the heartbeat.
@@ -111,8 +113,7 @@ namespace cloud.charging.open.LocalController.Tests
             var secondEntry   = await stream.ReadUntil(second);
 
             Assert.Multiple(() => {
-                Assert.That(entry,                          Is.True,        "the entry logged after the heartbeat arrived");
-                Assert.That(secondEntry,                    Is.True,        "and so did the one after it");
+                Assert.That(secondEntry,                    Is.True,        "the entry logged after that one arrived too");
                 Assert.That(stream.Count($"\"{marker}\""),  Is.EqualTo(1),  "once");
             });
 
