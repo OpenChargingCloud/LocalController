@@ -262,6 +262,14 @@ in a debug build only: `Debug.WriteLine` carries `[Conditional("DEBUG")]`, so
 a release build of those libraries compiles the calls away. `--no-trace`
 switches the bridge off.
 
+A program that reads commands on the same console hands the log a way to write
+around the line being typed, so that an entry arriving mid-word neither lands
+inside the command nor waits for it:
+
+```csharp
+localController.ShareConsoleWith(cli.WriteBlock);   // line off, entry whole, line back
+```
+
 The entries are numbered and the number only ever grows. A browser loads a
 snapshot from `/api/v1/logs`, which says how far it reaches, and then applies
 everything newer from `/api/v1/events` - so a reconnect that replays a few

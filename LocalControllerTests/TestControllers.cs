@@ -61,9 +61,11 @@ namespace cloud.charging.open.LocalController.Tests
         /// <param name="Directory">Where its accounts and its configuration go; created when it does not exist.</param>
         /// <param name="Configuration">What its configuration file says, or null for a controller nobody has configured.</param>
         /// <param name="Clock">Where it reads the time, for a test that needs to decide what time it is.</param>
+        /// <param name="LogToConsole">Whether its log reaches the console, for a test about who gets to write there. Off otherwise, because a test run's console is for the test run.</param>
         public static LocalController New(String         Directory,
                                           JObject?       Configuration   = null,
-                                          TimeProvider?  Clock           = null)
+                                          TimeProvider?  Clock           = null,
+                                          Boolean        LogToConsole    = false)
         {
 
             System.IO.Directory.CreateDirectory(Directory);
@@ -77,7 +79,7 @@ namespace cloud.charging.open.LocalController.Tests
                        HTTPPort:         IPPort.Parse(FreePort()),
                        AccountsPath:     Path.Combine(Directory, "accounts"),
                        ConfigFile:       new ControllerConfigFile(configFile),
-                       LogToConsole:     false,
+                       LogToConsole:     LogToConsole,
                        BridgeDebugLog:   false,
                        TimeProvider:     Clock
                    );

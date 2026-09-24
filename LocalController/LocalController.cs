@@ -1273,6 +1273,38 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
+        #region ShareConsoleWith(WriteBlock)
+
+        /// <summary>
+        /// Let somebody else decide when this local controller's log may write
+        /// on the console, because they are writing on it too.
+        /// </summary>
+        /// <remarks>
+        /// A controller at a console assumes the console is its own and writes
+        /// an entry whenever one happens, from whichever thread it happened on.
+        /// That assumption stops holding the moment somebody is typing a command
+        /// on the same screen: an entry arriving mid-word puts half a log line
+        /// into the middle of a half-typed command and ruins both.
+        ///
+        /// So the writing is handed over rather than suppressed. Whoever owns
+        /// the line takes the entry, clears what is being typed, writes the
+        /// entry as one piece and puts the line back. Nothing is lost and
+        /// nothing is delayed, which is what makes this better than the obvious
+        /// alternative of going quiet while a command line is open.
+        ///
+        /// Has no effect on a controller whose log does not reach the console.
+        /// </remarks>
+        /// <param name="WriteBlock">Runs what it is given with the console to itself.</param>
+        public void ShareConsoleWith(Action<Action> WriteBlock)
+        {
+
+            if (consoleLog is not null)
+                consoleLog.WriteBlock = WriteBlock;
+
+        }
+
+        #endregion
+
         #region DisposeAsync()
 
         /// <summary>
