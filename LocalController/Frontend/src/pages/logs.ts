@@ -235,8 +235,9 @@ export const logsPage: Page = {
 
                 // Line 0 is the newest entry, which is the last one the store
                 // holds. Lines and entries are kept the same length, so this
-                // pairing stays exact - and it is the same function the drawing
-                // above goes by, which is the point of it being one.
+                // pairing stays exact - and entryAt is the one place it is
+                // written down, held by its tests to the drawOrder the drawing
+                // above goes by.
                 const wanted = matches(entryAt(logs.entries, index)!);
 
                 lines[index]!.classList.toggle('filtered-out', !wanted);
@@ -274,9 +275,10 @@ export const logsPage: Page = {
                 const anchor    = lineBox.firstElementChild;
                 const anchorWas = anchor?.getBoundingClientRect().top ?? 0;
 
-                // Turned around inside the batch as well: a burst that arrives
-                // in one event would otherwise sit at the top back to front.
-                const batch = [...added].reverse();
+                // In the order everything else is drawn in, the batch included:
+                // a burst that arrives in one event would otherwise sit at the
+                // top back to front.
+                const batch = drawOrder(added);
 
                 lineBox.insertAdjacentHTML('afterbegin', batch.map(lineHTML).join(''));
 
