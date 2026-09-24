@@ -306,8 +306,15 @@ namespace cloud.charging.open.LocalController
                            new JProperty("clientId",              ntsClient.Id)
                        )),
 
+                       // What may be changed about the group, as it is in
+                       // effect. The quorum is the one this controller was
+                       // told; the group's own, below, can be lower when it has
+                       // fewer servers switched on.
                        new JProperty("settings",     new JObject(
-                           new JProperty("timeoutSeconds",        ntsClient.Timeout?.TotalSeconds)
+                           new JProperty("timeoutSeconds",        ntsClient.Timeout?.TotalSeconds),
+                           new JProperty("checkEverySeconds",     TimeCheckEvery.TotalSeconds),
+                           new JProperty("minServers",            ntsQuorum),
+                           new JProperty("maxDeviationSeconds",   timeSources.MaxDeviation.TotalSeconds)
                        )),
 
                        new JProperty("cookies",      new JObject(
@@ -347,14 +354,22 @@ namespace cloud.charging.open.LocalController
                        // this controller's clock. The single client reported
                        // above is the one the detailed test configures itself
                        // from, and its cookie pool is not what a check spends.
+                       //
+                       // Every server, in the order they were configured, the
+                       // switched-off ones included: this is the list the page
+                       // edits and sends back whole, and a server missing from it
+                       // because it was switched off would be deleted by the next
+                       // save of anything else.
                        new JProperty("timeSources",  new JArray(
-                           timeSources.Bands().SelectMany(band => band).Select(source => {
+                           timeSources.Sources.Select(source => {
 
                                var held = timeEngine.KeyExchanges.TryGetValue(source.Hostname, out var state) ? state : null;
 
                                return new JObject(
                                           new JProperty("hostname",       source.Hostname.ToString()),
                                           new JProperty("priority",       source.Priority),
+                                          new JProperty("ntsKEPort",      source.NTSKEPort.ToUInt16()),
+                                          new JProperty("ntpPort",        source.NTPPort.  ToUInt16()),
                                           new JProperty("enabled",        source.Enabled),
                                           new JProperty("cookies",        held?.RemainingCookies),
                                           new JProperty("lastExchange",   held?.LastRefreshed.ToString("o")),
@@ -373,7 +388,13 @@ namespace cloud.charging.open.LocalController
                        new JProperty("lastSync",     lastTimeSync),
 
                        new JProperty("limits",       new JObject(
-                           new JProperty("maxTimeout",  NTSConfiguration.MaxTimeoutSeconds)
+                           new JProperty("maxTimeout",         NTSConfiguration.MaxTimeoutSeconds),
+                           new JProperty("minCheckEvery",      NTSConfiguration.MinCheckEverySeconds),
+                           new JProperty("maxCheckEvery",      NTSConfiguration.MaxCheckEverySeconds),
+                           new JProperty("minDeviation",       NTSConfiguration.MinDeviationSeconds),
+                           new JProperty("maxDeviation",       NTSConfiguration.MaxDeviationSeconds),
+                           new JProperty("defaultNTSKEPort",   NTSClient.DefaultNTSKE_Port.ToUInt16()),
+                           new JProperty("defaultNTPPort",     NTSClient.DefaultNTP_Port.  ToUInt16())
                        )),
 
                        new JProperty("file",         ConfigFile.Path)
@@ -413,6 +434,20 @@ namespace cloud.charging.open.LocalController
                 // its own is checked against are the ones in effect.
                 if (!TryCheckNTSQuorum(configuration, out Error))
                     return false;
+
+                // And the file as the next start will read it. Each half can
+                // be fine and the two together not: the quorum the file holds
+                // and a list saved now that is shorter than it would be a
+                // section the next start refuses, and a controller that does
+                // not start because of a save that was accepted.
+                if (!ConfigFile.TryPreviewSection(NTSConfiguration.SectionName, configuration.ToJSON(), out var merged, out Error))
+                    return false;
+
+                if (!NTSConfiguration.TryParse(merged, out _, out var mergedError))
+                {
+                    Error = $"{mergedError} Nothing was changed.";
+                    return false;
+                }
 
                 if (!ConfigFile.TryMergeSection(NTSConfiguration.SectionName, configuration.ToJSON(), out Error))
                     return false;
@@ -483,7 +518,16 @@ namespace cloud.charging.open.LocalController
             // it, and the other half - how often to check, and what the
             // operator claims about the server - is read from elsewhere and
             // much later. See LocalController.Clock.cs.
-            ntsSettings = Configuration;
+            //
+            // Laid over what was kept rather than put in its place. A save sends
+            // part of the section - the switch on the page sends "enabled" and
+            // nothing else - and replaced by that, how often to check and who
+            // stands behind the time went back to their defaults until the
+            // next start read them from the file again.
+            var wasCheckingEvery  = TimeCheckEvery;
+            var wasEnabled        = NTSEnabled;
+
+            ntsSettings = ntsSettings?.OverriddenBy(Configuration) ?? Configuration;
 
             var changed  = new List<String>();
 
@@ -576,8 +620,22 @@ namespace cloud.charging.open.LocalController
                 changed.Add(NTSEnabled ? "switched on" : "switched off");
             }
 
+            if (TimeCheckEvery != wasCheckingEvery)
+                changed.Add($"clock checked every {TimeCheckEvery.TotalSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} s");
+
             if (changed.Count > 0)
                 Log.Notice($"NTS configuration changed: {String.Join(", ", changed)}.", "nts", "config");
+
+            // The clock is checked on a timer set when the controller started,
+            // so whether and how often it is checked has to be put into that
+            // timer here - otherwise the page says "in effect" about something
+            // that waits for the next start. Before the start there is no timer
+            // yet, and the start sets one from what this left behind.
+            if (started &&
+               (TimeCheckEvery != wasCheckingEvery || NTSEnabled != wasEnabled))
+            {
+                StartCheckingTheClock();
+            }
 
         }
 

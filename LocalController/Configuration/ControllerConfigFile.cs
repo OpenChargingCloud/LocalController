@@ -228,7 +228,60 @@ namespace cloud.charging.open.LocalController.Configuration
             if (!TryLoadDocument(out var document, out Error))
                 return false;
 
-            if (document[Name] is JObject section)
+            return TryWrite(Merged(document, Name, Values), out Error);
+
+        }
+
+        #endregion
+
+        #region TryPreviewSection(Name, Values, out Section, out Error)
+
+        /// <summary>
+        /// The section as <see cref="TryMergeSection"/> would leave it, without
+        /// writing anything.
+        /// </summary>
+        /// <remarks>
+        /// For finding out what a save would do to the next start before doing
+        /// it. A merge can put two halves that are each fine together into a
+        /// section that is not - a quorum from before and a shorter list from
+        /// now - and a file that stops the local controller is worse than a
+        /// save that is refused.
+        /// </remarks>
+        /// <param name="Name">The section, e.g. "nts".</param>
+        /// <param name="Values">The fields that would be written into it.</param>
+        /// <param name="Section">The section as it would then read.</param>
+        /// <param name="Error">What went wrong, when something did.</param>
+        public Boolean TryPreviewSection(String                            Name,
+                                         JObject                           Values,
+                                         [NotNullWhen(true)]  out JObject?  Section,
+                                         [NotNullWhen(false)] out String?   Error)
+        {
+
+            Section = null;
+
+            if (!TryLoadDocument(out var document, out Error))
+                return false;
+
+            Section = Merged(document, Name, Values)[Name] as JObject ?? [];
+
+            return true;
+
+        }
+
+        #endregion
+
+        #region (private static) Merged(Document, Name, Values)
+
+        /// <summary>
+        /// The document with the given fields merged into one of its sections,
+        /// by the rules <see cref="TryMergeSection"/> describes.
+        /// </summary>
+        private static JObject Merged(JObject  Document,
+                                      String   Name,
+                                      JObject  Values)
+        {
+
+            if (Document[Name] is JObject section)
             {
 
                 section.Merge(
@@ -241,9 +294,9 @@ namespace cloud.charging.open.LocalController.Configuration
             }
 
             else
-                document[Name] = Values;
+                Document[Name] = Values.DeepClone();
 
-            return TryWrite(document, out Error);
+            return Document;
 
         }
 

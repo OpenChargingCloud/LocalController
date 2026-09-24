@@ -146,6 +146,22 @@ namespace cloud.charging.open.LocalController.Configuration
         /// </summary>
         public const Double  MaxTimeoutSeconds    = 3600;
 
+        /// <summary>
+        /// How often the clock may be checked at most and at least, in seconds:
+        /// ten seconds, which is already more than a time server asks to be
+        /// bothered, and once a day.
+        /// </summary>
+        public const Double  MinCheckEverySeconds = 10;
+        public const Double  MaxCheckEverySeconds = 86400;
+
+        /// <summary>
+        /// The disagreement between time servers that may be agreed on before
+        /// it is written down, in seconds: a millisecond at the least, an hour
+        /// at the most.
+        /// </summary>
+        public const Double  MinDeviationSeconds  = 0.001;
+        public const Double  MaxDeviationSeconds  = 3600;
+
         #endregion
 
 
@@ -167,12 +183,12 @@ namespace cloud.charging.open.LocalController.Configuration
                 !ConfigurationReader.TryReadPort   (JSON, "ntsKEPort",       "nts",      out var ntsKEPort, out Error) ||
                 !ConfigurationReader.TryReadPort   (JSON, "ntpPort",         "nts",      out var ntpPort,   out Error) ||
                 !ConfigurationReader.TryReadSeconds(JSON, "timeoutSeconds",  "nts", 0.1, MaxTimeoutSeconds, out var timeout, out Error) ||
-                !ConfigurationReader.TryReadSeconds(JSON, "checkEverySeconds", "nts", 10, 86400, out var checkEvery, out Error) ||
+                !ConfigurationReader.TryReadSeconds(JSON, "checkEverySeconds", "nts", MinCheckEverySeconds, MaxCheckEverySeconds, out var checkEvery, out Error) ||
                 !ConfigurationReader.TryReadSeconds(JSON, "legalTimeToleranceSeconds", "nts", 0.001, 60, out var tolerance, out Error) ||
                 !ConfigurationReader.TryReadSeconds(JSON, "legalTimeMaxAgeSeconds", "nts", 10, 86400, out var maxAge, out Error) ||
                 !ConfigurationReader.TryReadString (JSON, "legalTimeAuthority", "nts", MaxAuthorityLength, out var authority, out Error) ||
                 !ConfigurationReader.TryReadByte   (JSON, "minServers",          "nts",                     out var minServers, out Error) ||
-                !ConfigurationReader.TryReadSeconds(JSON, "maxDeviationSeconds", "nts", 0.001, 3600,        out var maxDeviation, out Error))
+                !ConfigurationReader.TryReadSeconds(JSON, "maxDeviationSeconds", "nts", MinDeviationSeconds, MaxDeviationSeconds, out var maxDeviation, out Error))
             {
                 return false;
             }
@@ -314,6 +330,35 @@ namespace cloud.charging.open.LocalController.Configuration
                         MaxDeviation);
 
         }
+
+        #endregion
+
+        #region OverriddenBy(Update)
+
+        /// <summary>
+        /// This section with another laid over it: the other's value for each
+        /// key it names, and this one's for each key it does not.
+        /// </summary>
+        /// <remarks>
+        /// What a save that sends part of the section amounts to, and what the
+        /// file says once that part is merged into it. The list of servers is
+        /// one value and is replaced whole, as it is in the file.
+        /// </remarks>
+        /// <param name="Update">The section laid over this one.</param>
+        public NTSConfiguration OverriddenBy(NTSConfiguration Update)
+
+            => new (Update.Enabled             ?? Enabled,
+                    Update.Hostname            ?? Hostname,
+                    Update.NTSKEPort           ?? NTSKEPort,
+                    Update.NTPPort             ?? NTPPort,
+                    Update.Timeout             ?? Timeout,
+                    Update.CheckEvery          ?? CheckEvery,
+                    Update.LegalTimeAuthority  ?? LegalTimeAuthority,
+                    Update.LegalTimeTolerance  ?? LegalTimeTolerance,
+                    Update.LegalTimeMaxAge     ?? LegalTimeMaxAge,
+                    Update.Servers             ?? Servers,
+                    Update.MinServers          ?? MinServers,
+                    Update.MaxDeviation        ?? MaxDeviation);
 
         #endregion
 
