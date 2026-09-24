@@ -268,6 +268,90 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region AnAddressWithSomethingAroundItIsRefusedWithASentence(Text)
+
+        /// <summary>
+        /// An address with a port or a scheme around it is not an address, and
+        /// is refused as the file's mistake - with the key named, and not with
+        /// an exception: Hermod's IPAddress.TryParse used to find the address
+        /// inside the text and then throw over the rest of it, which stopped a
+        /// controller at its start without naming the file or the key.
+        /// </summary>
+        [TestCase("0.0.0.0:9000")]
+        [TestCase("wss://192.168.1.10")]
+        [TestCase("[2001:db8::1]:9000")]
+        public void AnAddressWithSomethingAroundItIsRefusedWithASentence(String Text)
+        {
+
+            var      parsed  = true;
+            String?  error   = null;
+
+            Assert.That(() => parsed = OCPPServerConfiguration.TryParse(new JObject(new JProperty("address", Text)), out _, out error),
+                        Throws.Nothing);
+
+            Assert.Multiple(() => {
+                Assert.That(parsed,  Is.False);
+                Assert.That(error,   Does.Contain("'ocppServer.address'"));
+            });
+
+        }
+
+        #endregion
+
+        #region AReachableAddressWithAPortIsRefusedWithASentence(Text)
+
+        /// <summary>
+        /// The same for the names the stations reach this controller under: an
+        /// address with a port is neither an address nor a name.
+        /// </summary>
+        [TestCase("192.168.1.10:9000")]
+        [TestCase("wss://192.168.1.10")]
+        public void AReachableAddressWithAPortIsRefusedWithASentence(String Text)
+        {
+
+            var      parsed  = true;
+            String?  error   = null;
+
+            Assert.That(() => parsed = OCPPServerConfiguration.TryParse(new JObject(new JProperty("reachableAs", new JArray(Text))), out _, out error),
+                        Throws.Nothing);
+
+            Assert.Multiple(() => {
+                Assert.That(parsed,  Is.False);
+                Assert.That(error,   Does.Contain("'ocppServer.reachableAs'").And.Contain(Text));
+            });
+
+        }
+
+        #endregion
+
+        #region ANameThatBeginsWithAnAddressIsAName()
+
+        /// <summary>
+        /// "10.0.0.1.nip.io" is a host name - the kind a certificate for a box
+        /// that only has an address is often issued for - and not an address
+        /// with something after it. Read as the latter, it used to stop the
+        /// controller at its start.
+        /// </summary>
+        [Test]
+        public void ANameThatBeginsWithAnAddressIsAName()
+        {
+
+            var                       parsed  = false;
+            OCPPServerConfiguration?  read    = null;
+            String?                   error   = null;
+
+            Assert.That(() => parsed = OCPPServerConfiguration.TryParse(new JObject(new JProperty("reachableAs", new JArray("10.0.0.1.nip.io"))), out read, out error),
+                        Throws.Nothing);
+
+            Assert.Multiple(() => {
+                Assert.That(parsed,             Is.True,  error);
+                Assert.That(read?.ReachableAs,  Is.EqualTo(new[] { "10.0.0.1.nip.io" }));
+            });
+
+        }
+
+        #endregion
+
         #region NumbersHaveToBeWithinReason()
 
         [Test]
