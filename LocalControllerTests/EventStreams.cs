@@ -216,6 +216,18 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region Count(Text)
+
+        /// <summary>
+        /// How often the given text has come down the stream so far: for a
+        /// test that has to know an entry arrived once, and not twice.
+        /// </summary>
+        public Int32 Count(String Text)
+
+            => read.ToString().Split(Text).Length - 1;
+
+        #endregion
+
         #region Dispose()
 
         public void Dispose()
