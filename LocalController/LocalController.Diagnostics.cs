@@ -338,7 +338,7 @@ namespace cloud.charging.open.LocalController
                 // answering is not "checked against ptbtime1", and picking one
                 // of them to print would be the nicer-looking lie.
                 lastTimeCheckServer    = asked.Length == 1
-                                             ? asked[0]
+                                             ? asking[0]
                                              : null;
 
                 // Written down rather than acted on, which is what the white

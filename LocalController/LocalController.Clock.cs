@@ -125,12 +125,7 @@ namespace cloud.charging.open.LocalController
             // Named rather than counted, because this is written once at a
             // start and somebody reading it is checking that the file took
             // effect. "4 time servers" would not tell them which four.
-            //
-            // Trimmed, because this is a sentence somebody reads. The root
-            // dot belongs on a name going back into a file - see how the
-            // configuration is written - and not in the middle of a line of
-            // prose, where it reads as a typing mistake.
-            var asking = timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.Trimmed).ToArray();
+            var asking = CheckedAgainst();
 
             Log.Info(
                 $"The clock of this local controller will be checked against {String.Join(", ", asking)} every {TimeCheckEvery.TotalMinutes:F0} minute(s)" +
@@ -179,6 +174,23 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
+        #region (private) CheckedAgainst()
+
+        /// <summary>
+        /// The time servers the clock check asks: those switched on, in the
+        /// order their bands are asked in.
+        /// </summary>
+        /// <remarks>
+        /// Trimmed, because both places this goes are read by somebody: a
+        /// sentence in the log, and the clock's JSON for a screen. The root dot
+        /// belongs on a name going back into a file, not in the middle of
+        /// prose, where it reads as a typing mistake.
+        /// </remarks>
+        private String[] CheckedAgainst()
+            => [.. timeSources.Bands().SelectMany(band => band).Select(source => source.Hostname.Trimmed)];
+
+        #endregion
+
         #region ClockJSON()
 
         /// <summary>
@@ -195,7 +207,7 @@ namespace cloud.charging.open.LocalController
         {
 
             var now       = TimeProvider.GetUtcNow();
-            var asked     = timeSources.Bands().SelectMany(band => band).ToArray();
+            var asked     = CheckedAgainst();
             var checkedAt = lastTimeCheck;
             var offset    = lastTimeCheckOffset;
             var age       = checkedAt.HasValue ? now - checkedAt.Value : (TimeSpan?) null;
@@ -218,12 +230,19 @@ namespace cloud.charging.open.LocalController
                        // clock, and the check below did not set it.
                        new JProperty("source",          "system"),
 
+                       // Against whom: the group the check asks, as the log line
+                       // at the start names it - its name, its servers switched
+                       // on and how many of them have to answer - and the one
+                       // server by name when there is only one. Switched off,
+                       // nobody.
                        new JProperty("nts",             new JObject(
                            new JProperty("enabled",       NTSEnabled),
+                           new JProperty("group",         NTSEnabled ? timeSources.Name : null),
                            new JProperty("server",        NTSEnabled && asked.Length == 1
-                                                              ? asked[0].Hostname.ToString()
+                                                              ? asked[0]
                                                               : null),
-                           new JProperty("servers",       new JArray(asked.Select(source => source.Hostname.ToString()))),
+                           new JProperty("servers",       NTSEnabled ? new JArray(asked) : null),
+                           new JProperty("minServers",    NTSEnabled ? timeSources.MinServers : null),
                            new JProperty("lastServer",    lastTimeCheckServer),
                            new JProperty("asked",         lastTimeCheckAsked),
                            new JProperty("answered",      lastTimeCheckAnswered),

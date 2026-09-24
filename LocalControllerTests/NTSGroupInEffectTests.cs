@@ -508,6 +508,92 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region TheClockNamesTheGroupItIsCheckedAgainst()
+
+        /// <summary>
+        /// Against whom the clock is checked, as its JSON says it: the group,
+        /// its servers switched on in the order they are asked, and how many of
+        /// them have to answer.
+        /// </summary>
+        /// <remarks>
+        /// It named the servers with their root dot and neither the group nor
+        /// the quorum - which is half of what "checked against" means when
+        /// there is more than one.
+        /// </remarks>
+        [Test]
+        public async Task TheClockNamesTheGroupItIsCheckedAgainst()
+        {
+
+            await using var controller = Controller("""
+                                             { "nts": { "servers": [ { "hostname": "b.example", "priority": 5 },
+                                                                     "a.example",
+                                                                     { "hostname": "c.example", "enabled": false } ] } }
+                                             """);
+
+            var nts = (JObject) controller.ClockJSON()["nts"]!;
+
+            Assert.Multiple(() => {
+
+                Assert.That(nts.Value<String>("group"),        Is.EqualTo("legal"));
+
+                Assert.That(nts["servers"]!.Values<String>(),  Is.EqualTo(new[] { "a.example", "b.example" }),
+                            "switched on, in the order their bands are asked, and without the root's dot");
+
+                Assert.That(nts.Value<Int32>("minServers"),    Is.EqualTo(2));
+
+                Assert.That(nts["server"]?.Type,               Is.EqualTo(JTokenType.Null),
+                            "one of two named as though it were the one");
+
+            });
+
+        }
+
+        #endregion
+
+        #region AClockCheckedAgainstOneServerNamesIt()
+
+        /// <summary>
+        /// A group of one is checked against that one, and says so - as it is
+        /// read, without the root's dot.
+        /// </summary>
+        [Test]
+        public async Task AClockCheckedAgainstOneServerNamesIt()
+        {
+
+            await using var controller = Controller("""{ "nts": { "hostname": "a.example" } }""");
+
+            Assert.That(controller.ClockJSON()["nts"]?.Value<String>("server"),  Is.EqualTo("a.example"));
+
+        }
+
+        #endregion
+
+        #region AClockThatIsNotCheckedNamesNobody()
+
+        /// <summary>
+        /// Switched off, the clock is checked against nobody, and says so -
+        /// rather than naming servers that are not asked.
+        /// </summary>
+        [Test]
+        public async Task AClockThatIsNotCheckedNamesNobody()
+        {
+
+            await using var controller = Controller("""{ "nts": { "enabled": false } }""");
+
+            var nts = (JObject) controller.ClockJSON()["nts"]!;
+
+            Assert.Multiple(() => {
+                Assert.That(nts.Value<Boolean>("enabled"),  Is.False);
+                Assert.That(nts["group"]?.     Type,        Is.EqualTo(JTokenType.Null));
+                Assert.That(nts["servers"]?.   Type,        Is.EqualTo(JTokenType.Null));
+                Assert.That(nts["minServers"]?.Type,        Is.EqualTo(JTokenType.Null));
+                Assert.That(nts["server"]?.    Type,        Is.EqualTo(JTokenType.Null));
+            });
+
+        }
+
+        #endregion
+
         #region ADeviationStaysWhenTheServersChange()
 
         /// <summary>
