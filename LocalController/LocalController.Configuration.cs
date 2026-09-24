@@ -498,6 +498,36 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
+        #region (private static) LastSyncSaid(Sync)
+
+        /// <summary>
+        /// How the last synchronisation went, in a few words: that it
+        /// succeeded and how far off the clock was, or why it did not.
+        /// </summary>
+        /// <remarks>
+        /// Said beside when it happened, because the moment alone reads as a
+        /// success: a synchronisation that found no server has a time just as
+        /// much as one that set the record straight.
+        /// </remarks>
+        /// <param name="Sync">The last synchronisation, or null while there has been none.</param>
+        private static String? LastSyncSaid(JObject? Sync)
+        {
+
+            if (Sync is null)
+                return null;
+
+            if (Sync.Value<Boolean>("ok"))
+                return Sync.Value<Double?>("offset_ms") is Double offset
+                           ? String.Format(System.Globalization.CultureInfo.InvariantCulture,
+                                           "succeeded, the clock is {0:+0.0;-0.0;0.0} ms off", offset)
+                           : "succeeded";
+
+            return $"failed: {Sync.Value<String>("error") ?? "no reason was given"}";
+
+        }
+
+        #endregion
+
         #region (private) TryCheckNTSQuorum(Configuration, out Error)
 
         /// <summary>

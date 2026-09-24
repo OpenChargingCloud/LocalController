@@ -417,6 +417,97 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region TheOverviewNamesTheGroupAndNotTheTestClient()
+
+        /// <summary>
+        /// The Configuration page's time card names the servers the clock is
+        /// checked against - all of them, the one switched off as well - and
+        /// not the host of the single client.
+        /// </summary>
+        /// <remarks>
+        /// It said "NTS: ptbtime1.ptb.de." and nothing else: one server, the
+        /// single client's, with its root dot, where the group asked four.
+        /// </remarks>
+        [Test]
+        public async Task TheOverviewNamesTheGroupAndNotTheTestClient()
+        {
+
+            await using var controller = Controller("""
+                                             { "nts": { "servers": [ "a.example",
+                                                                     { "hostname": "b.example", "priority": 5 },
+                                                                     { "hostname": "c.example", "enabled": false } ] } }
+                                             """);
+
+            var time = controller.ConfigurationJSON()["time"] as JObject;
+
+            Assert.Multiple(() => {
+
+                Assert.That(time?.Value<String>("timeServers"),  Is.EqualTo("a.example, b.example (priority 5), c.example (switched off)"));
+                Assert.That(time?.Value<Boolean>("ntsEnabled"),  Is.True);
+                Assert.That(time?.Value<Int32>("minServers"),    Is.EqualTo(2));
+                Assert.That(time?.Value<String>("checkedEvery"), Is.EqualTo("00:15:00"));
+                Assert.That(time?.ContainsKey("nts"),            Is.False,  "the single client's host is named again");
+
+                // There and empty while nothing has been synchronised, so that
+                // the card says "-" rather than leaving the line out.
+                Assert.That(time?["lastSync"]?.      Type,       Is.EqualTo(JTokenType.Null));
+                Assert.That(time?["lastSyncResult"]?.Type,       Is.EqualTo(JTokenType.Null));
+
+            });
+
+        }
+
+        #endregion
+
+        #region TheOverviewSaysHowTheLastSynchronisationWent()
+
+        /// <summary>
+        /// When the last synchronisation happened, and how it went - because
+        /// the moment alone reads as a success, and one that found no server
+        /// has a moment just as much as one that set the record straight.
+        /// </summary>
+        /// <remarks>
+        /// Against one server that cannot answer and costs nothing to ask: an
+        /// address, which needs no lookup, on a port nobody listens on, so the
+        /// key exchange is turned away at once and nothing leaves this machine.
+        /// Name resolution is switched off as well, for the lookup the
+        /// measurement makes on the side.
+        /// </remarks>
+        [Test]
+        public async Task TheOverviewSaysHowTheLastSynchronisationWent()
+        {
+
+            await using var controller = TestControllers.New(
+                                             directory,
+                                             new JObject(
+                                                 new JProperty("dns", new JObject(
+                                                     new JProperty("enabled",  false)
+                                                 )),
+                                                 new JProperty("nts", new JObject(
+                                                     new JProperty("enabled",  true),
+                                                     new JProperty("servers",  new JArray(
+                                                         new JObject(
+                                                             new JProperty("hostname",   "127.0.0.1"),
+                                                             new JProperty("ntsKEPort",  TestControllers.FreePort())
+                                                         )
+                                                     ))
+                                                 ))
+                                             )
+                                         );
+
+            var result = await controller.SyncTimeAsync();
+            var time   = controller.ConfigurationJSON()["time"] as JObject;
+
+            Assert.Multiple(() => {
+                Assert.That(result.Value<Boolean>("ok"),              Is.False);
+                Assert.That(time?.Value<String>("lastSync"),          Is.EqualTo(result.Value<String>("at")));
+                Assert.That(time?.Value<String>("lastSyncResult"),    Is.EqualTo($"failed: {result.Value<String>("error")}"));
+            });
+
+        }
+
+        #endregion
+
         #region ADeviationStaysWhenTheServersChange()
 
         /// <summary>

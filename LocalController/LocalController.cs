@@ -1148,8 +1148,23 @@ namespace cloud.charging.open.LocalController
                        new JProperty("tags",           new JArray(Log.KnownTags))
                    )),
 
+                   // The group, which is what the clock is checked against.
+                   // This card used to say "NTS" and the host of the single
+                   // client - one server, where the group asks four, and with
+                   // its root dot - and nothing else. The servers are now named
+                   // the way the log names them when they change, the ones
+                   // switched off included.
+                   //
+                   // And the last synchronisation - the button's or the clock
+                   // check's - when it happened and how it went, or nothing
+                   // while there has been none.
                    new JProperty("time",       new JObject(
-                       new JProperty("nts",            ntsClient.Hostname.ToString()),
+                       new JProperty("ntsEnabled",     NTSEnabled),
+                       new JProperty("timeServers",    Described(timeSources)),
+                       new JProperty("minServers",     timeSources.MinServers),
+                       new JProperty("checkedEvery",   TimeCheckEvery.ToString()),
+                       new JProperty("lastSync",       lastTimeSync?.Value<String>("at")),
+                       new JProperty("lastSyncResult", LastSyncSaid(lastTimeSync)),
                        new JProperty("now",            TimeProvider.GetUtcNow().ToString("o"))
                    )),
 
