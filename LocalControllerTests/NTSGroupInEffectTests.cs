@@ -17,9 +17,13 @@
 
 #region Usings
 
+using System.Security.Cryptography;
+
 using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
+
+using org.GraphDefined.Vanaheimr.Norn.NTS;
 
 #endregion
 
@@ -310,6 +314,9 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(listed?[1]?.Value<Boolean>("enabled"),   Is.False);
                 Assert.That(listed?[1]?.Value<Int32>("ntsKEPort"),   Is.EqualTo(4461));
                 Assert.That(listed?[0]?.Value<Int32>("ntpPort"),     Is.EqualTo(123));
+
+                // There and empty until a key exchange has shown a chain.
+                Assert.That(listed?[0]?["rootCA"]?.Type,             Is.EqualTo(JTokenType.Null));
             });
 
         }
@@ -588,6 +595,38 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(nts["servers"]?.   Type,        Is.EqualTo(JTokenType.Null));
                 Assert.That(nts["minServers"]?.Type,        Is.EqualTo(JTokenType.Null));
                 Assert.That(nts["server"]?.    Type,        Is.EqualTo(JTokenType.Null));
+            });
+
+        }
+
+        #endregion
+
+        #region TheRootCAIsNamedAndFingerprintedForTheList()
+
+        /// <summary>
+        /// What the NTS page's list shows of a server's last key exchange: the
+        /// root its chain ended at, by its common name, its whole subject, and
+        /// its SHA-256 fingerprint - and nothing before there was an exchange.
+        /// </summary>
+        [Test]
+        public void TheRootCAIsNamedAndFingerprintedForTheList()
+        {
+
+            using var authority = TestCA.Create("Test Root");
+            using var server    = authority.SignFor("time.example",
+                                                    DateTimeOffset.UtcNow.AddDays(-10),
+                                                    DateTimeOffset.UtcNow.AddDays(79),
+                                                    ClientAuthentication: false);
+
+            var root = authority.Certificate;
+            var json = LocalController.RootCAJSON(new NTSKE_TLSInfo(ServerCertificate: server, ValidatedChain: [ server, root ]));
+
+            Assert.Multiple(() => {
+                Assert.That(json?.Value<String>("name"),                     Is.EqualTo("Test Root"));
+                Assert.That(json?.Value<String>("subject"),                  Is.EqualTo("CN=Test Root"));
+                Assert.That(json?.Value<String>("fingerprint"),              Is.EqualTo(Convert.ToHexStringLower(SHA256.HashData(root.RawData))));
+                Assert.That(LocalController.RootCAJSON(null),                Is.Null);
+                Assert.That(LocalController.RootCAJSON(new NTSKE_TLSInfo()), Is.Null, "a session that kept no chain names no root");
             });
 
         }
