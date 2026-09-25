@@ -632,17 +632,91 @@ export interface TOTPUpdate {
 
 export class ApiError extends Error {
 
-    constructor(public readonly status:  number,
-                message:                 string,
-                public readonly body?:   unknown) {
+    readonly status:  number;
+    readonly body?:   unknown;
+
+    constructor(status:   number,
+                message:  string,
+                body?:    unknown) {
+
         super(message);
-        this.name = 'ApiError';
+
+        this.name    = 'ApiError';
+        this.status  = status;
+        this.body    = body;
+
     }
 
     get isUnauthorized(): boolean {
         return this.status === 401;
     }
 
+}
+
+
+/**
+ * Nothing came back at all.
+ *
+ * Not an ApiError, because the two are different things to be told: an
+ * ApiError is the local controller answering and saying no, with a sentence of its own
+ * about why. This is the local controller saying nothing - and a page that can tell the
+ * two apart can say so, instead of repeating a status that was never sent.
+ */
+export class NoAnswer extends Error {
+
+    readonly reason:  'ran out of time' | 'could not be reached';
+
+    constructor(reason:   'ran out of time' | 'could not be reached',
+                message:  string) {
+
+        super(message);
+
+        this.name    = 'NoAnswer';
+        this.reason  = reason;
+
+    }
+
+}
+
+
+/**
+ * How long the web interface waits for the local controller to answer about
+ * itself.
+ *
+ * Measured on the vehicle's web interface, against a vehicle that had gone
+ * quiet rather than away - the case a refused connection does not cover, and
+ * the one a car park's network actually produces: 98 seconds after Save, the
+ * request was still open, both buttons of the form were still greyed out, and
+ * the page said nothing at all. Seven pages clicked through in that state left
+ * nine requests hanging, more than the browser will even keep connections open
+ * for.
+ *
+ * Fifteen seconds is more than two orders of magnitude more than this local
+ * controller needs: every read and write of its own configuration measured
+ * between 1 and 30 milliseconds, and the slowest thing it does outside a key -
+ * a station's login, made up and stored - under 100. That is the point. The
+ * deadline is here to notice silence and not slowness, so it can be generous
+ * enough that a slow link never trips it.
+ */
+export const answerWithin = 15_000;
+
+/**
+ * And how long for the local controller to do something and then answer.
+ *
+ * Longer, because a write is a file and sometimes more than one, and because
+ * giving up on a write is the worse mistake of the two to make: the local
+ * controller may have carried it out and only been slow to say so.
+ */
+export const actWithin = 30_000;
+
+/**
+ * How long a question the local controller has to put to somebody else may
+ * take: the timeouts it was told to allow, added up, and the usual allowance
+ * on top - so that what the page gives up on is silence from the local
+ * controller rather than patience it was told to have.
+ */
+export function afterAsking(Timeouts: number[]): number {
+    return Timeouts.reduce((total, seconds) => total + seconds * 1000, 0) + answerWithin;
 }
 
 
@@ -659,7 +733,7 @@ export function onUnauthorized(handler: () => void): void {
  *
  * Two requests rather than one, and that is not a detour. The HTTPExt API is
  * the only place that can check a password - the store it reads is private to
- * it - but it answers in its own shape and knows nothing of this controller's
+ * it - but it answers in its own shape and knows nothing of this local controller's
  * roles. So it sets the session cookie, and "me" is asked afterwards for the
  * roles and permissions this frontend actually works from.
  *
@@ -668,15 +742,32 @@ export function onUnauthorized(handler: () => void): void {
  */
 async function signIn(username: string, password: string): Promise<Me> {
 
-    const response = await fetch(config.extBase + '/login', {
-                               method:       'POST',
-                               headers:      {
-                                                 'Content-Type':  'application/x-www-form-urlencoded',
-                                                 'Accept':        'application/json'
-                                             },
-                               credentials:  'same-origin',
-                               body:         new URLSearchParams({ login: username, password }).toString()
-                           });
+    const giveUp = new AbortController();
+    const timer  = setTimeout(() => giveUp.abort(), actWithin);
+
+    let response: Response;
+
+    try
+    {
+        response = await fetch(config.extBase + '/login', {
+                             method:       'POST',
+                             headers:      {
+                                               'Content-Type':  'application/x-www-form-urlencoded',
+                                               'Accept':        'application/json'
+                                           },
+                             credentials:  'same-origin',
+                             signal:       giveUp.signal,
+                             body:         new URLSearchParams({ login: username, password }).toString()
+                         });
+    }
+    catch (problem)
+    {
+        throw nothingCameBack(problem, 'POST', actWithin, giveUp.signal.aborted);
+    }
+    finally
+    {
+        clearTimeout(timer);
+    }
 
     if (!response.ok) {
 
@@ -702,32 +793,66 @@ async function signIn(username: string, password: string): Promise<Me> {
 }
 
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/**
+ * One request to the local controller, with a deadline.
+ *
+ * The deadline covers reading the body as well as opening the connection: a
+ * local controller that sends its headers and then stops mid-answer hangs exactly as
+ * thoroughly as one that never starts.
+ *
+ * Exported so that the tests can drive it at a deadline short enough to be a
+ * test; everything the pages do goes through `api` below.
+ */
+export async function request<T>(method:  string,
+                                 path:    string,
+                                 body?:   unknown,
+                                 within:  number = method === 'GET' ? answerWithin : actWithin): Promise<T> {
 
     const headers: Record<string, string> = { 'Accept': 'application/json' };
 
     if (body !== undefined)
         headers['Content-Type'] = 'application/json';
 
-    // Same origin, so the session cookie travels with every request.
-    const response = await fetch(config.apiBase + path, {
-                               method,
-                               headers,
-                               credentials: 'same-origin',
-                               body: body !== undefined ? JSON.stringify(body) : undefined
-                           });
+    const giveUp = new AbortController();
+    const timer  = setTimeout(() => giveUp.abort(), within);
 
-    if (response.status === 401)
-        unauthorizedHandler?.();
+    let response:  Response;
+    let text:      string;
 
-    if (response.status === 204) {
-        // Nothing to read, but reading it lets the browser finish the request
-        // cleanly instead of aborting an unconsumed body.
-        await response.arrayBuffer();
-        return undefined as T;
+    try
+    {
+
+        // Same origin, so the session cookie travels with every request.
+        response = await fetch(config.apiBase + path, {
+                             method,
+                             headers,
+                             credentials: 'same-origin',
+                             signal:      giveUp.signal,
+                             body:        body !== undefined ? JSON.stringify(body) : undefined
+                         });
+
+        if (response.status === 401)
+            unauthorizedHandler?.();
+
+        if (response.status === 204) {
+            // Nothing to read, but reading it lets the browser finish the
+            // request cleanly instead of aborting an unconsumed body.
+            await response.arrayBuffer();
+            return undefined as T;
+        }
+
+        text = await response.text();
+
+    }
+    catch (problem)
+    {
+        throw nothingCameBack(problem, method, within, giveUp.signal.aborted);
+    }
+    finally
+    {
+        clearTimeout(timer);
     }
 
-    const text = await response.text();
     let json: unknown = null;
 
     try {
@@ -749,6 +874,48 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     }
 
     return json as T;
+
+}
+
+
+/**
+ * What to say when nothing came back, in words somebody can act on.
+ *
+ * A read that runs out of time changed nothing, and can be told so. A write
+ * that runs out of time is the honest awkward case: the page stopped waiting,
+ * but the local controller may well have done the thing and been slow to say so, and
+ * telling somebody that it did not work would invite them to do it twice. So
+ * it says what is actually known - that the waiting stopped - and where to
+ * look for the rest.
+ */
+function nothingCameBack(Problem:  unknown,
+                         Method:   string,
+                         Within:   number,
+                         GaveUp:   boolean): unknown {
+
+    const seconds = Math.round(Within / 1000);
+
+    if (GaveUp)
+        return new NoAnswer(
+                   'ran out of time',
+                   Method === 'GET'
+                       ? `The local controller did not answer within ${seconds} seconds. ` +
+                         'It may be busy, restarting, or no longer reachable from here.'
+                       : `The local controller did not answer within ${seconds} seconds, so this page ` +
+                         'stopped waiting. It may still have carried this out - reload to see ' +
+                         'what it now says.'
+               );
+
+    // The browser's own word for this is "Failed to fetch", which on a page
+    // about a local controller names neither the local controller nor what to do next.
+    if (Problem instanceof TypeError)
+        return new NoAnswer(
+                   'could not be reached',
+                   'The local controller could not be reached. It may be switched off, restarting, ' +
+                   'or on the other side of a network that is down.'
+               );
+
+    return Problem;
 
 }
 
@@ -775,14 +942,18 @@ export const api = {
         /** Only the fields given are changed; the answer is the whole configuration as it now stands. */
         save:  (update: DNSUpdate)   => request<DNSConfiguration>('PUT', '/configuration/dns', update),
         /**
-         * Make the controller look a name up. A POST because it sends traffic.
+         * Make the local controller look a name up. A POST because it sends
+         * traffic.
          *
-         * @param server  the place in the list of the one name server to ask,
-         *                or undefined to resolve the way the controller resolves
-         *                anything else, trying them in turn.
+         * @param timeouts  what each name server is allowed, in seconds; the
+         *                  page waits for all of them, added up.
+         * @param server    which configured name server to ask, by its place
+         *                  in the list - or undefined to resolve the way the
+         *                  local controller resolves anything else.
          */
-        query: (name: string, recordTypes: string[], server?: number) =>
-                   request<DNSQueryResult>('POST', '/configuration/dns/query', { name, recordTypes, server })
+        query: (name: string, recordTypes: string[], timeouts: number[], server?: number) =>
+                   request<DNSQueryResult>('POST', '/configuration/dns/query', { name, recordTypes, server },
+                                           afterAsking(timeouts))
     },
 
     nts: {
@@ -792,11 +963,26 @@ export const api = {
          * Ask one time server everything: the name, the key exchange, the
          * authenticated NTP request, each one written down as it happens.
          *
-         * @param host  the server to ask, or undefined for the configured one.
+         * @param timeoutSeconds  what the local controller allows each of the
+         *                        two steps.
+         * @param host            which server, on the ports it is configured
+         *                        with, or undefined for the configured one.
          */
-        test:  (host?: string)       => request<TimeServerTest>('POST', '/configuration/nts/test', { host }),
-        /** One key exchange and one authenticated NTP request, with every step in the log. */
-        sync:  ()                    => request<NTSConfiguration>('POST', '/configuration/nts/sync', {})
+        test:  (timeoutSeconds: number, host?: string) => request<TimeServerTest>(
+                                               'POST', '/configuration/nts/test', { host },
+                                               afterAsking([timeoutSeconds, timeoutSeconds])),
+        /**
+         * Ask every server of the group, with every step in the log - two steps
+         * over the network per server, so two of the local controller's own
+         * timeouts before the page stops believing in it.
+         *
+         * @param timeoutSeconds  what the local controller allows each of the
+         *                        two steps.
+         */
+        sync:  (timeoutSeconds: number) => request<NTSConfiguration>(
+                                               'POST', '/configuration/nts/sync', {},
+                                               afterAsking([timeoutSeconds, timeoutSeconds])
+                                           )
     },
 
     /**
@@ -833,10 +1019,19 @@ export const api = {
 
             get:     ()  => request<ServerCertificates>('GET', '/configuration/ocpp-server/certificates'),
 
-            /** Generate a key and the signing request that goes with it; the key never leaves. */
+            /**
+             * Generate a key and the signing request that goes with it; the key
+             * never leaves.
+             *
+             * Given three minutes rather than the half of one any other write
+             * gets, because an RSA key is a search for two primes that takes as
+             * long as it takes: measured here, an RSA 4096 key took between 0.4
+             * and 7 seconds on a desktop, and a local controller may well be a
+             * board many times slower than that.
+             */
             create:  (subject: string, algorithm: string) =>
                          request<{ id: string; csr: string }>('POST', '/configuration/ocpp-server/certificates',
-                                                              { subject, algorithm }),
+                                                              { subject, algorithm }, 3 * 60_000),
 
             /** Where the signing request can be downloaded; a plain file, not JSON. */
             csrURL:  (id: string) => `${config.apiBase}/configuration/ocpp-server/certificates/${encodeURIComponent(id)}/csr`,

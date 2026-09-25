@@ -858,16 +858,7 @@ input, textarea, select {
 // The dialog a time server is added, changed or deleted in: the test's dialog,
 // narrower, because it holds a form and not a log.
 .server-dialog {
-
-    width:            min(30rem, 92vw);
-
-    h2 {
-        margin:       0 0 0.85rem;
-        display:      flex;
-        align-items:  center;
-        gap:          0.5rem;
-    }
-
+    width:  min(30rem, 92vw);
 }
 
 // Asking a name server something, and what it said.

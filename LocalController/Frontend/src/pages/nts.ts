@@ -4,26 +4,41 @@ import { html, must, render, type HTMLFragment } from '../html';
 import type { Page } from '../router';
 import { shell } from '../shell';
 import { errorMessage, formatValue, humanizeKey, whileSaving } from '../ui';
+import { typedSinceDrawn, unsaved } from '../unsaved';
 import { entryOf, nameTaken, readable, withServer, withoutServer, type UsualPorts } from './ntsServers';
 
 /**
- * Where this local controller reads the time: its time servers, and the rules
- * for believing them.
+ * What the NTS client allows itself when the local controller has not been told.
+ *
+ * The local controller's answer carries the timeout it was configured with, and null
+ * where it was configured with none - and it does not repeat what the client
+ * then falls back to, which is three seconds. This is only used to work out
+ * how long this page waits for a test, and the page allows the local controller
+ * fifteen seconds on top of it, so being wrong here by a few seconds costs
+ * nothing at all.
+ */
+const theClientsOwnTimeout = 3;
+
+
+/**
+ * Where this local controller reads the time: its time servers, and the rules for
+ * believing them.
  *
  * The page is the group, because the group is what the clock is checked
- * against. It used to lead with a form for one server - and saving that form
- * told the controller a lone host name, which it read as a group of one: four
- * servers went down to the one in the form. Now each server is a row with an
- * Edit of its own, the group is added to at the end of its list, and what the
- * group is held to is a form of its own below it.
+ * against. It used to lead with a form for one server "for the detailed test"
+ * - and saving that form told the local controller a lone host name, which it
+ * read as a group of one: four servers went down to the one in the form. Now
+ * each server is a row with a Test of its own and an Edit, the group is added
+ * to at the end of its list, and what the group is held to is a form of its
+ * own below it.
  *
  * The cards stand one under the other, read from the top down: what the clock
  * is worth, whether, who, by which rules - and last "Sync now", which puts all
  * of that to work, with what came of it.
  *
- * Every change takes effect at once, and the controller is told the whole list
+ * Every change takes effect at once, and the local controller is told the whole list
  * each time - which is why the list is only ever changed by exactly one server
- * at a time, from a dialog, and why a change the controller refuses leaves the
+ * at a time, from a dialog, and why a change the local controller refuses leaves the
  * page as it was.
  *
  * The parts are drawn separately. "Sync now" redraws its own card, the clock
@@ -46,7 +61,12 @@ export const ntsPage: Page = {
 
         render(content, html`<div class="loading">Loading ...</div>`);
 
-        must<HTMLButtonElement>(root, '#reload').addEventListener('click', () => void load());
+        // Reload throws a draft away just as thoroughly as "Discard changes"
+        // does, and from the opposite corner of the screen, so it asks first.
+        must<HTMLButtonElement>(root, '#reload').addEventListener('click', () => {
+            if (unsaved.mayBeLost())
+                void load();
+        });
 
         const mayChange = auth.can('changeNetworkSettings');
         const mayTest   = auth.can('runDiagnostics');
@@ -65,14 +85,14 @@ export const ntsPage: Page = {
             };
         }
 
-        /** The list as the controller has it, as entries it can be told again. */
+        /** The list as the local controller has it, as entries it can be told again. */
         function entries(): NTSServerEntry[] {
             const usual = usualPorts();
             return (current?.timeSources ?? []).map(source => entryOf(source, usual));
         }
 
 
-        /** The whole page, from what the controller last said. */
+        /** The whole page, from what the local controller last said. */
         function draw(): void {
 
             if (current === null)
@@ -234,8 +254,8 @@ export const ntsPage: Page = {
                 </label>
 
                 <p class="hint">
-                    Switched off, this local controller asks its time servers nothing at all - "Sync now"
-                    below is refused rather than quietly doing nothing.
+                    Switched off, this local controller asks its time servers nothing at all - "Sync now" and the
+                    tests below are refused rather than quietly doing nothing.
                 </p>
 
                 <span id="switch-error" class="form-error" role="alert"></span>
@@ -247,10 +267,10 @@ export const ntsPage: Page = {
 
         /**
          * The synchronisation this page shows: the one just asked for, or the
-         * last one the controller remembers - and none at all while the next
-         * one is being asked for, neither the verdict nor what each server
-         * said. Left standing under the spinning button, the last one read as
-         * the new answer.
+         * last one the local controller remembers - and none at all while the next one
+         * is being asked for, neither the verdict nor what each server said.
+         * Left standing under the spinning button, the last one read as the
+         * new answer.
          */
         function shownSync(): NTSSyncResult | null {
             return syncing ? null : current?.result ?? current?.lastSync ?? null;
@@ -335,6 +355,12 @@ export const ntsPage: Page = {
                                value="${settings.checkEverySeconds}" ${off} />
                     </label>
 
+                    <label>Timeout of a test in seconds
+                        <input type="number" name="timeoutSeconds" step="0.1" min="0.1" max="${limits.maxTimeout}"
+                               value="${settings.timeoutSeconds ?? ''}" placeholder="${theClientsOwnTimeout}" ${off} />
+                        <span class="hint">What a server's Test allows each step. "Sync now" asks the way the clock check does, with timeouts of its own.</span>
+                    </label>
+
                     <div class="form-actions">
                         <button type="submit" class="btn primary" ${off}>Save</button>
                         <span id="policy-note"  class="form-notice" role="status"></span>
@@ -374,9 +400,7 @@ export const ntsPage: Page = {
                               ? html`
                                     Asks every server that is switched on, the way the clock check does: a key
                                     exchange over TLS, then one authenticated NTP request each. Every step goes
-                                    into the log. The clock of this local controller is not stepped by it - that
-                                    is a different thing, with meter readings and certificates hanging off it,
-                                    and not something a button does by surprise.
+                                    into the log. The clock of this local controller is not stepped by it.
                                 `
                               : html`Asking the servers needs the CPO or the system administrator role.`}
                     </span>
@@ -392,8 +416,8 @@ export const ntsPage: Page = {
 
 
         /**
-         * One time server: who it is, what it said last, the root its last key
-         * exchange ended at, and what can be done with it.
+         * One time server: who it is, what it said last, and what can be done
+         * with it.
          *
          * A server switched on can be missing from a synchronisation without
          * anything being wrong with it: the bands are asked in turn, and one
@@ -519,9 +543,9 @@ export const ntsPage: Page = {
          *
          * A dialog rather than fields in the row: a server has five things
          * that can be said about it, and the list is for reading which servers
-         * there are. And the controller is told the whole list when this is
-         * saved, so the dialog is also where it becomes clear that exactly one
-         * server is being changed.
+         * there are. And the local controller is told the whole list when this is saved,
+         * so the dialog is also where it becomes clear that exactly one server
+         * is being changed.
          *
          * @param index  the server's place in the list, or null to add one.
          */
@@ -544,8 +568,7 @@ export const ntsPage: Page = {
 
             document.body.appendChild(dialog);
 
-            // Shut it and take it away: a dialog that was only closed stays in
-            // the document, and the next one opened would be the second.
+            /** Shut it and take it away - both, as not every browser fires "close". */
             const dismiss = (): void => { dialog.close(); dialog.remove(); };
 
             render(dialog, html`
@@ -605,10 +628,10 @@ export const ntsPage: Page = {
             const error  = must<HTMLElement>    (dialog, '#server-error');
 
             /**
-             * Tell the controller the list with the one change in it, and close
+             * Tell the local controller the list with the one change in it, and close
              * only when it took it. What it refuses - a server below the
              * quorum, the last one - is said in the dialog, and the list the
-             * page shows is still the one the controller has.
+             * page shows is still the one the local controller has.
              */
             async function tell(servers: NTSServerEntry[]): Promise<void> {
 
@@ -691,9 +714,9 @@ export const ntsPage: Page = {
          * "Sync now" answers whether the group has a time; this answers where
          * one server got to, which is the question somebody has when it did
          * not. The steps are the ones the exchange actually has - the name, the
-         * TCP connection, the TLS handshake and the certificate it presented,
-         * the key exchange, the authenticated request - and each is timed, so a
-         * server that is merely slow can be told from one that is refusing.
+         * TCP connection, the TLS handshake, the key exchange, the
+         * authenticated request - and each is timed, so a server that is merely
+         * slow can be told from one that is refusing.
          *
          * @param host  which server, asked on the ports it is configured with.
          *              Sent as it is read, without the root's dot, because the
@@ -718,7 +741,8 @@ export const ntsPage: Page = {
             document.body.appendChild(dialog);
             dialog.showModal();
 
-            // Shut it and take it away, as the server dialog above is.
+            // Both halves explicitly: a browser the charging station's pages
+            // were tried in fired no close event at all.
             const dismiss = (): void => { dialog.close(); dialog.remove(); };
 
             dialog.addEventListener('close',  dismiss);
@@ -732,7 +756,7 @@ export const ntsPage: Page = {
 
             try
             {
-                result = await api.nts.test(host);
+                result = await api.nts.test(current?.settings.timeoutSeconds ?? theClientsOwnTimeout, host);
             }
             catch (problem)
             {
@@ -820,13 +844,20 @@ export const ntsPage: Page = {
 
                 event.preventDefault();
 
-                const data = new FormData(event.target as HTMLFormElement);
+                const form     = event.target as HTMLFormElement;
+                const data     = new FormData(form);
+                const timeout  = String(data.get('timeoutSeconds') ?? '').trim();
 
-                void savePolicy({
+                const update: NTSUpdate = {
                     minServers:           Number(data.get('minServers')),
                     maxDeviationSeconds:  Number(data.get('maxDeviationSeconds')),
                     checkEverySeconds:    Number(data.get('checkEverySeconds'))
-                });
+                };
+
+                if (timeout.length > 0)
+                    update.timeoutSeconds = Number(timeout);
+
+                void savePolicy(update);
 
             });
 
@@ -850,7 +881,7 @@ export const ntsPage: Page = {
             }
             catch (problem)
             {
-                // Back to what the controller has, which is not what the box
+                // Back to what the local controller has, which is not what the box
                 // says now that somebody has clicked it.
                 drawSwitch();
                 must<HTMLElement>(content, '#switch-error').textContent = errorMessage(problem);
@@ -863,7 +894,7 @@ export const ntsPage: Page = {
         }
 
 
-        /** Tell the controller what the group is held to. */
+        /** Tell the local controller what the group is held to. */
         async function savePolicy(update: NTSUpdate): Promise<void> {
 
             const policy  = must<HTMLElement>(content, '#nts-policy');
@@ -904,7 +935,7 @@ export const ntsPage: Page = {
                 // The answer carries the whole configuration as well as the
                 // result, because an exchange moves the cookies and the record
                 // of the last key exchange that each row is showing.
-                current = await api.nts.sync();
+                current = await api.nts.sync(current?.settings.timeoutSeconds ?? theClientsOwnTimeout);
 
                 // And the clock: an exchange is exactly the thing that turns
                 // "never checked" into a number.
@@ -952,9 +983,11 @@ export const ntsPage: Page = {
 
         }
 
+        const release = unsaved.heldBy(() => typedSinceDrawn(content.querySelector('#policy-form')));
+
         void load();
 
-        return () => { cancelled = true; };
+        return () => { cancelled = true; release(); };
 
     }
 
@@ -962,8 +995,8 @@ export const ntsPage: Page = {
 
 
 /**
- * Milliseconds the way the controller's log writes them: one place after a
- * point, and a sign where the number says which way.
+ * Milliseconds the way the local controller's log writes them: one place after a point,
+ * and a sign where the number says which way.
  */
 function ms(value: number | null | undefined, signed = false): string {
 

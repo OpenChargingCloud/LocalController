@@ -3,8 +3,8 @@ import type { NTSServerEntry, NTSTimeSource } from '../api/client';
 /**
  * The list of time servers as the NTS page edits it.
  *
- * Apart from the page, because this is the part that decides what the local
- * controller is told - and it is told the whole list every time, so a mistake
+ * Apart from the page, because this is the part that decides what the local controller
+ * is told - and the local controller is told the whole list every time, so a mistake
  * here is a server deleted that nobody touched. The page around it only draws
  * and asks.
  */
@@ -18,9 +18,9 @@ export interface UsualPorts {
 
 
 /**
- * A name as somebody reads it: without the root's dot. The local controller
- * hands its names back fully qualified, and "ptbtime1.ptb.de." is correct and
- * looks like a typing mistake.
+ * A name as somebody reads it: without the root's dot. The local controller hands its
+ * names back fully qualified, and "ptbtime1.ptb.de." is correct and looks like
+ * a typing mistake.
  */
 export function readable(hostname: string): string {
     return hostname.endsWith('.') ? hostname.slice(0, -1) : hostname;
@@ -28,10 +28,10 @@ export function readable(hostname: string): string {
 
 
 /**
- * A server as the local controller shows it, turned back into what its
- * configuration says - with everything that is the usual left out.
+ * A server as the local controller shows it, turned back into what its configuration
+ * says - with everything that is the usual left out.
  *
- * Left out rather than repeated, because the controller writes back what it is
+ * Left out rather than repeated, because the local controller writes back what it is
  * sent: an entry carrying the usual ports and priority 0 becomes an object in
  * the file where a bare name was, and the file stops reading the way somebody
  * would have written it.
@@ -54,9 +54,9 @@ export function entryOf(source: NTSTimeSource, usual: UsualPorts): NTSServerEntr
  * The list with one server replaced, or with one added at the end when there
  * is no place given.
  *
- * A new list rather than the old one changed: the old one is what the local
- * controller still has, and it is what the page has to go back to when the
- * controller says no.
+ * A new list rather than the old one changed: the old one is what the local controller
+ * still has, and it is what the page has to go back to when the local controller says
+ * no.
  */
 export function withServer(list:   readonly NTSServerEntry[],
                            index:  number | null,

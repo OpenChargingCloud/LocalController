@@ -8,6 +8,13 @@
 //
 // A page may return a cleanup function from render(); it is called before the
 // next page renders, e.g. to close an EventSource or destroy a chart.
+//
+// A page holding something the local controller has not been told about is asked about
+// before it is left: measured, one click on a menu entry threw away an EVSE
+// that had just been added, and nothing on the way out said so.
+
+import { unsaved } from './unsaved';
+
 
 import { fromURL, toURL } from './basePath';
 
@@ -69,6 +76,14 @@ export class Router {
     private renderToken  = 0;
     private cleanup?:    Cleanup;
 
+    /**
+     * Where the browser's address bar stands, as far as this router knows.
+     *
+     * Kept because the back button has already moved it by the time anybody
+     * can be asked anything: staying put means putting it back.
+     */
+    private shown = location.pathname + location.search + location.hash;
+
     constructor(options: RouterOptions) {
         this.routes       = options.routes.map(compile);
         this.outlet       = options.outlet;
@@ -78,9 +93,31 @@ export class Router {
     }
 
     start(): void {
-        window.addEventListener('popstate', () => void this.render());
+
+        window.addEventListener('popstate', () => {
+
+            // Back and forward have moved the address bar before this runs, so
+            // a page that is not to be left has to be put back on it.
+            if (!unsaved.mayBeLost()) {
+                history.pushState(null, '', this.shown);
+                return;
+            }
+
+            void this.render();
+
+        });
+
         document.addEventListener('click', event => this.onClick(event));
+
+        // Closing the tab, or the browser's own reload: the same question,
+        // asked by the browser in its own words because only it may.
+        window.addEventListener('beforeunload', event => {
+            if (unsaved.any())
+                event.preventDefault();
+        });
+
         void this.render();
+
     }
 
     navigate(path: string, replace = false): void {
@@ -125,8 +162,15 @@ export class Router {
 
         const target = anchor.pathname + anchor.search + anchor.hash;
 
-        if (target !== location.pathname + location.search + location.hash)
-            this.navigate(target);
+        if (target === location.pathname + location.search + location.hash)
+            return;
+
+        // A menu entry is one click away from any page, and looks the same
+        // whether or not the page behind it is holding half an hour of work.
+        if (!unsaved.mayBeLost())
+            return;
+
+        this.navigate(target);
 
     }
 
@@ -186,6 +230,8 @@ export class Router {
         this.outlet.replaceChildren();
         this.onNavigated?.(url);
         window.scrollTo(0, 0);
+
+        this.shown = url.pathname + url.search + url.hash;
 
         try
         {

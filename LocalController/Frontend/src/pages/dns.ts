@@ -3,7 +3,8 @@ import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '../html';
 import type { Page } from '../router';
 import { shell } from '../shell';
-import { errorMessage, formatValue, humanizeKey } from '../ui';
+import { errorMessage, formatValue, humanizeKey, whileSaving } from '../ui';
+import { typedSinceDrawn, unsaved } from '../unsaved';
 
 /**
  * How this local controller resolves names.
@@ -32,7 +33,12 @@ export const dnsPage: Page = {
 
         render(content, html`<div class="loading">Loading ...</div>`);
 
-        must<HTMLButtonElement>(root, '#reload').addEventListener('click', () => void load());
+        // Reload throws a draft away just as thoroughly as "Discard changes"
+        // does, and from the opposite corner of the screen, so it asks first.
+        must<HTMLButtonElement>(root, '#reload').addEventListener('click', () => {
+            if (unsaved.mayBeLost())
+                void load();
+        });
 
         const mayChange  = auth.can('changeNetworkSettings');
         const mayTest    = auth.can('runDiagnostics');
@@ -43,14 +49,15 @@ export const dnsPage: Page = {
         /** The servers on screen; edited as a list and sent as one value. */
         let servers: DNSServer[] = [];
 
+        let result: DNSQueryResult | null = null;
+        let testing = false;
+
         /**
          * What was last typed into the test.
          *
-         * Kept outside the dialog because every redraw builds the form afresh,
-         * and because the dialog goes when it is closed: without this, the name
-         * being looked up would disappear from the field the moment the button
-         * said "Asking ..." - and would have to be typed again for the next
-         * server.
+         * Kept outside the template because every redraw builds the form
+         * afresh: without this, the name being looked up would disappear from
+         * the field the moment the button said "Asking ...".
          */
         let testName: string = '';
         let testTypes: string[] = ['A', 'AAAA'];
@@ -207,9 +214,9 @@ export const dnsPage: Page = {
                         <p class="hint">
                             ${mayTest
                                   ? html`
-                                        This asks the way the local controller asks for anything: the servers
-                                        above, in turn, until one answers. To find out what one particular server
-                                        says, use the button on its own row.
+                                        This asks the way the local controller asks for anything: the servers above, in
+                                        turn, until one answers. To find out what one particular server says,
+                                        use the button on its own row.
                                     `
                                   : html`Running a query needs the CPO or the system administrator role.`}
                         </p>
@@ -326,18 +333,18 @@ export const dnsPage: Page = {
 
         async function save(update: DNSUpdate): Promise<void> {
 
-            const note  = must<HTMLElement>(content, '#form-note');
-            const error = must<HTMLElement>(content, '#form-error');
+            const note = must<HTMLElement>(content, '#form-note');
 
-            note.textContent  = '';
-            error.textContent = '';
+            note.textContent = '';
+
+            must<HTMLElement>(content, '#form-error').textContent = '';
 
             try
             {
                 // The answer is the whole configuration as it now stands, so
                 // the page shows what the local controller took rather than what the
                 // form sent.
-                current = await api.dns.save(update);
+                current = await whileSaving(content, note, () => api.dns.save(update));
                 servers = current.servers.map(server => ({ ...server }));
 
                 draw();
@@ -346,18 +353,33 @@ export const dnsPage: Page = {
             }
             catch (problem)
             {
-                error.textContent = errorMessage(problem);
+                must<HTMLElement>(content, '#form-error').textContent = errorMessage(problem);
             }
 
         }
 
 
         /**
+         * What each name server is allowed, in seconds: its own timeout where
+         * it has one, and the client's where it has not.
+         *
+         * The local controller tries them in turn, so this is the list the page has to
+         * be willing to wait for - what it is given up on is the local controller going
+         * quiet, never the patience the local controller was configured with.
+         */
+        function whatTheServersAreAllowed(): number[] {
+            return (current?.servers ?? []).map((_, index) => whatOneServerIsAllowed(index));
+        }
+
+        /**
          * The longest one server can honestly take, in seconds.
          *
          * Its timeout times the number of attempts, and the attempts are the
-         * part that is easy to forget: a name server that does not answer at
-         * all is asked again, as often as the retries say.
+         * part that is easy to forget: measured against a name server that
+         * does not answer at all, a query with a ten second timeout came back
+         * after twenty, because the local controller tries again. A deadline of ten
+         * would have given up on a local controller that was still doing what it was
+         * told.
          */
         function whatOneServerIsAllowed(index: number): number {
 
@@ -370,7 +392,8 @@ export const dnsPage: Page = {
 
 
         /**
-         * What came back.
+         * What came back, as it was shown on the page before this moved into a
+         * dialog.
          *
          * A function rather than a block inside the dialog, because it is the
          * one part of this that is worth reading on its own: it is what
@@ -427,7 +450,6 @@ export const dnsPage: Page = {
 
         }
 
-
         /**
          * The lookup dialog, for all the servers at once or for one of them.
          *
@@ -439,8 +461,7 @@ export const dnsPage: Page = {
          * other in one place.
          *
          * @param server  the place in the list of the one server to ask, or
-         *                null to ask the way the local controller asks for
-         *                anything.
+         *                null to ask the way the local controller asks for anything.
          */
         function lookUp(server: number | null): void {
 
@@ -459,8 +480,7 @@ export const dnsPage: Page = {
 
             document.body.appendChild(dialog);
 
-            // Shut it and take it away: a dialog that was only closed stays in
-            // the document, and the next one opened would be the second.
+            /** Shut it and take it away - both, as not every browser fires "close". */
             const dismiss = (): void => { dialog.close(); dialog.remove(); };
 
             let asked: DNSQueryResult | null = null;
@@ -475,8 +495,8 @@ export const dnsPage: Page = {
                     <p class="hint">
                         ${asking === null
                               ? html`
-                                    Asked the way this local controller asks for anything: the configured
-                                    servers, in turn, until one answers.
+                                    Asked the way this local controller asks for anything: the configured servers, in
+                                    turn, until one answers.
                                 `
                               : html`
                                     Asked of <code>${asking.address.includes(':')
@@ -544,7 +564,6 @@ export const dnsPage: Page = {
 
                 });
 
-                // Remembered as it is typed, so that the next paint keeps it.
                 must<HTMLInputElement>(dialog, 'input[name="name"]').
                     addEventListener('input', event => {
                         testName = (event.target as HTMLInputElement).value;
@@ -578,7 +597,16 @@ export const dnsPage: Page = {
 
                 try
                 {
-                    asked = await api.dns.query(testName, testTypes, server ?? undefined);
+                    // One server means one server's patience, not every
+                    // server's added up: waiting two minutes for a question
+                    // that was only ever put to one of them is a page that
+                    // looks broken.
+                    asked = await api.dns.query(testName,
+                                                testTypes,
+                                                server === null
+                                                    ? whatTheServersAreAllowed()
+                                                    : [ whatOneServerIsAllowed(server) ],
+                                                server ?? undefined);
                 }
                 catch (problem)
                 {
@@ -629,9 +657,17 @@ export const dnsPage: Page = {
 
         }
 
+        // The settings are a form and answer for themselves; the name servers
+        // are a list, which is redrawn as it is edited and therefore always
+        // looks untouched - so it is compared with what the local controller last said.
+        const release = unsaved.heldBy(
+                            () => typedSinceDrawn(content.querySelector('#dns-form')) ||
+                                  JSON.stringify(servers) !== JSON.stringify(current?.servers ?? [])
+                        );
+
         void load();
 
-        return () => { cancelled = true; };
+        return () => { cancelled = true; release(); };
 
     }
 

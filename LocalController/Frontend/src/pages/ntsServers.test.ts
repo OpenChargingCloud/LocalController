@@ -1,9 +1,9 @@
 /**
- * What the NTS page tells the local controller when a time server is added,
- * edited or deleted, asked directly.
+ * What the NTS page tells the local controller when a time server is added, edited or
+ * deleted, asked directly.
  *
- * Run with `npm test`. The controller is sent the whole list every time, so
- * what is pinned here is that the list sent is the list shown with exactly one
+ * Run with `npm test`. The local controller is sent the whole list every time, so what
+ * is pinned here is that the list sent is the list shown with exactly one
  * change in it - and that it reads the way the configuration file would.
  */
 
@@ -65,7 +65,7 @@ describe('the list a change sends', () => {
 
     });
 
-    it('leaves the list it was made from alone, which is what the page goes back to when the controller says no', () => {
+    it('leaves the list it was made from alone, which is what the page goes back to when the local controller says no', () => {
 
         withServer(list, 0, { hostname: 'x.example' });
         withoutServer(list, 2);
