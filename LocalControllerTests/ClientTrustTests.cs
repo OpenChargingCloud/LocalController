@@ -19,6 +19,8 @@
 
 using NUnit.Framework;
 
+using cloud.charging.open.protocols.WWCP.Node.Logging;
+
 using cloud.charging.open.LocalController.OCPP;
 
 #endregion
@@ -503,12 +505,12 @@ namespace cloud.charging.open.LocalController.Tests
 
             Accept(ca, "network");
 
-            var said = new List<(Logging.LogLevel Level, String Message)>();
+            var said = new List<(LogLevel Level, String Message)>();
             store.OnNotice += (level, message) => said.Add((level, message));
 
             store.CheckExpiry();
 
-            Assert.That(said.Any(entry => entry.Level == Logging.LogLevel.Critical &&
+            Assert.That(said.Any(entry => entry.Level == LogLevel.Critical &&
                                           entry.Message.Contains("expired")),
                         Is.True,
                         $"An expired trust anchor was not announced as critical: {String.Join(" | ", said.Select(entry => $"{entry.Level}: {entry.Message}"))}");

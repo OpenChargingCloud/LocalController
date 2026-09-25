@@ -24,6 +24,8 @@ using Newtonsoft.Json.Linq;
 
 using org.GraphDefined.Vanaheimr.Hermod;
 
+using cloud.charging.open.protocols.WWCP.Node.Configuration;
+
 using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.LocalController.Web;
 
@@ -63,11 +65,13 @@ namespace cloud.charging.open.LocalController.Tests
         /// <param name="Clock">Where it reads the time, for a test that needs to decide what time it is.</param>
         /// <param name="LogToConsole">Whether its log reaches the console, for a test about who gets to write there. Off otherwise, because a test run's console is for the test run.</param>
         /// <param name="LogPath">A directory for its log files, for a test about those. None otherwise.</param>
+        /// <param name="BridgeDebugLog">Whether what the libraries below write with DebugX ends up in its log, for a test about that. Off otherwise, because every controller of a test run would pick up every other one's lines.</param>
         public static LocalController New(String         Directory,
-                                          JObject?       Configuration   = null,
-                                          TimeProvider?  Clock           = null,
-                                          Boolean        LogToConsole    = false,
-                                          String?        LogPath         = null)
+                                          JObject?       Configuration    = null,
+                                          TimeProvider?  Clock            = null,
+                                          Boolean        LogToConsole     = false,
+                                          String?        LogPath          = null,
+                                          Boolean        BridgeDebugLog   = false)
         {
 
             System.IO.Directory.CreateDirectory(Directory);
@@ -80,10 +84,10 @@ namespace cloud.charging.open.LocalController.Tests
             return new LocalController(
                        HTTPPort:         IPPort.Parse(FreePort()),
                        AccountsPath:     Path.Combine(Directory, "accounts"),
-                       ConfigFile:       new ControllerConfigFile(configFile),
+                       ConfigFile:       new WWCPConfigFile(configFile),
                        LogToConsole:     LogToConsole,
                        LogPath:          LogPath,
-                       BridgeDebugLog:   false,
+                       BridgeDebugLog:   BridgeDebugLog,
                        TimeProvider:     Clock
                    );
 

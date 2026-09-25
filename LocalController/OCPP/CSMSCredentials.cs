@@ -25,7 +25,7 @@ using Newtonsoft.Json.Linq;
 using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 
-using cloud.charging.open.LocalController.Logging;
+using cloud.charging.open.protocols.WWCP.Node.Logging;
 using cloud.charging.open.LocalController.Web;
 
 #endregion

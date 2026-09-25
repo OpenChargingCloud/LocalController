@@ -21,6 +21,8 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using cloud.charging.open.protocols.WWCP.Node.Configuration;
+
 using cloud.charging.open.LocalController.Configuration;
 
 #endregion
@@ -37,7 +39,7 @@ namespace cloud.charging.open.LocalController.Tests
         #region Data
 
         private String                directory   = default!;
-        private ControllerConfigFile  file        = default!;
+        private WWCPConfigFile  file        = default!;
 
         #endregion
 
@@ -48,7 +50,7 @@ namespace cloud.charging.open.LocalController.Tests
         {
             directory = TestControllers.TemporaryDirectory("config");
             Directory.CreateDirectory(directory);
-            file      = new ControllerConfigFile(Path.Combine(directory, "configuration.json"));
+            file      = new WWCPConfigFile(Path.Combine(directory, "configuration.json"));
         }
 
         [TearDown]
@@ -335,26 +337,41 @@ namespace cloud.charging.open.LocalController.Tests
 
         #region WhatIsWrittenComesBackAsWhatWasMeant()
 
+        /// <remarks>
+        /// One file with two readers: the sections every node has, which the
+        /// node below reads, and the controller's own, read from the same
+        /// document. Each comes back as it was written, and neither is lost to
+        /// the other.
+        /// </remarks>
         [Test]
         public void WhatIsWrittenComesBackAsWhatWasMeant()
         {
 
-            var written = new ControllerConfiguration(
-                              DNS:   new DNSConfiguration(Enabled: false),
-                              NTS:   new NTSConfiguration(Enabled: true),
-                              OCPP:  new OCPPConfiguration(NodeId: "lc042", VendorName: "ACME")
-                          );
+            var node       = new WWCPConfiguration(
+                                 DNS:   new DNSConfiguration(Enabled: false),
+                                 NTS:   new NTSConfiguration(Enabled: true)
+                             );
 
-            file.TryWrite(written.ToJSON(), out _);
+            var controller = new ControllerConfiguration(
+                                 OCPP:  new OCPPConfiguration(NodeId: "lc042", VendorName: "ACME")
+                             );
 
-            Assert.That(file.TryLoad(out var read, out var error), Is.True, error);
+            var written    = node.ToJSON();
+            written.Merge(controller.ToJSON());
+
+            file.TryWrite(written, out _);
+
+            Assert.That(file.TryLoad        (out var read,     out var error),         Is.True, error);
+            Assert.That(file.TryLoadDocument(out var document, out var documentError), Is.True, documentError);
+            Assert.That(ControllerConfiguration.TryParse(document!, out var own, out var ownError), Is.True, ownError);
 
             Assert.Multiple(() => {
                 Assert.That(read!.DNS?.Enabled,        Is.False);
                 Assert.That(read.NTS?.Enabled,         Is.True);
-                Assert.That(read.OCPP?.NodeId,         Is.EqualTo("lc042"));
-                Assert.That(read.OCPP?.VendorName,     Is.EqualTo("ACME"));
+                Assert.That(own!.OCPP?.NodeId,         Is.EqualTo("lc042"));
+                Assert.That(own.OCPP?.VendorName,      Is.EqualTo("ACME"));
                 Assert.That(read.IsEmpty,              Is.False);
+                Assert.That(own.IsEmpty,               Is.False);
             });
 
         }

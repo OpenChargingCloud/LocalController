@@ -21,6 +21,8 @@ using System.Diagnostics.CodeAnalysis;
 
 using Newtonsoft.Json.Linq;
 
+using cloud.charging.open.protocols.WWCP.Node.Configuration;
+
 #endregion
 
 namespace cloud.charging.open.LocalController.Configuration

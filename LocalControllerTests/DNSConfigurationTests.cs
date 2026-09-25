@@ -25,6 +25,8 @@ using NUnit.Framework;
 
 using org.GraphDefined.Vanaheimr.Hermod.DNS;
 
+using cloud.charging.open.protocols.WWCP.Node.Configuration;
+
 using cloud.charging.open.LocalController.Configuration;
 
 #endregion
@@ -53,7 +55,7 @@ namespace cloud.charging.open.LocalController.Tests
         private String directory = default!;
 
         private String ConfigurationPath
-            => Path.Combine(directory, ControllerConfigFile.DefaultFileName);
+            => Path.Combine(directory, WWCPConfigFile.DefaultFileName);
 
         #endregion
 

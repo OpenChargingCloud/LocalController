@@ -21,20 +21,25 @@ using System.Diagnostics.CodeAnalysis;
 
 using Newtonsoft.Json.Linq;
 
+using cloud.charging.open.protocols.WWCP.Node.Configuration;
+
 #endregion
 
 namespace cloud.charging.open.LocalController.Configuration
 {
 
     /// <summary>
-    /// Everything this local controller can be told in writing: one document
-    /// with one section per thing that can be configured.
+    /// What a local controller can be told in writing beyond what every node
+    /// can: the sections of the configuration file that are its own.
     /// </summary>
     /// <remarks>
     /// One file rather than one per subject, because these settings are read
     /// together, changed together and backed up together - and because the
     /// question "what is this controller configured as" should have one answer
-    /// that fits on a screen instead of a directory to go through.
+    /// that fits on a screen instead of a directory to go through. The
+    /// sections every node has - "dns", "nts" and "certificates" - are in the
+    /// same file and are the node's: <see cref="WWCPConfiguration"/> reads
+    /// them from the same document, and passes these over.
     ///
     /// Every section is optional and so is every field inside it. A section
     /// that is absent is not a section set to nothing: it means the file has no
@@ -43,14 +48,10 @@ namespace cloud.charging.open.LocalController.Configuration
     /// the order is: system default, then what the constructor was given, then
     /// what this file says - each one only where it actually speaks.
     /// </remarks>
-    /// <param name="DNS">How this local controller resolves names.</param>
-    /// <param name="NTS">Where this local controller reads the time.</param>
     /// <param name="OCPP">Who this local controller says it is when it speaks OCPP.</param>
     /// <param name="OCPPServer">The server the charging stations below it connect to.</param>
     /// <param name="CSMS">The charging station management system above it, and how it is dialled.</param>
-    public sealed record ControllerConfiguration(DNSConfiguration?         DNS          = null,
-                                                 NTSConfiguration?         NTS          = null,
-                                                 OCPPConfiguration?        OCPP         = null,
+    public sealed record ControllerConfiguration(OCPPConfiguration?        OCPP         = null,
                                                  OCPPServerConfiguration?  OCPPServer   = null,
                                                  CSMSConfiguration?        CSMS         = null)
     {
@@ -61,7 +62,7 @@ namespace cloud.charging.open.LocalController.Configuration
         /// Whether this document says anything at all.
         /// </summary>
         public Boolean IsEmpty
-            => DNS is null && NTS is null && OCPP is null && OCPPServer is null && CSMS is null;
+            => OCPP is null && OCPPServer is null && CSMS is null;
 
         #endregion
 
@@ -77,10 +78,11 @@ namespace cloud.charging.open.LocalController.Configuration
         /// DNS, but <c>"dns": "google"</c> is a file whose author believed they
         /// had configured something.
         ///
-        /// Sections this local controller does not know are passed over without
-        /// a word. A file written by a newer controller should still start an
-        /// older one, and the file keeps them - see
-        /// <see cref="ControllerConfigFile.TryReplaceSection"/>.
+        /// Sections this does not know are passed over without a word: the
+        /// node below reads its own from the same document, and a file written
+        /// by a newer controller should still start an older one. The file
+        /// keeps them either way - see
+        /// <see cref="WWCPConfigFile.TryReplaceSection"/>.
         /// </remarks>
         public static Boolean TryParse(JObject                                          JSON,
                                        [NotNullWhen(true)]  out ControllerConfiguration? Configuration,
@@ -89,46 +91,6 @@ namespace cloud.charging.open.LocalController.Configuration
 
             Configuration  = null;
             Error          = null;
-
-            #region DNS
-
-            DNSConfiguration? dns = null;
-
-            if (JSON[DNSConfiguration.SectionName] is JToken dnsToken && dnsToken.Type != JTokenType.Null)
-            {
-
-                if (dnsToken is not JObject dnsJSON)
-                {
-                    Error = $"'{DNSConfiguration.SectionName}' must be a JSON object.";
-                    return false;
-                }
-
-                if (!DNSConfiguration.TryParse(dnsJSON, out dns, out Error))
-                    return false;
-
-            }
-
-            #endregion
-
-            #region NTS
-
-            NTSConfiguration? nts = null;
-
-            if (JSON[NTSConfiguration.SectionName] is JToken ntsToken && ntsToken.Type != JTokenType.Null)
-            {
-
-                if (ntsToken is not JObject ntsJSON)
-                {
-                    Error = $"'{NTSConfiguration.SectionName}' must be a JSON object.";
-                    return false;
-                }
-
-                if (!NTSConfiguration.TryParse(ntsJSON, out nts, out Error))
-                    return false;
-
-            }
-
-            #endregion
 
             #region OCPP
 
@@ -190,7 +152,7 @@ namespace cloud.charging.open.LocalController.Configuration
 
             #endregion
 
-            Configuration = new ControllerConfiguration(dns, nts, ocpp, ocppServer, csms);
+            Configuration = new ControllerConfiguration(ocpp, ocppServer, csms);
             return true;
 
         }
@@ -206,12 +168,6 @@ namespace cloud.charging.open.LocalController.Configuration
         {
 
             var json = new JObject();
-
-            if (DNS  is not null)
-                json.Add(DNSConfiguration. SectionName,  DNS. ToJSON());
-
-            if (NTS  is not null)
-                json.Add(NTSConfiguration. SectionName,  NTS. ToJSON());
 
             if (OCPP is not null)
                 json.Add(OCPPConfiguration.SectionName,  OCPP.ToJSON());
@@ -236,8 +192,6 @@ namespace cloud.charging.open.LocalController.Configuration
                    ? "nothing configured"
                    : String.Join(", ",
                          new[] {
-                             DNS        is not null ? "DNS"                  : null,
-                             NTS        is not null ? "NTS"                  : null,
                              OCPP       is not null ? OCPP.ToString()        : null,
                              OCPPServer is not null ? OCPPServer.ToString()  : null
                          }.Where(section => section is not null));

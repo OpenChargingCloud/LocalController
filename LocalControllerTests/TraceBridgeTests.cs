@@ -19,7 +19,7 @@
 
 using NUnit.Framework;
 
-using cloud.charging.open.LocalController.Logging;
+using cloud.charging.open.protocols.WWCP.Node.Logging;
 
 #endregion
 
@@ -27,13 +27,16 @@ namespace cloud.charging.open.LocalController.Tests
 {
 
     /// <summary>
-    /// What the libraries below write through DebugX, as the event log gets it:
-    /// above all, which tags a line is given.
+    /// What the libraries below write through DebugX, as the event log of a
+    /// local controller gets it: above all, which tags a line is given.
     /// </summary>
     /// <remarks>
     /// The tags are what the Logs page filters by, so a wrong one is not
     /// cosmetic: a line about the accounts that says "nts" is shown to
-    /// somebody looking for the time servers, and hidden from nobody.
+    /// somebody looking for the time servers, and hidden from nobody. The
+    /// bridge is the node's; the table is the controller's own,
+    /// <see cref="LocalController.TraceTags"/>, and that is what is read by
+    /// here.
     /// </remarks>
     public class TraceBridgeTests
     {
@@ -41,15 +44,15 @@ namespace cloud.charging.open.LocalController.Tests
         #region (helper) TagsOf(Line)
 
         /// <summary>
-        /// The tags a line is given: written into a bridge of its own, and read
-        /// back from that bridge's log.
+        /// The tags a line is given: written into a bridge of its own, reading
+        /// by the controller's table, and read back from that bridge's log.
         /// </summary>
         private static IReadOnlyList<String> TagsOf(String Line)
         {
 
             var log = new EventLog();
 
-            using (var bridge = TraceBridge.Attach(log))
+            using (var bridge = TraceBridge.Attach(log, LocalController.TraceTags))
                 bridge.WriteLine(Line);
 
             return log.Recent(100).Single(entry => entry.Message == Line).Tags;
@@ -112,6 +115,46 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(TagsOf("The ServerCertificate has expired"),             Does.Contain("tls"));
                 Assert.That(TagsOf("Forwarding it to the CSMS"),                     Does.Contain("csms").And.Contain("routing"));
             });
+
+        }
+
+        #endregion
+
+        #region AControllerTagsWhatItOverhearsByItsOwnTable()
+
+        /// <summary>
+        /// The table above is the one a controller's own bridge reads by: a
+        /// line written through Trace, the way the libraries below write,
+        /// arrives in its log with the controller's tags on it.
+        /// </summary>
+        /// <remarks>
+        /// The node below has a table of its own for a kind of node that hands
+        /// in none, the vehicle's - by which this line would be about nothing
+        /// at all.
+        /// </remarks>
+        [Test]
+        public async Task AControllerTagsWhatItOverhearsByItsOwnTable()
+        {
+
+            var directory = TestControllers.TemporaryDirectory("trace");
+
+            try
+            {
+
+                var line = $"Forwarding a BootNotification to the CSMS ({Guid.NewGuid():N})";
+
+                await using var controller = TestControllers.New(directory, TestControllers.Offline, BridgeDebugLog: true);
+
+                System.Diagnostics.Trace.WriteLine(line);
+
+                Assert.That(controller.Log.Recent(2000).Single(entry => entry.Message == line).Tags,
+                            Is.EqualTo(new[] { TraceBridge.TraceTag, "ocpp", "csms", "routing" }));
+
+            }
+            finally
+            {
+                TestControllers.Remove(directory);
+            }
 
         }
 

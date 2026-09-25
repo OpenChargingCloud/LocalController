@@ -25,6 +25,8 @@ using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.DNS;
 using org.GraphDefined.Vanaheimr.Norn.NTS;
 
+using cloud.charging.open.protocols.WWCP.Node.Configuration;
+
 using cloud.charging.open.LocalController.Configuration;
 
 #endregion
@@ -451,7 +453,7 @@ namespace cloud.charging.open.LocalController.Tests
                                       Select(entry => entry.Message).
                                       FirstOrDefault(message => message.Contains("will be checked against"));
 
-            Assert.That(line,  Is.EqualTo("The clock of this local controller will be checked against " +
+            Assert.That(line,  Is.EqualTo("The clock of this node will be checked against " +
                                           "ptbtime1.ptb.de, ptbtime2.ptb.de, ptbtime3.ptb.de, ptbtime4.ptb.de " +
                                           "every 15 minute(s), at least 2 of which must answer."));
 
@@ -502,7 +504,7 @@ namespace cloud.charging.open.LocalController.Tests
             await using var controller = new LocalController(
                                              HTTPPort:        IPPort.Parse(TestControllers.FreePort()),
                                              AccountsPath:    Path.Combine(directory, "accounts"),
-                                             ConfigFile:      new ControllerConfigFile(Path.Combine(directory, "configuration.json")),
+                                             ConfigFile:      new WWCPConfigFile(Path.Combine(directory, "configuration.json")),
                                              NTSClient:       new NTSClient(DomainName.Parse("time.example.org")),
                                              LogToConsole:    false,
                                              BridgeDebugLog:  false

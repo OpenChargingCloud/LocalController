@@ -21,7 +21,7 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
-using cloud.charging.open.LocalController.Logging;
+using cloud.charging.open.protocols.WWCP.Node.Logging;
 
 #endregion
 

@@ -23,6 +23,16 @@ below, and is usually the only thing in a car park with a keyboard within reach
 of it. That is what the web interface is for: it is the one place where
 somebody can see what the box is doing without having a back end to ask.
 
+Everything a running local controller is before it is a local controller -
+its log, its configuration file, name resolution and the time, who may sign in,
+and the HTTP server all of that sits behind - is not here. That is
+[WWCP_Node](https://github.com/OpenChargingCloud/WWCP_Node), the part a
+vehicle, a charging station and a local controller share, and
+`LocalController` is one `WWCPNode` with an OCPP node, a port for the charging
+stations below it and a line up to the CSMS above: its sections - `ocpp`,
+`ocppServer`, `csms` - go into the same configuration file, and its JSON API
+below the node's `/api`.
+
 
 ## What it can be told
 
@@ -212,9 +222,10 @@ system clock by default; an NTS-disciplined or a fake one where a test says
 so. The sign-in sessions are not among them - they belong to the HTTPExt API
 and run on its clock.
 
-It is assigned first in the constructor, before the event log is built, because
-the log stamps its entries with it - a clock set afterwards would leave the log
-reading the system one, which is a log that cannot be held against anything.
+It is the first thing the node below assigns, before the event log is built,
+because the log stamps its entries with it - a clock set afterwards would leave
+the log reading the system one, which is a log that cannot be held against
+anything.
 
 ```csharp
 sealed class FixedClock(DateTimeOffset Start) : TimeProvider
@@ -260,8 +271,10 @@ localController.Log.Warning("The CSMS did not answer the BootNotification.", "oc
 ```
 
 What the libraries below write through Illias' `DebugX` lands there too,
-tagged `trace` plus whatever `TraceBridge` recognises in the text. That works
-in a debug build only: `Debug.WriteLine` carries `[Conditional("DEBUG")]`, so
+tagged `trace` plus whatever the controller's own table,
+`LocalController.TraceTags`, finds in the text: OCPP going past in both
+directions, and which side a line is about - the CSMS above or a charging
+station below. That works in a debug build only: `Debug.WriteLine` carries `[Conditional("DEBUG")]`, so
 a release build of those libraries compiles the calls away. `--no-trace`
 switches the bridge off.
 

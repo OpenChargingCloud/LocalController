@@ -17,6 +17,7 @@
 
 #region Usings
 
+using System.Net.Sockets;
 using System.Diagnostics.CodeAnalysis;
 
 using Newtonsoft.Json.Linq;
@@ -26,8 +27,10 @@ using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 using org.GraphDefined.Vanaheimr.Hermod.WebSocket;
 
+using cloud.charging.open.protocols.WWCP.Node;
+using cloud.charging.open.protocols.WWCP.Node.Logging;
+
 using cloud.charging.open.LocalController.Configuration;
-using cloud.charging.open.LocalController.Logging;
 using cloud.charging.open.LocalController.OCPP;
 
 using OCPPWebSockets = cloud.charging.open.protocols.OCPP.WebSockets;
@@ -398,7 +401,20 @@ namespace cloud.charging.open.LocalController
 
             #endregion
 
-            await ocppWebSocketServer.Start();
+            // The socket layer's own words for a port somebody else has name
+            // neither the port nor what it was for, and both are known here.
+            try
+            {
+                await ocppWebSocketServer.Start();
+            }
+            catch (SocketException problem)
+            {
+                throw new PortUnavailableException(
+                          settings.TCPPort ?? OCPPServerConfiguration.DefaultTCPPort,
+                          problem,
+                          StationServerPort
+                      );
+            }
 
             ocppServerStarted = true;
 

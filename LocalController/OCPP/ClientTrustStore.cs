@@ -24,7 +24,7 @@ using System.Security.Cryptography.X509Certificates;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-using cloud.charging.open.LocalController.Logging;
+using cloud.charging.open.protocols.WWCP.Node.Logging;
 
 #endregion
 

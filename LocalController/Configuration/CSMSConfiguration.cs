@@ -22,6 +22,8 @@ using System.Security.Authentication;
 
 using Newtonsoft.Json.Linq;
 
+using cloud.charging.open.protocols.WWCP.Node.Configuration;
+
 using org.GraphDefined.Vanaheimr.Hermod;
 
 #endregion

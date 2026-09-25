@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\Hermod\Hermod\Hermod.csproj" />
     <ProjectReference Include="..\..\Norn\Norn\Norn.csproj" />
     <ProjectReference Include="..\..\Styx\Styx\Styx.csproj" />
+    <ProjectReference Include="..\..\WWCP_Node\WWCP_Node\WWCP_Node.csproj" />
     <ProjectReference Include="..\..\WWCP_OCPP\WWCP_OCPPv2.1\WWCP_OCPPv2.1.csproj" />
     <ProjectReference Include="..\..\WWCP_OCPP\WWCP_OCPPv2.1_LocalController\WWCP_OCPPv2.1_LocalController.csproj" />
     <ProjectReference Include="..\..\WWCP_OCPP\WWCP_OCPP_Common\WWCP_OCPP_Common.csproj" />

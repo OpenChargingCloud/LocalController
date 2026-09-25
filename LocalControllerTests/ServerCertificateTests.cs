@@ -22,6 +22,8 @@ using System.Security.Cryptography.X509Certificates;
 
 using NUnit.Framework;
 
+using cloud.charging.open.protocols.WWCP.Node.Logging;
+
 using cloud.charging.open.LocalController.OCPP;
 
 #endregion
@@ -725,12 +727,12 @@ namespace cloud.charging.open.LocalController.Tests
 
             clock.Advance(TimeSpan.FromDays(10));
 
-            var said = new List<(Logging.LogLevel Level, String Message)>();
+            var said = new List<(LogLevel Level, String Message)>();
             store.OnNotice += (level, message) => said.Add((level, message));
 
             store.CheckExpiry(ReachableAs);
 
-            Assert.That(said.Any(entry => entry.Level == Logging.LogLevel.Critical &&
+            Assert.That(said.Any(entry => entry.Level == LogLevel.Critical &&
                                           entry.Message.Contains("No server certificate")),
                         Is.True,
                         $"A controller with nothing valid said: {String.Join(" | ", said.Select(entry => $"{entry.Level}: {entry.Message}"))}");

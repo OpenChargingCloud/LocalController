@@ -28,7 +28,7 @@ using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 using cloud.charging.open.protocols.WWCP.NetworkingNode;
 
 using cloud.charging.open.LocalController.Configuration;
-using cloud.charging.open.LocalController.Logging;
+using cloud.charging.open.protocols.WWCP.Node.Logging;
 using cloud.charging.open.LocalController.OCPP;
 
 #endregion

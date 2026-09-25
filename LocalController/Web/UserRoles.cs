@@ -21,6 +21,8 @@ using System.Diagnostics.CodeAnalysis;
 
 using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 
+using cloud.charging.open.protocols.WWCP.Node;
+
 #endregion
 
 namespace cloud.charging.open.LocalController.Web
@@ -180,7 +182,7 @@ namespace cloud.charging.open.LocalController.Web
         /// decides which certificate authority this controller believes does it
         /// twice in the life of the box.
         /// </remarks>
-        public static readonly UserRole  SystemAdmin  = new ("systemadmin",
+        public static readonly UserRole  SystemAdmin  = new (WWCPNode.AdminRole,
                                                              Permissions.ReadConfiguration      |
                                                              Permissions.ChangeNetworkSettings  |
                                                              Permissions.RunDiagnostics         |

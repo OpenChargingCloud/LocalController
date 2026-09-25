@@ -23,6 +23,8 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using org.GraphDefined.Vanaheimr.Hermod.HTTP;
+
 using cloud.charging.open.LocalController.Web;
 
 #endregion
@@ -128,6 +130,34 @@ namespace cloud.charging.open.LocalController.Tests
                 foreach (var role in UserRole.All)
                     Assert.That(Controller.ExtAPI.TryGetUserGroup(role.GroupId, out _), Is.True,
                                 $"The '{role.Name}' role has no user group, so nobody can ever hold it.");
+
+            });
+
+        }
+
+        #endregion
+
+        #region NoGroupOfTheVehiclesRoles()
+
+        /// <summary>
+        /// The groups are the controller's roles and not the vehicle's.
+        /// </summary>
+        /// <remarks>
+        /// The node below makes a group for every role its kind hands it, and
+        /// a node handed none knows the vehicle's. A controller that did not
+        /// hand its own over would have a "driver" and a "service" group
+        /// nobody here has a use for - and no "cpo", which the test above
+        /// catches from the other side.
+        /// </remarks>
+        [Test]
+        public void NoGroupOfTheVehiclesRoles()
+        {
+
+            Assert.Multiple(() => {
+
+                foreach (var vehicles in new[] { "driver", "service" })
+                    Assert.That(Controller.ExtAPI.TryGetUserGroup(UserGroup_Id.Parse(vehicles), out _), Is.False,
+                                $"A local controller has the vehicle's '{vehicles}' group.");
 
             });
 

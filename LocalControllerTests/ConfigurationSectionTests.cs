@@ -21,6 +21,8 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using cloud.charging.open.protocols.WWCP.Node.Configuration;
+
 using cloud.charging.open.LocalController.Configuration;
 
 #endregion
@@ -366,6 +368,11 @@ namespace cloud.charging.open.LocalController.Tests
 
         #region The whole document
 
+        /// <remarks>
+        /// Read twice, as the controller reads it: the node below takes the
+        /// sections every node has, the controller its own, and each passes
+        /// the other's over without a word.
+        /// </remarks>
         [Test]
         public void ADocumentReportsWhichSectionsSpoke()
         {
@@ -375,15 +382,16 @@ namespace cloud.charging.open.LocalController.Tests
                            new JProperty("ocpp", new JObject(new JProperty("nodeId",  "lc007")))
                        );
 
-            Assert.That(ControllerConfiguration.TryParse(json, out var configuration, out var error), Is.True, error);
+            Assert.That(WWCPConfiguration.      TryParse(json, out var node,       out var nodeError), Is.True, nodeError);
+            Assert.That(ControllerConfiguration.TryParse(json, out var controller, out var error),     Is.True, error);
 
             Assert.Multiple(() => {
-                Assert.That(configuration!.DNS,        Is.Not.Null);
-                Assert.That(configuration.NTS,         Is.Null);
-                Assert.That(configuration.OCPP,        Is.Not.Null);
-                Assert.That(configuration.IsEmpty,     Is.False);
-                Assert.That(configuration.ToString(),  Does.Contain("DNS"));
-                Assert.That(configuration.ToString(),  Does.Contain("lc007"));
+                Assert.That(node!.DNS,                 Is.Not.Null);
+                Assert.That(node.NTS,                  Is.Null);
+                Assert.That(controller!.OCPP,          Is.Not.Null);
+                Assert.That(controller.IsEmpty,        Is.False);
+                Assert.That(node.ToString(),           Does.Contain("DNS"));
+                Assert.That(controller.ToString(),     Does.Contain("lc007"));
             });
 
         }

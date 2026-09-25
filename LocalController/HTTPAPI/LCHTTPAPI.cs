@@ -26,7 +26,8 @@ using Newtonsoft.Json.Linq;
 using org.GraphDefined.Vanaheimr.Illias;
 using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 
-using cloud.charging.open.LocalController.Logging;
+using cloud.charging.open.protocols.WWCP.Node.Logging;
+
 using cloud.charging.open.LocalController.Web;
 
 #endregion
@@ -433,7 +434,7 @@ namespace cloud.charging.open.LocalController
             return JSONResponse(
                        Request,
                        HTTPStatusCode.OK,
-                       await Controller.ResolveAsync(name, recordTypes, Request.CancellationToken)
+                       await Controller.ResolveAsync(name, recordTypes, CancellationToken: Request.CancellationToken)
                    );
 
         }
