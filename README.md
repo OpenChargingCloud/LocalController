@@ -308,8 +308,9 @@ The stream asks, before every entry it sends and at every heartbeat, whether
 whoever opened it would still be let in. Once the session it was opened with
 has ended - signed out, expired, or taken back with the account's others - the
 stream ends too, without the entry, and the browser's next try is answered with
-a 401. One opened with Basic auth or an API key has no session to end, and is
-held to its account instead.
+a 401. One opened with an API key ends the same way once the key is revoked or
+has run out. One opened with Basic auth has neither, and is held to its account
+instead.
 
 
 ## Who may open it

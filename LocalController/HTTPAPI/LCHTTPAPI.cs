@@ -879,10 +879,17 @@ namespace cloud.charging.open.LocalController
         /// ever, one line of the log at a time. Among the few sessions a local
         /// controller has, looking costs nothing.
         ///
-        /// One opened with a password or an API key has no session that could
-        /// end. Its account is asked about instead, and the password is not
-        /// checked again: that would be 600 000 rounds of PBKDF2 and a turn of
-        /// the sign-in's rate limit, for every line of the log.
+        /// One opened with an API key is asked about the key - still there,
+        /// inside its window, not disabled, its owner still one that may sign
+        /// in - which is what a new request with it is asked, and costs a
+        /// lookup. Held to its account alone, a stream went on being sent the
+        /// log after its key had been revoked or had run out.
+        ///
+        /// One opened with a password has neither a session nor a key that
+        /// could end. Its account is asked about instead, and the password is
+        /// not checked again: that would be 600 000 rounds of PBKDF2 and a turn
+        /// of the sign-in's rate limit, for every line of the log. A password
+        /// is asked before a key here because Hermod asks it first.
         /// </remarks>
         /// <param name="Request">The request that opened the stream.</param>
         /// <param name="Reader">Who it was let in as.</param>
@@ -898,6 +905,13 @@ namespace cloud.charging.open.LocalController
                 return () => LiveSession(securityTokenId) is Session session  &&
                              ExtAPI.TryGetUser(session.UserId, out var user)   &&
                              HTTPExtAPI.CanAuthenticate(user);
+            }
+
+            if (Request.Authorization is not HTTPBasicAuthentication &&
+                Request.API_Key.HasValue                             &&
+                ExtAPI.CheckHTTPAPIKey(Request) is not null)
+            {
+                return () => ExtAPI.CheckHTTPAPIKey(Request) is not null;
             }
 
             var readerId = Reader.Id;
