@@ -695,10 +695,13 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> StreamEvents(HTTPRequest Request)
         {
 
-            if (!TryGetUser(Request, out _, out var unauthorized))
+            if (!TryGetUser(Request, out var reader, out var unauthorized))
                 return Task.FromResult(unauthorized);
 
-            var clientId = Request.RemoteSocket.ToString();
+            var clientId    = Request.RemoteSocket.ToString();
+
+            // Asked before every event and at every heartbeat - see StillLetIn().
+            var stillLetIn  = StillLetIn(Request, reader);
 
             return Task.FromResult(
                        new HTTPResponse.Builder(Request) {
@@ -749,6 +752,9 @@ namespace cloud.charging.open.LocalController
                                    // takes one question at a time.
                                    var next = events.MoveNextAsync().AsTask();
 
+                                   // Set when the stream ends because its session did.
+                                   var signedOut = false;
+
                                    try
                                    {
 
@@ -762,8 +768,28 @@ namespace cloud.charging.open.LocalController
                                            }
                                            catch (TimeoutException)
                                            {
+
+                                               // A quiet stream is asked as well, or one
+                                               // whose session ended would go on for as
+                                               // long as nothing was logged.
+                                               if (!stillLetIn())
+                                               {
+                                                   signedOut = true;
+                                                   break;
+                                               }
+
                                                await stream.WriteHeartbeat(CancellationToken: ending.Token);
                                                continue;
+
+                                           }
+
+                                           // Asked before the event is written, not after:
+                                           // what was logged after the sign-out is not sent
+                                           // to the session that signed out.
+                                           if (!stillLetIn())
+                                           {
+                                               signedOut = true;
+                                               break;
                                            }
 
                                            var httpEvent = events.Current;
@@ -795,6 +821,12 @@ namespace cloud.charging.open.LocalController
                                        { }
                                    }
 
+                                   // Its session over, the reader is told the one way
+                                   // a stream can tell anybody anything: it ends, and
+                                   // the browser's retry is answered with a 401.
+                                   if (signedOut)
+                                       await Events.Unsubscribe(clientId);
+
                                }
                                catch (OperationCanceledException)
                                {
@@ -822,6 +854,67 @@ namespace cloud.charging.open.LocalController
                          WithCommonSecurityHeaders().
                          AsImmutable
                    );
+
+        }
+
+        #endregion
+
+        #region (private) StillLetIn(Request, Reader)
+
+        /// <summary>
+        /// Whether whoever opened an event stream would still be let in -
+        /// asked before every event the stream is sent, and at every heartbeat.
+        /// </summary>
+        /// <remarks>
+        /// A stream is one request that is answered for hours, and it used to
+        /// be asked about its session once, when it opened. Measured: signed
+        /// out, the Logs page went on saying "live" and showing every line the
+        /// local controller wrote, for as long as it was watched.
+        ///
+        /// A stream opened with a session is asked whether that session is
+        /// still there and its account still one that may sign in - what a new
+        /// request with the same cookie is asked. The session is looked at and
+        /// not taken through Sessions.TryGet, which counts as a use: with an
+        /// idle timeout, a Logs page left open would keep its session alive for
+        /// ever, one line of the log at a time. Among the few sessions a local
+        /// controller has, looking costs nothing.
+        ///
+        /// One opened with a password or an API key has no session that could
+        /// end. Its account is asked about instead, and the password is not
+        /// checked again: that would be 600 000 rounds of PBKDF2 and a turn of
+        /// the sign-in's rate limit, for every line of the log.
+        /// </remarks>
+        /// <param name="Request">The request that opened the stream.</param>
+        /// <param name="Reader">Who it was let in as.</param>
+        private Func<Boolean> StillLetIn(HTTPRequest Request, IUser Reader)
+        {
+
+            if (Request.Cookies is not null                                                      &&
+                Request.Cookies.TryGet(ExtAPI.SessionCookieName, out var cookie)                 &&
+                cookie is not null                                                               &&
+                SecurityToken_Id.TryParse(cookie.FirstOrDefault().Key, out var securityTokenId) &&
+                LiveSession(securityTokenId) is not null)
+            {
+                return () => LiveSession(securityTokenId) is Session session  &&
+                             ExtAPI.TryGetUser(session.UserId, out var user)   &&
+                             HTTPExtAPI.CanAuthenticate(user);
+            }
+
+            var readerId = Reader.Id;
+
+            return () => ExtAPI.TryGetUser(readerId, out var user) &&
+                         HTTPExtAPI.CanAuthenticate(user);
+
+
+            Session? LiveSession(SecurityToken_Id Token)
+            {
+
+                var now = ExtAPI.Sessions.TimeProvider.GetUtcNow();
+
+                return ExtAPI.Sessions.FirstOrDefault(session => session.Token == Token &&
+                                                                 !session.IsExpired(now));
+
+            }
 
         }
 

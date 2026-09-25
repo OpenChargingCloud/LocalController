@@ -304,6 +304,13 @@ snapshot from `/api/v1/logs`, which says how far it reaches, and then applies
 everything newer from `/api/v1/events` - so a reconnect that replays a few
 cached events costs bytes and nothing else.
 
+The stream asks, before every entry it sends and at every heartbeat, whether
+whoever opened it would still be let in. Once the session it was opened with
+has ended - signed out, expired, or taken back with the account's others - the
+stream ends too, without the entry, and the browser's next try is answered with
+a 401. One opened with Basic auth or an API key has no session to end, and is
+held to its account instead.
+
 
 ## Who may open it
 

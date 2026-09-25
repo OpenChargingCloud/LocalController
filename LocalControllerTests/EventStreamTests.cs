@@ -121,6 +121,106 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region AStreamEndsWithTheSessionThatOpenedIt()
+
+        /// <summary>
+        /// Signed out, a stream opened with that session ends - and a line
+        /// logged after the sign-out does not come down it first.
+        /// </summary>
+        /// <remarks>
+        /// Measured before this was so: signed out, the Logs page went on
+        /// saying "live" and showing every line the local controller wrote for
+        /// as long as it was watched. A stream is a request that is answered
+        /// for hours, and it was asked about its session once, when it opened.
+        /// </remarks>
+        [Test]
+        public async Task AStreamEndsWithTheSessionThatOpenedIt()
+        {
+
+            Controller.API.EventStreamHeartbeat = TimeSpan.FromMilliseconds(300);
+
+            using var http    = await SignedIn();
+            using var stream  = await EventStream.OpenAndSettle(Controller, http);
+
+            Assert.That((await http.PostAsync("/api/v1/auth/logout", null)).StatusCode,
+                        Is.EqualTo(HttpStatusCode.NoContent));
+
+            var afterwards    = "Logged after the sign-out " + Guid.NewGuid().ToString("N")[..8];
+            Controller.Log.Info(afterwards, "test");
+
+            var ended         = await stream.EndsWithin(TimeSpan.FromSeconds(5));
+
+            Assert.Multiple(() => {
+                Assert.That(ended,                     Is.True,        "the stream went on after its session had ended");
+                Assert.That(stream.Count(afterwards),  Is.EqualTo(0),  "a line logged after the sign-out was sent to the session that had signed out");
+            });
+
+        }
+
+        #endregion
+
+        #region AQuietStreamEndsWithItsSessionToo()
+
+        /// <summary>
+        /// And a stream nothing is logged into ends at its next heartbeat, not
+        /// whenever the next line happens to be written - however the session
+        /// ended. Here all of an account's sessions are taken back at once,
+        /// the way a new password takes them, which logs nothing at all.
+        /// </summary>
+        [Test]
+        public async Task AQuietStreamEndsWithItsSessionToo()
+        {
+
+            Controller.API.EventStreamHeartbeat = TimeSpan.FromMilliseconds(300);
+
+            using var http    = await SignedIn();
+            using var stream  = await EventStream.OpenAndSettle(Controller, http);
+
+            var session       = Controller.ExtAPI.Sessions.Single();
+
+            Assert.That(Controller.ExtAPI.Sessions.RemoveAllForUser(session.UserId), Is.EqualTo(1));
+
+            Assert.That(await stream.EndsWithin(TimeSpan.FromSeconds(3)), Is.True,
+                        "a stream nothing was logged into went on after its session had ended");
+
+        }
+
+        #endregion
+
+        #region AStreamOfAnotherSessionGoesOn()
+
+        /// <summary>
+        /// Only the stream of the session that ended ends: a second browser,
+        /// signed in on its own, goes on being sent the log.
+        /// </summary>
+        [Test]
+        public async Task AStreamOfAnotherSessionGoesOn()
+        {
+
+            using var mine    = await SignedIn();
+            using var theirs  = await SignedIn();
+            using var ending  = await EventStream.OpenAndSettle(Controller, mine);
+            using var going   = await EventStream.OpenAndSettle(Controller, theirs);
+
+            Assert.That((await mine.PostAsync("/api/v1/auth/logout", null)).StatusCode,
+                        Is.EqualTo(HttpStatusCode.NoContent));
+
+            var afterwards    = "Logged after one of two signed out " + Guid.NewGuid().ToString("N")[..8];
+            Controller.Log.Info(afterwards, "test");
+
+            var arrived       = await going. ReadUntil  (afterwards);
+            var ended         = await ending.EndsWithin (TimeSpan.FromSeconds(5));
+
+            Assert.Multiple(() => {
+                Assert.That(arrived,                   Is.True,        "the stream of the session still signed in stopped too");
+                Assert.That(ended,                     Is.True,        "the stream of the session that signed out went on");
+                Assert.That(ending.Count(afterwards),  Is.EqualTo(0),  "a line logged after the sign-out was sent to the session that had signed out");
+            });
+
+        }
+
+        #endregion
+
     }
 
 }

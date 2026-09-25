@@ -216,6 +216,56 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region EndsWithin(Time)
+
+        /// <summary>
+        /// Whether the other end closes the stream within the given time - read
+        /// to its end, and what came kept, so that Count() can still say what
+        /// arrived before it ended.
+        /// </summary>
+        /// <remarks>
+        /// ReadUntil() cannot tell the two apart: it answers false both for a
+        /// stream that ended and for one that merely went on without the text,
+        /// and a stream that goes on is exactly what a test of a stream that
+        /// should have ended is looking for.
+        /// </remarks>
+        public async Task<Boolean> EndsWithin(TimeSpan Time)
+        {
+
+            var buffer = new Char[1024];
+
+            using var cancellation = new CancellationTokenSource(Time);
+
+            try
+            {
+
+                while (true)
+                {
+
+                    var count = await reader.ReadAsync(buffer, cancellation.Token);
+
+                    if (count == 0)
+                        return true;
+
+                    read.Append(buffer, 0, count);
+
+                }
+
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+            catch (IOException)
+            {
+                // Cut rather than closed is ended, too.
+                return true;
+            }
+
+        }
+
+        #endregion
+
         #region Count(Text)
 
         /// <summary>
