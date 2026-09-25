@@ -453,7 +453,7 @@ namespace cloud.charging.open.LocalController.Tests
                                       Select(entry => entry.Message).
                                       FirstOrDefault(message => message.Contains("will be checked against"));
 
-            Assert.That(line,  Is.EqualTo("The clock of this node will be checked against " +
+            Assert.That(line,  Is.EqualTo("The clock of this local controller will be checked against " +
                                           "ptbtime1.ptb.de, ptbtime2.ptb.de, ptbtime3.ptb.de, ptbtime4.ptb.de " +
                                           "every 15 minute(s), at least 2 of which must answer."));
 

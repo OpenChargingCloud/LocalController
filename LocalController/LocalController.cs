@@ -174,7 +174,6 @@ namespace cloud.charging.open.LocalController
         /// <param name="ConfigFile">Where everything this controller can be told in writing lives: one file, whose sections the node below and the controller each read for themselves; "configuration.json" beside the process by default.</param>
         /// <param name="OCPP">Who this controller says it is in OCPP, unless the configuration file says otherwise.</param>
         /// <param name="Frontend">Where the web interface comes from; the bundle embedded in this assembly by default.</param>
-        /// <param name="CertificatesPath">The directory the certificate store of the node below lives in between starts.</param>
         /// <param name="Log">The event log; a new one by default.</param>
         /// <param name="LogToConsole">Whether the event log is also written to the console.</param>
         /// <param name="ConsoleLogLevel">What the console shows of it.</param>
@@ -193,7 +192,6 @@ namespace cloud.charging.open.LocalController
                                WWCPConfigFile?        ConfigFile         = null,
                                OCPPConfiguration?     OCPP               = null,
                                IStaticContentSource?  Frontend           = null,
-                               String?                CertificatesPath   = null,
                                EventLog?              Log                = null,
                                Boolean                LogToConsole       = true,
                                LogLevel               ConsoleLogLevel    = LogLevel.Info,
@@ -229,7 +227,15 @@ namespace cloud.charging.open.LocalController
                    DNSClient:          DNSClient,
                    NTSClient:          NTSClient,
                    Frontend:           Frontend ?? new EmbeddedContentSource(HTTPRoot, typeof(LocalController).Assembly),
-                   CertificatesPath:   CertificatesPath,
+
+                   // None of the kinds the node's store keeps - those are
+                   // ISO 15118's. What a local controller presents and
+                   // believes is its station port's, in stores of its own:
+                   // ocpp-server-keys and ocpp-client-trust. So there is no
+                   // store directory of the node's beside the configuration
+                   // file either.
+                   CertificateKinds:   [],
+
                    Log:                Log,
                    LogToConsole:       LogToConsole,
                    ConsoleLogLevel:    ConsoleLogLevel,

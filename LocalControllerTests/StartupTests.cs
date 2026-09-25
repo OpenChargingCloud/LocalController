@@ -182,6 +182,42 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region AControllerKeepsNoCertificateStoreOfTheNodes()
+
+        /// <summary>
+        /// The node below keeps the certificates its kind asks for, and a
+        /// local controller asks for none: nothing is made beside the
+        /// configuration file for them, at construction or at a start.
+        /// </summary>
+        /// <remarks>
+        /// The kinds that store knows are ISO 15118's. What a controller
+        /// presents to its charging stations and whom it believes are in
+        /// stores of its own, and until the node could be told so, every start
+        /// made a certificates directory with an index.json in it beside the
+        /// file - which, below a repository, is a tree git calls dirty.
+        /// </remarks>
+        [Test]
+        public async Task AControllerKeepsNoCertificateStoreOfTheNodes()
+        {
+
+            await using var controller = TestControllers.New(directory, TestControllers.Offline);
+
+            await controller.Start();
+
+            Assert.Multiple(() => {
+
+                Assert.That(Directory.Exists(Path.Combine(directory, "certificates")), Is.False,
+                            "A certificate store of the node's was made beside the configuration file.");
+
+                Assert.That(controller.Certificates.Kinds,                               Is.Empty,
+                            "The node's store keeps kinds of certificate a controller has no use for.");
+
+            });
+
+        }
+
+        #endregion
+
         #region TheFileDecidesWhoThisControllerIsInOCPP()
 
         /// <summary>
