@@ -5,6 +5,7 @@ import type { Page } from '../router';
 import { shell } from '../shell';
 import { errorMessage, formatValue, humanizeKey, whileSaving } from '../ui';
 import { typedSinceDrawn, unsaved } from '../unsaved';
+import { allServersTake, oneServerTakes } from './dnsServers';
 
 /**
  * How this local controller resolves names.
@@ -214,9 +215,9 @@ export const dnsPage: Page = {
                         <p class="hint">
                             ${mayTest
                                   ? html`
-                                        This asks the way the local controller asks for anything: the servers above, in
-                                        turn, until one answers. To find out what one particular server says,
-                                        use the button on its own row.
+                                        This asks the way the local controller asks for anything: all of the servers
+                                        above at once, and the first usable answer wins. To find out what one
+                                        particular server says, use the button on its own row.
                                     `
                                   : html`Running a query needs the CPO or the system administrator role.`}
                         </p>
@@ -360,38 +361,6 @@ export const dnsPage: Page = {
 
 
         /**
-         * What each name server is allowed, in seconds: its own timeout where
-         * it has one, and the client's where it has not.
-         *
-         * The local controller tries them in turn, so this is the list the page has to
-         * be willing to wait for - what it is given up on is the local controller going
-         * quiet, never the patience the local controller was configured with.
-         */
-        function whatTheServersAreAllowed(): number[] {
-            return (current?.servers ?? []).map((_, index) => whatOneServerIsAllowed(index));
-        }
-
-        /**
-         * The longest one server can honestly take, in seconds.
-         *
-         * Its timeout times the number of attempts, and the attempts are the
-         * part that is easy to forget: measured against a name server that
-         * does not answer at all, a query with a ten second timeout came back
-         * after twenty, because the local controller tries again. A deadline of ten
-         * would have given up on a local controller that was still doing what it was
-         * told.
-         */
-        function whatOneServerIsAllowed(index: number): number {
-
-            const timeout = current?.servers[index]?.queryTimeoutSeconds ??
-                            current?.settings.queryTimeoutSeconds ?? 0;
-
-            return timeout * ((current?.settings.maxRetries ?? 0) + 1);
-
-        }
-
-
-        /**
          * What came back, as it was shown on the page before this moved into a
          * dialog.
          *
@@ -495,8 +464,9 @@ export const dnsPage: Page = {
                     <p class="hint">
                         ${asking === null
                               ? html`
-                                    Asked the way this local controller asks for anything: the configured servers, in
-                                    turn, until one answers.
+                                    Asked the way this local controller asks for anything: all of the configured
+                                    servers at once, and the first usable answer wins. If none of them
+                                    answers at all, that takes ${allServersTake(current)} seconds to say so.
                                 `
                               : html`
                                     Asked of <code>${asking.address.includes(':')
@@ -505,7 +475,7 @@ export const dnsPage: Page = {
                                     ${asking.transport} and of nothing else, and without the cache - an
                                     answer somebody else already fetched says nothing about this server.
                                     One that does not answer at all takes
-                                    ${whatOneServerIsAllowed(server!)} seconds to say so.
+                                    ${oneServerTakes(current, server!)} seconds to say so.
                                 `}
                     </p>
 
@@ -597,15 +567,14 @@ export const dnsPage: Page = {
 
                 try
                 {
-                    // One server means one server's patience, not every
-                    // server's added up: waiting two minutes for a question
-                    // that was only ever put to one of them is a page that
-                    // looks broken.
+                    // One server's patience when one is asked, and the
+                    // longest of them when all are: they are asked at once,
+                    // so it does not add up.
                     asked = await api.dns.query(testName,
                                                 testTypes,
                                                 server === null
-                                                    ? whatTheServersAreAllowed()
-                                                    : [ whatOneServerIsAllowed(server) ],
+                                                    ? allServersTake(current)
+                                                    : oneServerTakes(current, server),
                                                 server ?? undefined);
                 }
                 catch (problem)

@@ -227,20 +227,23 @@ describe('how long the page is willing to wait', () => {
 
     it('waits out the local controller\'s own patience when it has to ask somebody else', () => {
 
-        // Measured on the vehicle: two name servers at three seconds each took
-        // 6.2 seconds. A page that gave up at four would be reporting its own
-        // impatience as the local controller's silence.
-        assert.ok(afterAsking([3, 3]) > 6_200);
+        // Measured on a WWCP node: a name server that never answers, at three
+        // seconds and asked again once, took 6.2 seconds - twice three, and a
+        // pause in between. A page that gave up at four would be reporting
+        // its own impatience as the local controller's silence.
+        assert.ok(afterAsking([6]) > 6_200);
 
         // And one that is asked nothing waits the ordinary time.
         assert.equal(afterAsking([]), answerWithin);
 
     });
 
-    it('grows with each name server it is given', () => {
+    it('grows with each step taken one after another', () => {
 
-        assert.ok(afterAsking([10, 10, 10]) > afterAsking([10, 10]));
-        assert.equal(afterAsking([10, 10, 10]) - afterAsking([10, 10]), 10_000);
+        // A time server's test is two of them: the key exchange, then the
+        // authenticated request, each given the client's timeout.
+        assert.ok(afterAsking([10, 10]) > afterAsking([10]));
+        assert.equal(afterAsking([10, 10]) - afterAsking([10]), 10_000);
 
     });
 

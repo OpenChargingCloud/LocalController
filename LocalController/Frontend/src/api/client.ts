@@ -710,10 +710,10 @@ export const answerWithin = 15_000;
 export const actWithin = 30_000;
 
 /**
- * How long a question the local controller has to put to somebody else may
- * take: the timeouts it was told to allow, added up, and the usual allowance
- * on top - so that what the page gives up on is silence from the local
- * controller rather than patience it was told to have.
+ * How long a question the local controller has to put to somebody else may take: the
+ * timeouts of the steps it takes one after another, added up, and the usual
+ * allowance on top - so that what the page gives up on is silence from the
+ * local controller rather than patience it was told to have.
  */
 export function afterAsking(Timeouts: number[]): number {
     return Timeouts.reduce((total, seconds) => total + seconds * 1000, 0) + answerWithin;
@@ -945,15 +945,16 @@ export const api = {
          * Make the local controller look a name up. A POST because it sends
          * traffic.
          *
-         * @param timeouts  what each name server is allowed, in seconds; the
-         *                  page waits for all of them, added up.
-         * @param server    which configured name server to ask, by its place
-         *                  in the list - or undefined to resolve the way the
-         *                  local controller resolves anything else.
+         * @param seconds  how long the name servers asked may take - see
+         *                 pages/dnsServers.ts.
+         * @param server   which configured name server to ask, by its place in
+         *                 the list - or undefined to resolve the way the local
+         *                 controller resolves anything else, asking all of
+         *                 them at once.
          */
-        query: (name: string, recordTypes: string[], timeouts: number[], server?: number) =>
+        query: (name: string, recordTypes: string[], seconds: number, server?: number) =>
                    request<DNSQueryResult>('POST', '/configuration/dns/query', { name, recordTypes, server },
-                                           afterAsking(timeouts))
+                                           afterAsking([ seconds ]))
     },
 
     nts: {
