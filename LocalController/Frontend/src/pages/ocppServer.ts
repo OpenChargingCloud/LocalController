@@ -4,6 +4,7 @@ import { html, must, render, type HTMLFragment } from '../html';
 import type { Page } from '../router';
 import { shell } from '../shell';
 import { errorMessage, field, formatTimestamp, isChecked } from '../ui';
+import { typedSinceDrawn, unsaved } from '../unsaved';
 
 /**
  * The server the charging stations connect to, and which of them may.
@@ -32,7 +33,13 @@ export const ocppServerPage: Page = {
 
         render(content, html`<div class="loading">Loading ...</div>`);
 
-        must<HTMLButtonElement>(root, '#reload').addEventListener('click', () => void load());
+        // Reload throws what is typed into a form away as thoroughly as leaving
+        // the page does, and from the opposite corner of the screen, so it
+        // asks first.
+        must<HTMLButtonElement>(root, '#reload').addEventListener('click', () => {
+            if (unsaved.mayBeLost())
+                void load();
+        });
 
         const mayChange = auth.can('changeStationSettings');
 
@@ -574,9 +581,14 @@ export const ocppServerPage: Page = {
         }
 
 
+        // Every card with a Save button is a draft until it is saved. The switch
+        // at the top is in no form: it takes effect the moment it is flipped.
+        const release = unsaved.heldBy(() => Array.from(content.querySelectorAll<HTMLFormElement>('form')).
+                                                   some(form => typedSinceDrawn(form)));
+
         void load();
 
-        return () => { cancelled = true; };
+        return () => { cancelled = true; release(); };
 
     }
 

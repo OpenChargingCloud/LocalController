@@ -4,6 +4,7 @@ import { html, must, render, type HTMLFragment } from '../html';
 import type { Page } from '../router';
 import { shell } from '../shell';
 import { errorMessage, field, formatTimestamp } from '../ui';
+import { typedSinceDrawn, unsaved } from '../unsaved';
 
 /**
  * The certificates this local controller presents to the charging stations.
@@ -33,7 +34,13 @@ export const serverCertificatesPage: Page = {
 
         render(content, html`<div class="loading">Loading ...</div>`);
 
-        must<HTMLButtonElement>(root, '#reload').addEventListener('click', () => void load());
+        // Reload throws what is typed into a form away as thoroughly as leaving
+        // the page does, and from the opposite corner of the screen, so it
+        // asks first.
+        must<HTMLButtonElement>(root, '#reload').addEventListener('click', () => {
+            if (unsaved.mayBeLost())
+                void load();
+        });
 
         const mayManage = auth.can('manageCertificates');
 
@@ -421,9 +428,14 @@ export const serverCertificatesPage: Page = {
         }
 
 
+        // A half-typed subject, or a certificate pasted but not yet taken in,
+        // is work like any other.
+        const release = unsaved.heldBy(() => Array.from(content.querySelectorAll<HTMLFormElement>('form')).
+                                                   some(form => typedSinceDrawn(form)));
+
         void load();
 
-        return () => { cancelled = true; };
+        return () => { cancelled = true; release(); };
 
     }
 

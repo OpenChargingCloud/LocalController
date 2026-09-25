@@ -4,6 +4,7 @@ import { html, must, render, type HTMLFragment } from '../html';
 import type { Page } from '../router';
 import { shell } from '../shell';
 import { errorMessage, field, formatTimestamp } from '../ui';
+import { typedSinceDrawn, unsaved } from '../unsaved';
 
 /**
  * Who may sign in to the charging station server, with what, and under which
@@ -31,7 +32,13 @@ export const stationLoginsPage: Page = {
 
         render(content, html`<div class="loading">Loading ...</div>`);
 
-        must<HTMLButtonElement>(root, '#reload').addEventListener('click', () => void load());
+        // Reload throws what is typed into a form away as thoroughly as leaving
+        // the page does, and from the opposite corner of the screen, so it
+        // asks first.
+        must<HTMLButtonElement>(root, '#reload').addEventListener('click', () => {
+            if (unsaved.mayBeLost())
+                void load();
+        });
 
         const mayChange = auth.can('changeStationSettings');
 
@@ -691,9 +698,15 @@ export const stationLoginsPage: Page = {
         }
 
 
+        // The group being edited and the station being added are drafts. The
+        // switches and choosers in the list are in no form: they take effect
+        // the moment they are touched.
+        const release = unsaved.heldBy(() => Array.from(content.querySelectorAll<HTMLFormElement>('form')).
+                                                   some(form => typedSinceDrawn(form)));
+
         void load();
 
-        return () => { cancelled = true; };
+        return () => { cancelled = true; release(); };
 
     }
 
