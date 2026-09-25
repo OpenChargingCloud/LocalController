@@ -332,3 +332,14 @@ Membership is asked on every request rather than remembered at the sign-in, so
 taking somebody out of a group takes effect on their next request. The
 permissions travel to the browser so a page can grey out what somebody may not
 do - a courtesy, not a lock: every request is checked again on arrival.
+
+
+## Your participation
+
+This software is Open Source under the **Affero GPL 3.0 license**.
+We appreciate your participation in this ongoing project, and your help to
+improve it and the e-mobility ICT in general. If you find bugs, want to
+request a feature or send us a pull request, feel free to use the normal
+GitHub features to do so. For this please read the Contributor License
+Agreement carefully and send us a signed copy or use a similar free and
+open license.
