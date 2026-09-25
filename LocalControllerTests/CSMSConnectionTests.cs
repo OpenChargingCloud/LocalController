@@ -46,6 +46,13 @@ namespace cloud.charging.open.LocalController.Tests
 
         private const String ThePassword = "a-password-long-enough-for-ocpp";
 
+        /// <summary>
+        /// How long the controller below may take to reach a CSMS that has come
+        /// up. It dials again a second after a loss at first, and never more
+        /// than two apart - see AControllerThatDials(DialsAgainQuickly).
+        /// </summary>
+        private static readonly TimeSpan BackWithin = TimeSpan.FromSeconds(15);
+
         private String           upstreamDirectory    = default!;
         private String           downstreamDirectory  = default!;
         private LocalController  upstream             = default!;
@@ -68,23 +75,7 @@ namespace cloud.charging.open.LocalController.Tests
             Directory.CreateDirectory(upstreamDirectory);
 
             csmsPort           = TestControllers.FreePort();
-
-            upstream           = TestControllers.New(
-                                     upstreamDirectory,
-                                     new JObject(
-                                         new JProperty("nts", new JObject(new JProperty("enabled", false))),
-                                         new JProperty("ocppServer", new JObject(
-                                             new JProperty("enabled",           true),
-                                             new JProperty("address",           "127.0.0.1"),
-                                             new JProperty("port",              csmsPort),
-                                             new JProperty("securityProfiles",  new JArray(1)),
-                                             new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1"))
-                                         ))
-                                     )
-                                 );
-
-            if (!upstream.StationLogins.TrySetPassword("lc002", ThePassword, null, "The controller below", out _, out var error))
-                throw new InvalidOperationException($"The test's own upstream login was refused: {error}");
+            upstream           = ACSMS(upstreamDirectory, csmsPort);
 
             await upstream.Start();
 
@@ -109,28 +100,71 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region (private static) ACSMS(Directory, Port)
+
+        /// <summary>
+        /// A controller standing in for the CSMS, listening on the given port
+        /// and ready to let 'lc002' in with a password: built, not started.
+        /// </summary>
+        private static LocalController ACSMS(String  Directory,
+                                             UInt16  Port)
+        {
+
+            var csms = TestControllers.New(
+                           Directory,
+                           new JObject(
+                               new JProperty("nts", new JObject(new JProperty("enabled", false))),
+                               new JProperty("ocppServer", new JObject(
+                                   new JProperty("enabled",           true),
+                                   new JProperty("address",           "127.0.0.1"),
+                                   new JProperty("port",              Port),
+                                   new JProperty("securityProfiles",  new JArray(1)),
+                                   new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1"))
+                               ))
+                           )
+                       );
+
+            if (!csms.StationLogins.TrySetPassword("lc002", ThePassword, null, "The controller below", out _, out var error))
+                throw new InvalidOperationException($"The test's own upstream login was refused: {error}");
+
+            return csms;
+
+        }
+
+        #endregion
+
         #region (private) AControllerThatDials(...)
 
         /// <summary>
         /// The controller below, configured to report to the one above.
         /// </summary>
-        private LocalController AControllerThatDials(Boolean  Enabled          = true,
-                                                     Byte     SecurityProfile  = 1,
-                                                     String?  URL              = null,
-                                                     String?  Username         = "lc002",
-                                                     String?  Password         = ThePassword)
+        /// <param name="DialsAgainQuickly">Whether it dials again a second after a loss, and never more than two apart, for a test of coming back that should not be a test of patience.</param>
+        private LocalController AControllerThatDials(Boolean  Enabled            = true,
+                                                     Byte     SecurityProfile    = 1,
+                                                     String?  URL                = null,
+                                                     String?  Username           = "lc002",
+                                                     String?  Password           = ThePassword,
+                                                     Boolean  DialsAgainQuickly  = false)
         {
+
+            var csms       = new JObject(
+                                 new JProperty("enabled",          Enabled),
+                                 new JProperty("url",              URL ?? $"ws://127.0.0.1:{csmsPort}"),
+                                 new JProperty("securityProfile",  SecurityProfile)
+                             );
+
+            if (DialsAgainQuickly)
+            {
+                csms.Add("reconnectInitialDelay",  1);
+                csms.Add("reconnectMaxDelay",      2);
+            }
 
             var controller = TestControllers.New(
                                  downstreamDirectory,
                                  new JObject(
                                      new JProperty("nts",  new JObject(new JProperty("enabled", false))),
                                      new JProperty("ocpp", new JObject(new JProperty("nodeId", "lc002"))),
-                                     new JProperty("csms", new JObject(
-                                         new JProperty("enabled",          Enabled),
-                                         new JProperty("url",              URL ?? $"ws://127.0.0.1:{csmsPort}"),
-                                         new JProperty("securityProfile",  SecurityProfile)
-                                     ))
+                                     new JProperty("csms", csms)
                                  )
                              );
 
@@ -141,6 +175,32 @@ namespace cloud.charging.open.LocalController.Tests
             }
 
             return controller;
+
+        }
+
+        #endregion
+
+        #region (private) UntilItIsBack(CSMS)
+
+        /// <summary>
+        /// Wait until the CSMS has a connection from the controller below and
+        /// the controller says it has one too, or until BackWithin is up.
+        /// </summary>
+        /// <remarks>
+        /// Both, because either can come first: the CSMS has the connection as
+        /// soon as it has answered the upgrade, and the controller hears of it
+        /// only once that answer has arrived.
+        /// </remarks>
+        private async Task UntilItIsBack(LocalController CSMS)
+        {
+
+            var giveUp = DateTimeOffset.UtcNow + BackWithin;
+
+            while (DateTimeOffset.UtcNow < giveUp &&
+                   !(CSMS.StationServer?.WebSocketConnections.Any() == true && downstream?.CSMSConnected == true))
+            {
+                await Task.Delay(100);
+            }
 
         }
 
@@ -208,6 +268,11 @@ namespace cloud.charging.open.LocalController.Tests
 
                 Assert.That(downstream.CSMSLastProblem,  Is.Not.Null,
                             "The connection failed and nothing says why.");
+
+                // An answer that means no is not asked again: a wrong password
+                // does not get better for being tried every few seconds.
+                Assert.That(downstream.CSMSLastProblem,  Does.Contain("refused").And.Contain("not dialled again"),
+                            "What the controller says of a refusal does not say that it is final.");
 
                 // And a controller whose backend refused it is still a
                 // controller: the port below has to be open regardless.
@@ -313,6 +378,193 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(File.ReadAllText(downstream.CSMSLogin.Path),             Does.Contain(ThePassword));
 
             });
+
+        }
+
+        #endregion
+
+
+        #region ACSMSThatIsDownAtTheStartIsReachedOnceItIsUp()
+
+        /// <summary>
+        /// A CSMS that is not there when this controller starts is reached once
+        /// it is - without the start waiting for it, on the one client the line
+        /// has however often it was dialled, and said to be connected, as one
+        /// reached at once is.
+        /// </summary>
+        /// <remarks>
+        /// The client was given its reconnect policy once its first attempt had
+        /// come back, and one whose first attempt had failed had ended by then:
+        /// a controller started while its CSMS was down stayed away from it
+        /// until it was started again.
+        /// </remarks>
+        [Test]
+        public async Task ACSMSThatIsDownAtTheStartIsReachedOnceItIsUp()
+        {
+
+            var laterPort       = TestControllers.FreePort();
+            var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
+
+            downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
+                                                       DialsAgainQuickly:  true);
+
+            var took            = System.Diagnostics.Stopwatch.StartNew();
+            await downstream.Start();
+            took.Stop();
+
+            Assert.Multiple(() => {
+                Assert.That(downstream.CSMSConnected,    Is.False,
+                            "The controller got through to a CSMS that was not there yet, so this test tests nothing.");
+                Assert.That(took.Elapsed,                Is.LessThan(TimeSpan.FromSeconds(10)),
+                            "The controller waited for a CSMS that was not there before it said it had started.");
+                Assert.That(downstream.CSMSLastProblem,  Does.Contain("could not be reached").And.Contain("dialled again by itself"),
+                            "What the controller says of a CSMS that is not there does not say that it goes on dialling.");
+            });
+
+            // And what it says stays what the first attempt found once the
+            // client has tried again, rather than turning into a connection
+            // "lost" that never was: twice, so that the first time has been told.
+            var client          = downstream.Node.OCPPWebSocketClients.
+                                      OfType<org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient>().
+                                      Single();
+
+            var triedBy         = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(10);
+
+            while (DateTimeOffset.UtcNow < triedBy && client.ReconnectAttempts < 2)
+                await Task.Delay(100);
+
+            Assert.Multiple(() => {
+                Assert.That(client.ReconnectAttempts,    Is.GreaterThanOrEqualTo(2),
+                            "The client did not try again by itself.");
+                Assert.That(downstream.CSMSLastProblem,  Does.Contain("could not be reached").And.Not.Contain("lost"),
+                            "A line that was never up is said to have been lost.");
+            });
+
+            var later           = ACSMS(laterDirectory, laterPort);
+
+            try
+            {
+
+                await later.Start();
+                await UntilItIsBack(later);
+
+                Assert.That(later.StationServer?.WebSocketConnections.Count(),  Is.GreaterThan(0),
+                            $"The CSMS came up after the controller had started, and the controller did not reach it within {BackWithin.TotalSeconds:F0} s.");
+
+                Assert.Multiple(() => {
+                    Assert.That(downstream.CSMSConnected,                      Is.True,        "The CSMS has the controller's connection, and the controller says it is not connected.");
+                    Assert.That(downstream.CSMSConnectedSince,                 Is.Not.Null,    "The controller does not say since when it is connected.");
+                    Assert.That(downstream.CSMSLastProblem,                    Is.Null,        "The controller still names a problem with a line that is up.");
+                    Assert.That(downstream.Node.OCPPWebSocketClients.Count(),  Is.EqualTo(1),  "Dialling the CSMS again made a client each time.");
+                });
+
+            }
+            finally
+            {
+                await later.DisposeAsync();
+                TestControllers.Remove(laterDirectory);
+            }
+
+        }
+
+        #endregion
+
+        #region ACSMSThatRestartsIsReachedAgain()
+
+        /// <summary>
+        /// A CSMS that goes away and comes back - stopped and started again, as
+        /// for an update - is reached again, on the client the line had, and
+        /// the controller says since when.
+        /// </summary>
+        /// <remarks>
+        /// "Dialled once, kept up by the client", the line has always said of
+        /// itself. The client stopped for good, though, when it was the other
+        /// side that ended its connection, whatever its policy said.
+        /// </remarks>
+        [Test]
+        public async Task ACSMSThatRestartsIsReachedAgain()
+        {
+
+            downstream    = AControllerThatDials(DialsAgainQuickly: true);
+
+            await downstream.Start();
+
+            Assert.That(downstream.CSMSConnected, Is.True, downstream.CSMSLastProblem);
+
+            var wentAway  = DateTimeOffset.UtcNow;
+
+            await upstream.DisposeAsync();
+
+            // The same CSMS again, from the same directory and on the same port:
+            // what a restart is.
+            upstream      = ACSMS(upstreamDirectory, csmsPort);
+
+            await upstream.Start();
+            await UntilItIsBack(upstream);
+
+            Assert.That(upstream.StationServer?.WebSocketConnections.Count(),  Is.GreaterThan(0),
+                        $"The CSMS was restarted, and the controller did not come back to it within {BackWithin.TotalSeconds:F0} s.");
+
+            Assert.Multiple(() => {
+                Assert.That(downstream.CSMSConnected,                      Is.True,                  "The CSMS has the controller's connection again, and the controller says it is not connected.");
+                Assert.That(downstream.CSMSConnectedSince ?? DateTimeOffset.MinValue,
+                                                                           Is.GreaterThan(wentAway), "The controller does not say since when it is connected again.");
+                Assert.That(downstream.CSMSLastProblem,                    Is.Null,                  "The controller still names a problem with a line that is up again.");
+                Assert.That(downstream.Node.OCPPWebSocketClients.Count(),  Is.EqualTo(1),            "Coming back made a client of its own.");
+            });
+
+        }
+
+        #endregion
+
+        #region AStoppedControllerDialsNoMore()
+
+        /// <summary>
+        /// A controller stopped while it was still dialling a CSMS that was not
+        /// there does not reach it once it is: stopping ends the dialling, and
+        /// nothing of a controller that is gone turns up at its CSMS later.
+        /// </summary>
+        /// <remarks>
+        /// Since its client has its policy before the first attempt, a
+        /// controller whose CSMS is down has something going on in the
+        /// background, which its stopping has to end.
+        /// </remarks>
+        [Test]
+        public async Task AStoppedControllerDialsNoMore()
+        {
+
+            var laterPort       = TestControllers.FreePort();
+            var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
+
+            downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
+                                                       DialsAgainQuickly:  true);
+
+            await downstream.Start();
+
+            Assert.That(downstream.CSMSLastProblem, Does.Contain("dialled again by itself"),
+                        "The controller does not go on dialling, so this test tests nothing.");
+
+            await downstream.Stop();
+
+            var later           = ACSMS(laterDirectory, laterPort);
+
+            try
+            {
+
+                await later.Start();
+
+                // More than twice the longest wait between two attempts.
+                await Task.Delay(TimeSpan.FromSeconds(5));
+
+                Assert.That(later.StationServer?.WebSocketConnections.Count(), Is.EqualTo(0),
+                            "A controller that had been stopped reached its CSMS once it was up.");
+
+            }
+            finally
+            {
+                await later.DisposeAsync();
+                TestControllers.Remove(laterDirectory);
+            }
 
         }
 

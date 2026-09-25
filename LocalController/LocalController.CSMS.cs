@@ -50,9 +50,10 @@ namespace cloud.charging.open.LocalController
     /// the routing.
     ///
     /// <b>Dialled once, kept up by the client.</b> Hermod's WebSocket client
-    /// reconnects on its own when a connection is lost, with an exponential
-    /// backoff this controller configures. So there is no loop here that dials
-    /// again: there is one that is told when the client is about to.
+    /// dials again on its own when a connection is lost or could not be made
+    /// in the first place, with an exponential backoff this controller
+    /// configures. So there is no loop here that dials again: there is one
+    /// that is told when the client is about to, and when it has got through.
     /// </remarks>
     public partial class LocalController
     {
@@ -208,6 +209,21 @@ namespace cloud.charging.open.LocalController
 
             #endregion
 
+            // Before the first attempt, and by the node, which gives it to the
+            // client it makes: a client whose first attempt failed had ended by
+            // the time anything out here could give it a policy, so a controller
+            // started while its CSMS was down stayed away from it until it was
+            // started again. The first attempt is answered at once all the same;
+            // the start is not held while the client goes on trying.
+            lc01.ReconnectPolicy = new org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClientReconnectPolicy(
+                                       InitialDelay:  csmsSettings.ReconnectInitialDelay,
+                                       MaxDelay:      csmsSettings.ReconnectMaxDelay
+                                   );
+
+            var signedIn = $"This local controller signed in to the CSMS at {url} " +
+                           $"({(totpConfig is not null ? "with a one-time token" : "with a password")}, " +
+                           $"security profile {csmsSettings.SecurityProfile}).";
+
             try
             {
 
@@ -238,38 +254,54 @@ namespace cloud.charging.open.LocalController
                     csmsConnectedSince  = TimeProvider.GetUtcNow();
                     csmsLastProblem     = null;
 
-                    Log.Notice($"This local controller signed in to the CSMS at {url} " +
-                               $"({(totpConfig is not null ? "with a one-time token" : "with a password")}, " +
-                               $"security profile {csmsSettings.SecurityProfile}).",
-                               "ocpp", "csms", "auth");
+                    Log.Notice(signedIn, "ocpp", "csms", "auth");
 
                 }
 
                 else
                 {
 
-                    csmsLastProblem = response is null
-                                          ? $"The CSMS at {url} did not answer."
-                                          : $"The CSMS at {url} refused this local controller: {response.HTTPStatusCode}.";
+                    // An attempt that found nothing listening, or no address for
+                    // the name, has made no request, and the answer to it is not
+                    // the CSMS's: nobody refused anything.
+                    var why          = response?.HTTPBodyAsJSONObject?["message"]?.Value<String>();
+
+                    csmsLastProblem  = (response?.HTTPRequest is null
+                                           ? $"The CSMS at {url} could not be reached{(why is null ? "" : $": {why.TrimEnd('.')}")}."
+                                           : $"The CSMS at {url} refused this local controller: {response.HTTPStatusCode}.") +
+                                       WhatComesNext();
 
                     Log.Warning(csmsLastProblem, "ocpp", "csms", "auth");
 
                 }
-
-                WireCSMSLogging();
 
             }
             catch (Exception e)
             {
 
                 csmsConnected    = false;
-                csmsLastProblem  = $"The CSMS at {url} could not be reached: {e.Message}";
+                csmsLastProblem  = $"The CSMS at {url} could not be reached: {e.Message.TrimEnd('.')}." + WhatComesNext();
 
                 Log.Warning(csmsLastProblem, "ocpp", "csms");
 
             }
 
+            // Whether the first attempt got through or not: the client is the
+            // node's either way, and goes on by itself.
+            WireCSMSLogging(url, signedIn);
+
             csmsAsBuilt = csmsSettings;
+
+
+            // Asked of the client rather than read from the answer: a CSMS that
+            // is not there yet, or not ready, is dialled again by itself; an
+            // answer that means no - a wrong password, a wrong address - is an
+            // answer, and is not.
+            String WhatComesNext()
+
+                => TheCSMSClient()?.KeepsTrying == true
+                       ? " It is dialled again by itself."
+                       : " It is not dialled again before this local controller is restarted.";
 
         }
 
@@ -283,6 +315,8 @@ namespace cloud.charging.open.LocalController
             {
                 try
                 {
+                    // A close asked for here ends the client's dialling as well:
+                    // it is not a loss to come back from.
                     if (client is org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient webSocketClient)
                         await webSocketClient.Close();
                 }
@@ -302,7 +336,21 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
-        #region (private) WireCSMSLogging()
+        #region (private) TheCSMSClient()
+
+        /// <summary>
+        /// The client the node made for the line when it was dialled: made
+        /// inside the call, and kept by the node whether it got through or not.
+        /// </summary>
+        private org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient? TheCSMSClient()
+
+            => lc01.OCPPWebSocketClients.
+                   OfType<org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient>().
+                   LastOrDefault();
+
+        #endregion
+
+        #region (private) WireCSMSLogging(URL, SignedIn)
 
         /// <summary>
         /// What of the line upwards ends up in the event log.
@@ -313,7 +361,10 @@ namespace cloud.charging.open.LocalController
         /// lines a day on a healthy connection, and the ones on an unhealthy one
         /// are the whole point.
         /// </remarks>
-        private void WireCSMSLogging()
+        /// <param name="URL">Where the line goes.</param>
+        /// <param name="SignedIn">What is said when it gets through.</param>
+        private void WireCSMSLogging(String  URL,
+                                     String  SignedIn)
         {
 
             foreach (var client in lc01.OCPPWebSocketClients)
@@ -322,23 +373,48 @@ namespace cloud.charging.open.LocalController
                 if (client is not org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient webSocketClient)
                     continue;
 
+                // Whether the line has been up, so that one that never was is
+                // not said to be lost - and keeps what its first attempt said,
+                // which is more than "not yet".
+                var wasUp = csmsConnected;
+
                 // Told when the line is about to be dialled again rather than
                 // dialling again here: the client already does the waiting, the
                 // backing off and the counting.
-                webSocketClient.ReconnectPolicy = new org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClientReconnectPolicy(
-                                                      InitialDelay:  csmsSettings.ReconnectInitialDelay,
-                                                      MaxDelay:      csmsSettings.ReconnectMaxDelay
-                                                  );
-
                 webSocketClient.OnReconnecting += (timestamp, sender, attempt, delay, cancellationToken) => {
 
                     csmsConnected       = false;
                     csmsConnectedSince  = null;
-                    csmsLastProblem     = $"The connection to the CSMS was lost; trying again in {delay.TotalSeconds:0} second(s).";
 
-                    Log.Warning($"The connection to the CSMS was lost. " +
+                    if (wasUp)
+                        csmsLastProblem = $"The connection to the CSMS was lost; trying again in {delay.TotalSeconds:0} second(s).";
+
+                    Log.Warning((wasUp
+                                     ? "The connection to the CSMS was lost. "
+                                     : $"The CSMS at {URL} was not reached. ") +
                                 $"Attempt {attempt} follows in {delay.TotalSeconds:0} second(s).",
                                 "ocpp", "csms");
+
+                    return Task.CompletedTask;
+
+                };
+
+                // And told when it has got through: to a CSMS that was not there
+                // when this controller started, or back to one that went away.
+                // Said as a line that got through at once is, or the page went
+                // on saying "lost" of a line long since back.
+                webSocketClient.OnWebSocketConnectionAccepted += (timestamp, sender, connection, response, cancellationToken) => {
+
+                    csmsConnected       = true;
+                    csmsConnectedSince  = TimeProvider.GetUtcNow();
+                    csmsLastProblem     = null;
+
+                    Log.Notice(wasUp
+                                   ? $"This local controller is connected to the CSMS at {URL} again."
+                                   : SignedIn,
+                               "ocpp", "csms", "auth");
+
+                    wasUp = true;
 
                     return Task.CompletedTask;
 

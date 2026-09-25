@@ -55,6 +55,15 @@ deliberately *not* changeable while running: an identification is what a CSMS
 knows this controller by, and changing it under a live connection would not
 rename the controller, it would make it a second one nobody is talking to.
 
+The line up to the CSMS is dialled when the controller starts, and kept up by
+the WebSocket client it was dialled with. A CSMS that is not there yet, or goes
+away later - restarted, deployed again - is dialled again by itself: after
+`reconnectInitialDelay` seconds of the `csms` section at first, and twice as
+long after every attempt that fails, up to `reconnectMaxDelay`. An answer that
+means no, such as a wrong password, is not asked again before the controller is
+restarted. The CSMS page says which of the two it is, and since when the line
+is up.
+
 
 ## Running it
 
