@@ -223,6 +223,7 @@ namespace cloud.charging.open.LocalController
             AddHandler(HTTPPath.Root + "v1/configuration/nts",        GetNTSConfiguration,   HTTPMethod.GET);
             AddHandler(HTTPPath.Root + "v1/configuration/nts",        PutNTSConfiguration,   HTTPMethod.PUT);
             AddHandler(HTTPPath.Root + "v1/configuration/nts/sync",   PostNTSSync,           HTTPMethod.POST);
+            AddHandler(HTTPPath.Root + "v1/configuration/nts/test",   PostNTSTest,           HTTPMethod.POST);
 
             AddHandler(HTTPPath.Root + "v1/configuration/time",       GetClock,              HTTPMethod.GET);
 
@@ -403,14 +404,23 @@ namespace cloud.charging.open.LocalController
         }
 
         /// <summary>
-        /// POST /api/v1/configuration/dns/query with {"name", "recordTypes"}:
-        /// make this local controller look a name up and say what came back.
+        /// POST /api/v1/configuration/dns/query with {"name", "recordTypes"}
+        /// and an optional {"server"}: make this local controller look a name
+        /// up and say what came back.
         /// </summary>
         /// <remarks>
         /// A POST although it changes nothing here, because it makes this
         /// local controller send traffic to a host somebody named - which is not
         /// something to leave sitting in a URL that a browser may repeat,
         /// prefetch or put in a history.
+        ///
+        /// The server is the place of one of the configured name servers in
+        /// the list, counted from 0, and asks that one and nothing else, and
+        /// without the cache. Left out, the question is put the way this
+        /// controller resolves anything: to the servers in turn, until one
+        /// answers. A place with no server at it is said in the answer; one
+        /// that is not a place at all is refused here, rather than read as
+        /// "all of them".
         /// </remarks>
         private async Task<HTTPResponse> PostDNSQuery(HTTPRequest Request)
         {
@@ -429,12 +439,28 @@ namespace cloud.charging.open.LocalController
             if (!LocalController.TryParseRecordTypes(json["recordTypes"], out var recordTypes, out var problem))
                 return ErrorJSON(Request, HTTPStatusCode.BadRequest, problem);
 
+            Int32? server = null;
+
+            if (json["server"] is JToken serverToken && serverToken.Type != JTokenType.Null)
+            {
+
+                if (serverToken.Type != JTokenType.Integer ||
+                    serverToken.Value<Int64>() is < 0 or > Int32.MaxValue)
+                {
+                    return ErrorJSON(Request, HTTPStatusCode.BadRequest,
+                                     "'server' must be the place of a name server in the list, counted from 0.");
+                }
+
+                server = serverToken.Value<Int32>();
+
+            }
+
             Log.Info($"'{user.Id}' asked this local controller to resolve '{name}'.", "dns", "test", "web");
 
             return JSONResponse(
                        Request,
                        HTTPStatusCode.OK,
-                       await Controller.ResolveAsync(name, recordTypes, CancellationToken: Request.CancellationToken)
+                       await Controller.ResolveAsync(name, recordTypes, server, Request.CancellationToken)
                    );
 
         }
@@ -504,6 +530,57 @@ namespace cloud.charging.open.LocalController
             json["result"] = result;
 
             return JSONResponse(Request, HTTPStatusCode.OK, json);
+
+        }
+
+        #endregion
+
+        #region (private) PostNTSTest(Request)
+
+        /// <summary>
+        /// POST /api/v1/configuration/nts/test with an optional {"host"}: ask
+        /// one time server everything there is to ask, and say where it got
+        /// to.
+        /// </summary>
+        /// <remarks>
+        /// "Sync now" says whether the group has a time; this says where one
+        /// server got to - the name, the TCP connection, the TLS handshake and
+        /// the certificate it presented, the key exchange, the authenticated
+        /// request - each step timed and in the answer, so that a server that
+        /// is merely slow can be told from one that is refusing.
+        ///
+        /// The host is optional and names the server to ask; left out, it is
+        /// the configured one. The key exchange may name NTP servers other
+        /// than itself, which is the other reason this takes a host at all.
+        ///
+        /// At the diagnostics permission, with the other tests. Like "Sync
+        /// now", it does not step the clock.
+        /// </remarks>
+        private async Task<HTTPResponse> PostNTSTest(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permissions.RunDiagnostics, true, out var user, out var refused))
+                return refused;
+
+            if (!TryParseJSONObject(Request, out var json, out var errorResponse))
+                return errorResponse;
+
+            if (json["host"] is JToken hostToken && hostToken.Type is not (JTokenType.String or JTokenType.Null))
+                return ErrorJSON(Request, HTTPStatusCode.BadRequest, "'host' must be the name or the address of a time server.");
+
+            var host = json.Value<String>("host")?.Trim();
+
+            if (host?.Length == 0)
+                host = null;
+
+            Log.Info($"'{user.Id}' asked this local controller to test {(host is null ? "its time server" : $"the time server '{host}'")}.",
+                     "nts", "test", "web");
+
+            return JSONResponse(
+                       Request,
+                       HTTPStatusCode.OK,
+                       await Controller.TestTimeServerAsync(host, Request.CancellationToken)
+                   );
 
         }
 

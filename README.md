@@ -39,8 +39,8 @@ below the node's `/api`.
 | Page | What it changes | Permission |
 |------|-----------------|------------|
 | Configuration | nothing - it answers "what am I running" | `readConfiguration` |
-| DNS client | the name servers and how they are asked; a test lookup | `changeNetworkSettings`, `runDiagnostics` |
-| NTS client | the time servers and the rules for believing them; a synchronisation | `changeNetworkSettings`, `runDiagnostics` |
+| DNS client | the name servers and how they are asked; a test lookup, of all of them or of one | `changeNetworkSettings`, `runDiagnostics` |
+| NTS client | the time servers and the rules for believing them; a synchronisation, and a test of one server step by step | `changeNetworkSettings`, `runDiagnostics` |
 | Logs | nothing - it reads | `readConfiguration` |
 
 Everything on the DNS and NTS pages takes effect the moment it is saved, for

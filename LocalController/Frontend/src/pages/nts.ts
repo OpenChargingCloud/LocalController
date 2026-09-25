@@ -1,4 +1,4 @@
-﻿import { api, type Clock, type NTSConfiguration, type NTSServerEntry, type NTSServerResult, type NTSSyncResult, type NTSTimeSource, type NTSUpdate } from '../api/client';
+﻿import { api, type Clock, type NTSConfiguration, type NTSServerEntry, type NTSServerResult, type NTSSyncResult, type NTSTimeSource, type NTSUpdate, type TimeServerTest } from '../api/client';
 import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '../html';
 import type { Page } from '../router';
@@ -450,6 +450,10 @@ export const ntsPage: Page = {
                     </div>
 
                     <div class="actions">
+                        <button type="button" class="btn small" data-test="${index}"
+                                title="Ask this server, and only this one" ${mayTest ? '' : html`disabled`}>
+                            <i class="fa-solid fa-list-check"></i> Test
+                        </button>
                         <button type="button" class="btn small" data-edit="${index}" ${mayChange ? '' : html`disabled`}>
                             <i class="fa-solid fa-pen"></i> Edit
                         </button>
@@ -536,7 +540,7 @@ export const ntsPage: Page = {
 
             const dialog = document.createElement('dialog');
 
-            dialog.className = 'server-dialog';
+            dialog.className = 'test-dialog server-dialog';
 
             document.body.appendChild(dialog);
 
@@ -682,6 +686,87 @@ export const ntsPage: Page = {
 
 
         /**
+         * Ask one time server everything, in a dialog, line by line.
+         *
+         * "Sync now" answers whether the group has a time; this answers where
+         * one server got to, which is the question somebody has when it did
+         * not. The steps are the ones the exchange actually has - the name, the
+         * TCP connection, the TLS handshake and the certificate it presented,
+         * the key exchange, the authenticated request - and each is timed, so a
+         * server that is merely slow can be told from one that is refusing.
+         *
+         * @param host  which server, asked on the ports it is configured with.
+         *              Sent as it is read, without the root's dot, because the
+         *              local controller writes it into the log as it was sent.
+         */
+        async function testServer(host: string): Promise<void> {
+
+            const dialog = document.createElement('dialog');
+
+            dialog.className = 'test-dialog';
+
+            render(dialog, html`
+                <h2>Asking ${readable(host)}</h2>
+                <div class="test-steps" id="test-steps">
+                    <div class="loading">Name, key exchange, authenticated time request ...</div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn" id="test-close" disabled>Close</button>
+                </div>
+            `);
+
+            document.body.appendChild(dialog);
+            dialog.showModal();
+
+            // Shut it and take it away, as the server dialog above is.
+            const dismiss = (): void => { dialog.close(); dialog.remove(); };
+
+            dialog.addEventListener('close',  dismiss);
+            dialog.addEventListener('cancel', dismiss);
+
+            const close = must<HTMLButtonElement>(dialog, '#test-close');
+
+            close.addEventListener('click', dismiss);
+
+            let result: TimeServerTest;
+
+            try
+            {
+                result = await api.nts.test(host);
+            }
+            catch (problem)
+            {
+                render(must<HTMLElement>(dialog, '#test-steps'), html`
+                    <div class="error-box">The test could not be run: ${errorMessage(problem)}</div>
+                `);
+                close.disabled = false;
+                close.focus();
+                return;
+            }
+
+            render(must<HTMLElement>(dialog, '#test-steps'), html`
+                <div class="${result.ok ? 'notice' : 'error-box'}">
+                    ${result.ok
+                          ? html`${readable(result.host)} answered. ${result.runtime_ms} ms altogether.`
+                          : html`${readable(result.host)} did not answer. ${result.runtime_ms} ms altogether.`}
+                </div>
+                <ol class="test-log">
+                    ${result.steps.map(step => html`
+                        <li class="level-${step.level}">
+                            <span class="at">+${step.at_ms} ms</span>
+                            <span class="text">${step.text}</span>
+                        </li>
+                    `)}
+                </ol>
+            `);
+
+            close.disabled = false;
+            close.focus();
+
+        }
+
+
+        /**
          * Listen on the parts rather than on what is in them, because the
          * parts are redrawn one at a time and a listener on a button that was
          * redrawn away would be listening to nothing.
@@ -710,6 +795,15 @@ export const ntsPage: Page = {
 
                 else if (button.dataset.edit !== undefined)
                     editServer(Number(button.dataset.edit));
+
+                else if (button.dataset.test !== undefined) {
+
+                    const source = current?.timeSources?.[Number(button.dataset.test)];
+
+                    if (source !== undefined)
+                        void testServer(readable(source.hostname));
+
+                }
 
             });
 

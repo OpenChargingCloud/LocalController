@@ -263,6 +263,84 @@ input, textarea, select {
     padding:  1rem 0;
 }
 
+// The dialog a test happens in: a time server's, or a name server's lookup.
+//
+// A dialog rather than a panel on the page: a test takes seconds and says a
+// dozen things, and the one question somebody has while it runs is "what is
+// it doing" - which is hard to ask of a box competing with four other cards.
+// It is modal for the same reason, and it closes only when somebody closes it,
+// because the log is the point.
+.test-dialog {
+
+    width:            min(46rem, 92vw);
+    max-height:       82vh;
+    overflow-y:       auto;
+    border:           1px solid $color-border;
+    border-radius:    $radius;
+    padding:          1.1rem 1.25rem;
+    background:       $color-surface;
+    color:            $color-text;
+    box-shadow:       0 12px 40px rgba(0, 0, 0, 0.22);
+
+    &::backdrop {
+        background:   rgba(15, 23, 42, 0.45);
+    }
+
+    h2 {
+        margin:       0 0 0.15rem;
+        font-size:    1.05rem;
+    }
+
+    > .hint {
+        margin:       0 0 0.85rem;
+        word-break:   break-all;
+    }
+
+}
+
+// What happened, in the order it happened. The elapsed time is on the left in
+// one column so that a step that took a second is visible as a gap rather
+// than as a number somebody has to subtract.
+.test-log {
+
+    list-style:       none;
+    margin:           0.85rem 0 0;
+    padding:          0;
+    font-size:        0.85rem;
+
+    li {
+
+        display:      grid;
+        grid-template-columns: 5.5rem 1fr;
+        gap:          0.6rem;
+        padding:      0.3rem 0.45rem;
+        border-left:  3px solid transparent;
+        border-radius: 0 $radius $radius 0;
+
+        + li {
+            border-top: 1px solid $color-border;
+        }
+
+    }
+
+    .at {
+        color:        $color-muted;
+        font-family:  $font-mono;
+        font-size:    0.78rem;
+        text-align:   right;
+        white-space:  nowrap;
+    }
+
+    .text {
+        word-break:   break-word;
+    }
+
+    .level-notice   { border-left-color: $color-accent; }
+    .level-warning  { border-left-color: #f59e0b; background: $color-warn-bg;  }
+    .level-error    { border-left-color: $color-error; background: $color-error-bg; }
+
+}
+
 
 // Sign-in
 
@@ -777,26 +855,14 @@ input, textarea, select {
     }
 }
 
-// The dialog a time server is added, changed or deleted in.
+// The dialog a time server is added, changed or deleted in: the test's dialog,
+// narrower, because it holds a form and not a log.
 .server-dialog {
 
     width:            min(30rem, 92vw);
-    max-height:       82vh;
-    overflow-y:       auto;
-    border:           1px solid $color-border;
-    border-radius:    $radius;
-    padding:          1.1rem 1.25rem;
-    background:       $color-surface;
-    color:            $color-text;
-    box-shadow:       0 12px 40px rgba(0, 0, 0, 0.22);
-
-    &::backdrop {
-        background:   rgba(15, 23, 42, 0.45);
-    }
 
     h2 {
         margin:       0 0 0.85rem;
-        font-size:    1.05rem;
         display:      flex;
         align-items:  center;
         gap:          0.5rem;

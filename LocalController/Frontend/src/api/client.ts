@@ -144,6 +144,10 @@ export interface DNSRecord {
 /** What a test query brought back. */
 export interface DNSQueryResult {
     name:           string;
+    /** Which single name server was asked, or null when all of them were. */
+    asked?:         string | null;
+    /** Set when an address was typed and a reverse name was asked for instead. */
+    turnedAround?:  string | null;
     recordTypes:    string[];
     ok:             boolean;
     error?:         string;
@@ -156,6 +160,22 @@ export interface DNSQueryResult {
     timedOut?:      boolean;
     answers:        DNSRecord[];
     more?:          number;
+}
+
+
+/** One line of what happened while a time server was being asked. */
+export interface TimeServerTestStep {
+    at_ms:  number;
+    level:  'info' | 'notice' | 'warning' | 'error';
+    text:   string;
+}
+
+/** What came of asking one time server everything. */
+export interface TimeServerTest {
+    host:        string;
+    ok:          boolean;
+    runtime_ms:  number;
+    steps:       TimeServerTestStep[];
 }
 
 
@@ -754,14 +774,27 @@ export const api = {
         get:   ()                    => request<DNSConfiguration>('GET', '/configuration/dns'),
         /** Only the fields given are changed; the answer is the whole configuration as it now stands. */
         save:  (update: DNSUpdate)   => request<DNSConfiguration>('PUT', '/configuration/dns', update),
-        /** Make the controller look a name up. A POST because it sends traffic. */
-        query: (name: string, recordTypes: string[]) =>
-                   request<DNSQueryResult>('POST', '/configuration/dns/query', { name, recordTypes })
+        /**
+         * Make the controller look a name up. A POST because it sends traffic.
+         *
+         * @param server  the place in the list of the one name server to ask,
+         *                or undefined to resolve the way the controller resolves
+         *                anything else, trying them in turn.
+         */
+        query: (name: string, recordTypes: string[], server?: number) =>
+                   request<DNSQueryResult>('POST', '/configuration/dns/query', { name, recordTypes, server })
     },
 
     nts: {
         get:   ()                    => request<NTSConfiguration>('GET', '/configuration/nts'),
         save:  (update: NTSUpdate)   => request<NTSConfiguration>('PUT', '/configuration/nts', update),
+        /**
+         * Ask one time server everything: the name, the key exchange, the
+         * authenticated NTP request, each one written down as it happens.
+         *
+         * @param host  the server to ask, or undefined for the configured one.
+         */
+        test:  (host?: string)       => request<TimeServerTest>('POST', '/configuration/nts/test', { host }),
         /** One key exchange and one authenticated NTP request, with every step in the log. */
         sync:  ()                    => request<NTSConfiguration>('POST', '/configuration/nts/sync', {})
     },
