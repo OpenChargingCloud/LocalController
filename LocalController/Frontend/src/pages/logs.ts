@@ -10,15 +10,17 @@ import { formatTime, formatTimestamp, isAtLeast } from '../ui';
  * Everything that happens inside the local controller, as it happens.
  *
  * The entries arrive over one Server-Sent Events stream and go in at the top,
- * newest first, so the line worth reading is the one that is already on screen;
- * the filters work on what is already in the browser, so changing one costs
- * nothing and asks the local controller for nothing. A list that is scrolled
- * to the top follows along; scrolling down stops that, which is what somebody
- * reading an older line wants - and the button at the bottom brings them back.
+ * newest first, so that what just happened is where the eye already is and
+ * nobody has to chase a growing list downwards. The filters work on what is
+ * already in the browser, so changing one costs nothing and asks the local controller
+ * for nothing. A list that is scrolled to the top follows along; scrolling
+ * down stops that, which is what somebody reading an older line wants - and
+ * the button that floats over the top of the list brings them back.
  *
  * The store keeps its entries oldest first and is left alone: that order is
  * what its own de-duplication and its bounded trim are written against. Only
- * what is drawn is reversed, at the three places that map a line to an entry.
+ * what is drawn is reversed, by drawOrder and entryAt in logs/order.ts, which
+ * the three places that map a line to an entry all go through.
  */
 export const logsPage: Page = {
 
@@ -65,7 +67,7 @@ export const logsPage: Page = {
 
             <div class="log-pane">
 
-                <button type="button" id="to-top" class="btn small jump-newest" hidden>
+                <button type="button" id="to-newest" class="btn small jump-newest" hidden>
                     <i class="fa-solid fa-arrow-up"></i>
                     Jump to the newest
                 </button>
@@ -92,7 +94,7 @@ export const logsPage: Page = {
         const errorNote   = must<HTMLElement>       (content, '#log-error');
         const tagBox      = must<HTMLElement>       (content, '#tags');
         const counts      = must<HTMLElement>       (content, '#counts');
-        const toTop       = must<HTMLButtonElement> (content, '#to-top');
+        const toNewest    = must<HTMLButtonElement> (content, '#to-newest');
         const search      = must<HTMLInputElement>  (content, '#search');
         const level       = must<HTMLSelectElement> (content, '#level');
         const follow      = must<HTMLInputElement>  (content, '#follow');
@@ -166,16 +168,16 @@ export const logsPage: Page = {
                    `</div>`;
         }
 
-        function atTop(): boolean {
+        function atNewest(): boolean {
             // A few pixels of slack: a list that is one rounding error short
             // of the top is, to the person reading it, at the top.
             return list.scrollTop <= 24;
         }
 
-        function scrollToTop(): void {
-            list.scrollTop = 0;
-            scrollDebt     = 0;
-            toTop.hidden   = true;
+        function scrollToNewest(): void {
+            list.scrollTop  = 0;
+            scrollDebt      = 0;
+            toNewest.hidden = true;
         }
 
         /**
@@ -190,15 +192,13 @@ export const logsPage: Page = {
             // Everything is drawn again, so nothing is owed from before.
             scrollDebt = 0;
 
-            // The store keeps its entries oldest first, because that is the
-            // order their ids come in and the order the next batch continues;
-            // only what is drawn is turned around.
+            // Reversed for drawing only; the store keeps them oldest first.
             lineBox.innerHTML = drawOrder(logs.entries).map(lineHTML).join('');
 
             applyFilters();
 
             if (follow.checked)
-                scrollToTop();
+                scrollToNewest();
 
             drawTags();
 
@@ -207,18 +207,21 @@ export const logsPage: Page = {
         /**
          * Which of the lines already drawn are wanted.
          *
-         * A filter used to rebuild the whole list, and most of that was work
-         * already done: the same lines built again from the same entries, and
-         * every timestamp put through the locale formatter twice more. At 2207
-         * entries that was 144 ms of JavaScript for one keystroke in the search
-         * box, and it grows with the log - on a page whose whole point is that
-         * filtering costs nothing.
+         * A filter used to rebuild the whole list, which measured 597 ms for
+         * one keystroke in the search box at 1959 entries, the layout that
+         * follows included - more than half a second of frozen page per
+         * character, and it grows with the log. Most of that was work already
+         * done: the same lines built again from the same entries, and every
+         * timestamp put through the locale formatter a second time.
          *
-         * A line is now made once and then only told whether it is wanted,
-         * which measured 2 ms for the same 2207. What the browser spends laying
-         * the list out again afterwards is untouched, and was 47 ms either way:
-         * this buys back the work the page was doing twice, not the work of
-         * showing the answer.
+         * A line is now made once and then only told whether it is wanted.
+         * One keystroke then measured 50 ms at 2033 entries, layout included
+         * as before: twelve times less. Deciding which lines are wanted is
+         * the least of it, 2 ms for the same 1959; the rest is the browser
+         * laying the list out again. Measured once more at 2207 entries, the
+         * JavaScript alone went from 144 ms to 2 ms, and the layout took 47 ms
+         * either way: this buys back the work the page was doing twice, not
+         * the work of showing the answer.
          */
         function applyFilters(): void {
 
@@ -254,39 +257,36 @@ export const logsPage: Page = {
         }
 
         /** Only what is new: the usual case, and the cheap one. */
-        function prepend(added: LogEntry[]): void {
+        function append(added: LogEntry[]): void {
 
             if (added.length > 0) {
 
-                const stick = follow.checked && atTop();
+                const stick = follow.checked && atNewest();
 
-                // Where the line that is at the top sits right now. Everything
-                // below it is about to be pushed down by whatever goes in
-                // above, and how far this one moved is that distance - and
-                // asking it this way answers in fractions of a pixel.
-                //
-                // The obvious way is the difference of two scrollHeights, and
-                // that one is rounded to whole pixels. Half a pixel lost per
-                // batch is invisible in any one of them and is still there
-                // after the next thousand, which on a busy log is an hour. Nor
-                // would it be the right number any more: the trimming below
-                // takes lines off the bottom, and the filtering hides some of
-                // what just went in.
-                const anchor    = lineBox.firstElementChild;
-                const anchorWas = anchor?.getBoundingClientRect().top ?? 0;
+                // Where the line that is at the top right now sits on the
+                // screen. Everything below is about to be pushed down by
+                // whatever goes in above it, and how far this one moved is
+                // the answer - scrollHeight would not be, because the
+                // trimming below takes lines off the bottom and the
+                // filtering hides some of what just went in. Asked of the
+                // rectangle rather than offsetTop, which rounds to whole
+                // pixels and leaves a few behind on every batch.
+                const anchor     = lineBox.firstElementChild;
+                const anchorWas  = anchor?.getBoundingClientRect().top ?? 0;
 
-                // In the order everything else is drawn in, the batch included:
-                // a burst that arrives in one event would otherwise sit at the
-                // top back to front.
+                // Newest first inside the batch as well, so that a burst of
+                // entries reads top-down the way a single one does - drawn by
+                // the same drawOrder as the rest of the list, so that the two
+                // cannot come to disagree.
                 const batch = drawOrder(added);
 
                 lineBox.insertAdjacentHTML('afterbegin', batch.map(lineHTML).join(''));
 
                 // The local controller keeps a bounded log and so does this page; what
-                // fell out of the store has to leave the list as well - and that is
-                // the oldest, which is now the last line rather than the first.
-                // The lines and the entries stay the same length, which is what
-                // lets a filter be applied by position above.
+                // fell out of the store has to leave the list as well. That is
+                // the oldest entry, which is now the last line rather than the
+                // first. The lines and the entries stay the same length, which
+                // is what lets a filter be applied by position above.
                 while (lineBox.childElementCount > logs.entries.length) {
 
                     if (lineBox.lastElementChild?.classList.contains('filtered-out') === false)
@@ -319,15 +319,16 @@ export const logsPage: Page = {
                 if (any) {
 
                     if (stick)
-                        scrollToTop();
+                        scrollToNewest();
 
                     else {
-                        // Lines going in above the viewport push everything
-                        // below them down, so the older line somebody stopped
-                        // to read would walk off the screen at the speed the
-                        // log fills. Put the view back where it was, by
-                        // exactly how far that line moved and whatever the
-                        // last correction was short.
+                        // Put the view back by exactly as far as that line
+                        // moved, and whatever the last correction was short,
+                        // so the older one somebody stopped to read stays
+                        // where they are looking instead of walking off the
+                        // top at the speed the log fills. Measured here
+                        // rather than left to the browser: see
+                        // overflow-anchor in app.scss.
                         //
                         // Asked after the filtering above rather than before
                         // it: a hidden line has no height, so a batch the
@@ -355,7 +356,7 @@ export const logsPage: Page = {
 
                         }
 
-                        toTop.hidden = false;
+                        toNewest.hidden = false;
                     }
 
                 }
@@ -434,13 +435,13 @@ export const logsPage: Page = {
 
         search  .addEventListener('input',  () => applyFilters());
         level   .addEventListener('change', () => applyFilters());
-        follow  .addEventListener('change', () => { if (follow.checked) scrollToTop(); });
-        toTop   .addEventListener('click',  () => scrollToTop());
+        follow  .addEventListener('change', () => { if (follow.checked) scrollToNewest(); });
+        toNewest.addEventListener('click',  () => scrollToNewest());
         clear   .addEventListener('click',  () => logs.clear());
 
         list.addEventListener('scroll', () => {
-            if (atTop())
-                toTop.hidden = true;
+            if (atNewest())
+                toNewest.hidden = true;
         });
 
         const stopListening = logs.onChange(event => {
@@ -448,7 +449,7 @@ export const logsPage: Page = {
             switch (event.type) {
 
                 case 'entries':
-                    prepend(event.added);
+                    append(event.added);
                     break;
 
                 case 'reloaded':
