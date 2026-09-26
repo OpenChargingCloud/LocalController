@@ -121,6 +121,19 @@ namespace cloud.charging.open.LocalController
         /// </summary>
         public static readonly TimeSpan CertificateCheckEvery = TimeSpan.FromHours(24);
 
+        /// <summary>
+        /// Where a connection keeps which charging station this controller let
+        /// in on it.
+        /// </summary>
+        /// <remarks>
+        /// Kept by this controller rather than read from the connection's
+        /// Login. The server leaves the checking to <see cref="ValidateStation"/>,
+        /// and Hermod sets a Login only where it authenticated the upgrade
+        /// itself - so to Hermod every one of these connections is anonymous,
+        /// and the log said "'?' is connected" of a station it had just let in.
+        /// </remarks>
+        private const String StationIdKey = "localController.chargingStation";
+
         #endregion
 
         #region Properties
@@ -594,6 +607,8 @@ namespace cloud.charging.open.LocalController
                     Log.Info($"The charging station '{who}' signed in from {from} with a certificate (security profile 3).",
                              "ocpp", "station", "auth");
 
+                Connection.TryAddCustomData(StationIdKey, who);
+
                 return Task.FromResult<HTTPResponse?>(null);
 
             }
@@ -642,6 +657,8 @@ namespace cloud.charging.open.LocalController
                     Log.Info($"The charging station '{id}' signed in from {from} with a password (security profile {profile}).",
                              "ocpp", "station", "auth");
 
+                Connection.TryAddCustomData(StationIdKey, id);
+
                 return Task.FromResult<HTTPResponse?>(null);
 
             }
@@ -679,6 +696,8 @@ namespace cloud.charging.open.LocalController
                     Log.Info($"The charging station '{id}' signed in from {from} with a one-time token (security profile {profile}" +
                              $"{(ocppServerTLS ? "" : ", on an unencrypted port, so the token is replayable while it stands")}).",
                              "ocpp", "station", "auth");
+
+                Connection.TryAddCustomData(StationIdKey, id);
 
                 return Task.FromResult<HTTPResponse?>(null);
 
@@ -865,7 +884,7 @@ namespace cloud.charging.open.LocalController
 
                 if (ocppServerSettings.Logging?.Connections != false)
                     Log.Notice(
-                        $"The charging station '{connection.Login ?? "?"}' is connected from {connection.RemoteSocket}" +
+                        $"The charging station '{StationOn(connection)}' is connected from {connection.RemoteSocket}" +
                         $" ({selectedSubprotocol ?? "no subprotocol"}).",
                         "ocpp", "station"
                     );
@@ -878,7 +897,7 @@ namespace cloud.charging.open.LocalController
 
                 if (ocppServerSettings.Logging?.Connections != false)
                     Log.Notice(
-                        $"The charging station '{connection.Login ?? "?"}' went away ({statusCode}{(reason.IsNullOrEmpty() ? "" : $": {reason}")}).",
+                        $"The charging station '{StationOn(connection)}' went away ({statusCode}{(reason.IsNullOrEmpty() ? "" : $": {reason}")}).",
                         "ocpp", "station"
                     );
 
@@ -928,7 +947,7 @@ namespace cloud.charging.open.LocalController
             Server.OnPingMessageReceived += (timestamp, server, connection, frame, eventTrackingId, pingMessage, cancellationToken) => {
 
                 if (ocppServerSettings.Logging?.Pings == true)
-                    Log.Debug($"A ping came from the charging station '{connection.Login ?? "?"}'.", "ocpp", "station", "ping");
+                    Log.Debug($"A ping came from the charging station '{StationOn(connection)}'.", "ocpp", "station", "ping");
 
                 return Task.CompletedTask;
 
@@ -937,6 +956,18 @@ namespace cloud.charging.open.LocalController
             #endregion
 
         }
+
+        #endregion
+
+        #region (private static) StationOn(Connection)
+
+        /// <summary>
+        /// Which charging station a connection is, as this controller let it
+        /// in - or, for one it has not let in, where it comes from.
+        /// </summary>
+        private static String StationOn(WebSocketServerConnection Connection)
+
+            => Connection.TryGetCustomData(StationIdKey) as String ?? Connection.RemoteSocket.ToString();
 
         #endregion
 
@@ -969,7 +1000,7 @@ namespace cloud.charging.open.LocalController
 
             var action  = Message.Count > 2 ? Message[2]?.Value<String>() : null;
             var id      = Message.Count > 1 ? Message[1]?.Value<String>() : null;
-            var station = Connection.Login ?? Connection.RemoteSocket.ToString();
+            var station = StationOn(Connection);
 
             if (logging.PayloadsAt(TimeProvider.GetUtcNow()))
                 Log.Log(
