@@ -59,10 +59,12 @@ The line up to the CSMS is dialled when the controller starts, and kept up by
 the WebSocket client it was dialled with. A CSMS that is not there yet, or goes
 away later - restarted, deployed again - is dialled again by itself: after
 `reconnectInitialDelay` seconds of the `csms` section at first, and twice as
-long after every attempt that fails, up to `reconnectMaxDelay`. An answer that
-means no, such as a wrong password, is not asked again before the controller is
-restarted. The CSMS page says which of the two it is, and since when the line
-is up.
+long after every attempt that fails, up to `reconnectMaxDelay`. So is one that
+answers "not yet" - 408, 429, or a 5xx from a proxy whose CSMS is still
+starting - though not before a `Retry-After` it sends, five minutes at most. An
+answer that means no, such as a wrong password, is not asked again before the
+controller is restarted, whether it comes at the start or on the way back. The
+CSMS page says which of these it is, and since when the line is up.
 
 
 ## Running it

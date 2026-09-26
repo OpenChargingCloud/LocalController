@@ -263,12 +263,16 @@ namespace cloud.charging.open.LocalController
 
                     // An attempt that found nothing listening, or no address for
                     // the name, has made no request, and the answer to it is not
-                    // the CSMS's: nobody refused anything.
+                    // the CSMS's: nobody refused anything. Nor has a CSMS that
+                    // answers "not yet" - 408, 429, a 5xx from a proxy whose CSMS
+                    // is still starting - which the client comes back from.
                     var why          = response?.HTTPBodyAsJSONObject?["message"]?.Value<String>();
 
                     csmsLastProblem  = (response?.HTTPRequest is null
                                            ? $"The CSMS at {url} could not be reached{(why is null ? "" : $": {why.TrimEnd('.')}")}."
-                                           : $"The CSMS at {url} refused this local controller: {response.HTTPStatusCode}.") +
+                                           : TheCSMSClient()?.KeepsTrying == true
+                                                 ? $"The CSMS at {url} cannot let this local controller in yet: {response.HTTPStatusCode}."
+                                                 : $"The CSMS at {url} refused this local controller: {response.HTTPStatusCode}.") +
                                        WhatComesNext();
 
                     Log.Warning(csmsLastProblem, "ocpp", "csms", "auth");
@@ -315,10 +319,18 @@ namespace cloud.charging.open.LocalController
             {
                 try
                 {
-                    // A close asked for here ends the client's dialling as well:
-                    // it is not a loss to come back from.
                     if (client is org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient webSocketClient)
+                    {
+
+                        // Its policy first. A close asked for here ends the
+                        // client's dialling anyway; without a policy it is also
+                        // known afterwards to have been hung up here, so that an
+                        // attempt it cuts off is not taken for the CSMS's no.
+                        webSocketClient.ReconnectPolicy = null;
+
                         await webSocketClient.Close();
+
+                    }
                 }
                 catch (Exception e)
                 {
@@ -415,6 +427,42 @@ namespace cloud.charging.open.LocalController
                                "ocpp", "csms", "auth");
 
                     wasUp = true;
+
+                    return Task.CompletedTask;
+
+                };
+
+                // And told of every answer, for the one that ends the dialling: a
+                // CSMS that turns this controller away - a password changed at
+                // the other end, an address that is no longer there - is not
+                // asked again, and the line went on saying "trying again" of a
+                // client that had stopped. Not for a client this controller has
+                // hung up, which it took the policy away from first: an attempt
+                // that is cut off ends, possibly after the controller has
+                // stopped, with an answer of the client's own making, which is
+                // nobody's refusal.
+                webSocketClient.ResponseLogDelegate += (timestamp, sender, request, response) => {
+
+                    if (webSocketClient.ReconnectPolicy is null                       ||
+                        response.HTTPStatusCode == HTTPStatusCode.SwitchingProtocols  ||
+                        webSocketClient.KeepsTrying)
+                    {
+                        return Task.CompletedTask;
+                    }
+
+                    var refused = $"The CSMS at {URL} refused this local controller: {response.HTTPStatusCode}. " +
+                                   "It is not dialled again before this local controller is restarted.";
+
+                    csmsConnected       = false;
+                    csmsConnectedSince  = null;
+
+                    // Said once: the answer to the first attempt may arrive here
+                    // as well, after ConnectCSMS() has said the same of it.
+                    if (csmsLastProblem != refused)
+                    {
+                        csmsLastProblem = refused;
+                        Log.Warning(refused, "ocpp", "csms", "auth");
+                    }
 
                     return Task.CompletedTask;
 

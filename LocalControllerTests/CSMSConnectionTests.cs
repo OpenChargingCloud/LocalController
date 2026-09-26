@@ -47,6 +47,12 @@ namespace cloud.charging.open.LocalController.Tests
         private const String ThePassword = "a-password-long-enough-for-ocpp";
 
         /// <summary>
+        /// What a CSMS knows 'lc002' by once its password has been changed at
+        /// its end, and not at this one.
+        /// </summary>
+        private const String AnotherPassword = "another-password-long-enough-for-ocpp";
+
+        /// <summary>
         /// How long the controller below may take to reach a CSMS that has come
         /// up. It dials again a second after a loss at first, and never more
         /// than two apart - see AControllerThatDials(DialsAgainQuickly).
@@ -106,8 +112,10 @@ namespace cloud.charging.open.LocalController.Tests
         /// A controller standing in for the CSMS, listening on the given port
         /// and ready to let 'lc002' in with a password: built, not started.
         /// </summary>
+        /// <param name="Password">The password it lets 'lc002' in with.</param>
         private static LocalController ACSMS(String  Directory,
-                                             UInt16  Port)
+                                             UInt16  Port,
+                                             String  Password  = ThePassword)
         {
 
             var csms = TestControllers.New(
@@ -124,7 +132,7 @@ namespace cloud.charging.open.LocalController.Tests
                            )
                        );
 
-            if (!csms.StationLogins.TrySetPassword("lc002", ThePassword, null, "The controller below", out _, out var error))
+            if (!csms.StationLogins.TrySetPassword("lc002", Password, null, "The controller below", out _, out var error))
                 throw new InvalidOperationException($"The test's own upstream login was refused: {error}");
 
             return csms;
@@ -201,6 +209,47 @@ namespace cloud.charging.open.LocalController.Tests
             {
                 await Task.Delay(100);
             }
+
+        }
+
+        #endregion
+
+        #region (private static) TheClientOf(Controller)
+
+        /// <summary>
+        /// The client a controller's node made for its line up to the CSMS.
+        /// </summary>
+        private static org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient TheClientOf(LocalController Controller)
+
+            => Controller.Node.OCPPWebSocketClients.
+                   OfType<org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient>().
+                   Single();
+
+        #endregion
+
+        #region (private) UntilItHasGivenUp(Client)
+
+        /// <summary>
+        /// Wait until the client has stopped dialling, or until BackWithin is
+        /// up - and then, for a moment, until the controller says it is not
+        /// dialled again.
+        /// </summary>
+        /// <remarks>
+        /// In that order, because the client stops before anything is told of
+        /// the answer that stopped it.
+        /// </remarks>
+        private async Task UntilItHasGivenUp(org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient Client)
+        {
+
+            var giveUp = DateTimeOffset.UtcNow + BackWithin;
+
+            while (DateTimeOffset.UtcNow < giveUp && Client.KeepsTrying)
+                await Task.Delay(100);
+
+            var saidBy = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(2);
+
+            while (DateTimeOffset.UtcNow < saidBy && downstream?.CSMSLastProblem?.Contains("not dialled again") != true)
+                await Task.Delay(50);
 
         }
 
@@ -424,9 +473,7 @@ namespace cloud.charging.open.LocalController.Tests
             // And what it says stays what the first attempt found once the
             // client has tried again, rather than turning into a connection
             // "lost" that never was: twice, so that the first time has been told.
-            var client          = downstream.Node.OCPPWebSocketClients.
-                                      OfType<org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient>().
-                                      Single();
+            var client          = TheClientOf(downstream);
 
             var triedBy         = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(10);
 
@@ -564,6 +611,346 @@ namespace cloud.charging.open.LocalController.Tests
             {
                 await later.DisposeAsync();
                 TestControllers.Remove(laterDirectory);
+            }
+
+        }
+
+        #endregion
+
+        #region ACSMSThatRestartsAndRefusesIsNotSaidToBeTriedAgain()
+
+        /// <summary>
+        /// A CSMS that comes back from a restart and turns this controller away
+        /// - its password changed at the other end - ends the dialling, and the
+        /// controller says so rather than that it is trying again.
+        /// </summary>
+        /// <remarks>
+        /// An answer that means no ends the client's attempts, and the line went
+        /// on saying what it had said when the connection was lost: that it was
+        /// trying again in a second or two, of a client that had stopped.
+        /// </remarks>
+        [Test]
+        public async Task ACSMSThatRestartsAndRefusesIsNotSaidToBeTriedAgain()
+        {
+
+            downstream  = AControllerThatDials(DialsAgainQuickly: true);
+
+            await downstream.Start();
+
+            Assert.That(downstream.CSMSConnected, Is.True, downstream.CSMSLastProblem);
+
+            var client  = TheClientOf(downstream);
+
+            await upstream.DisposeAsync();
+
+            // The same CSMS again, with another password for this controller.
+            upstream    = ACSMS(upstreamDirectory, csmsPort, AnotherPassword);
+
+            await upstream.Start();
+            await UntilItHasGivenUp(client);
+
+            Assert.Multiple(() => {
+                Assert.That(client.KeepsTrying,          Is.False,
+                            "The client still dials a CSMS that turns it away, so this test tests nothing.");
+                Assert.That(downstream.CSMSConnected,    Is.False);
+                Assert.That(downstream.CSMSLastProblem,  Does.Contain("refused").And.Contain("not dialled again"),
+                            "The controller says of a CSMS that turned it away that it is dialled again.");
+            });
+
+        }
+
+        #endregion
+
+        #region ACSMSThatComesUpAndRefusesIsNotSaidToBeTriedAgain()
+
+        /// <summary>
+        /// The same for a CSMS that was not there when this controller started:
+        /// once it is up and turns the controller away, the controller no longer
+        /// says that it is dialled again by itself.
+        /// </summary>
+        [Test]
+        public async Task ACSMSThatComesUpAndRefusesIsNotSaidToBeTriedAgain()
+        {
+
+            var laterPort       = TestControllers.FreePort();
+            var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
+
+            downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
+                                                       DialsAgainQuickly:  true);
+
+            await downstream.Start();
+
+            Assert.That(downstream.CSMSLastProblem, Does.Contain("dialled again by itself"),
+                        "The controller does not go on dialling, so this test tests nothing.");
+
+            var client          = TheClientOf(downstream);
+            var later           = ACSMS(laterDirectory, laterPort, AnotherPassword);
+
+            try
+            {
+
+                await later.Start();
+                await UntilItHasGivenUp(client);
+
+                Assert.Multiple(() => {
+                    Assert.That(client.KeepsTrying,          Is.False,
+                                "The client still dials a CSMS that turns it away, so this test tests nothing.");
+                    Assert.That(downstream.CSMSConnected,    Is.False);
+                    Assert.That(downstream.CSMSLastProblem,  Does.Contain("refused").And.Contain("not dialled again"),
+                                "The controller says of a CSMS that turned it away that it is dialled again.");
+                });
+
+            }
+            finally
+            {
+                await later.DisposeAsync();
+                TestControllers.Remove(laterDirectory);
+            }
+
+        }
+
+        #endregion
+
+        #region ACSMSStillStartingIsNotSaidToHaveRefused()
+
+        /// <summary>
+        /// A CSMS behind a reverse proxy that answers 503 while the CSMS is
+        /// still starting has not said no: the controller goes on dialling, does
+        /// not say that it was turned away, and gets through once the CSMS is up.
+        /// </summary>
+        /// <remarks>
+        /// The other side of the answer that ends the dialling. 408, 429 and the
+        /// 5xx are what a server says while it cannot yet, and the client comes
+        /// back from them - so only an answer after which the client has stopped
+        /// is one this controller may call final.
+        /// </remarks>
+        [Test]
+        public async Task ACSMSStillStartingIsNotSaidToHaveRefused()
+        {
+
+            var laterPort       = TestControllers.FreePort();
+            var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
+            var answered        = 0;
+
+            // Something on the port that answers every upgrade with 503, as a
+            // reverse proxy does while the CSMS behind it is still starting.
+            var proxy           = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, laterPort);
+
+            proxy.Start();
+
+            var answering       = Task.Run(async () => {
+
+                                      while (true)
+                                      {
+
+                                          System.Net.Sockets.TcpClient tcp;
+
+                                          try
+                                          {
+                                              tcp = await proxy.AcceptTcpClientAsync();
+                                          }
+                                          catch
+                                          {
+                                              return;
+                                          }
+
+                                          using (tcp)
+                                          {
+
+                                              var stream  = tcp.GetStream();
+                                              var buffer  = new Byte[4096];
+                                              var request = "";
+                                              var read    = 0;
+
+                                              while (!request.Contains("\r\n\r\n") &&
+                                                     (read = await stream.ReadAsync(buffer)) > 0)
+                                              {
+                                                  request += System.Text.Encoding.ASCII.GetString(buffer, 0, read);
+                                              }
+
+                                              Interlocked.Increment(ref answered);
+
+                                              await stream.WriteAsync(System.Text.Encoding.ASCII.GetBytes(
+                                                        "HTTP/1.1 503 Service Unavailable\r\n" +
+                                                        "Connection: close\r\n" +
+                                                        "Content-Length: 0\r\n\r\n"));
+
+                                          }
+
+                                      }
+
+                                  });
+
+            downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
+                                                       DialsAgainQuickly:  true);
+
+            try
+            {
+
+                await downstream.Start();
+
+                var client      = TheClientOf(downstream);
+                var giveUp      = DateTimeOffset.UtcNow + BackWithin;
+
+                while (DateTimeOffset.UtcNow < giveUp && Volatile.Read(ref answered) < 3)
+                    await Task.Delay(100);
+
+                Assert.Multiple(() => {
+                    Assert.That(Volatile.Read(ref answered),  Is.GreaterThanOrEqualTo(3),
+                                "The proxy was not asked again and again, so this test tests nothing.");
+                    Assert.That(client.KeepsTrying,           Is.True,
+                                "The client took a 503 for an answer that means no.");
+                    Assert.That(downstream.CSMSLastProblem,   Does.Not.Contain("refused").And.Not.Contain("not dialled again"),
+                                "The controller says that a CSMS still starting turned it away.");
+                });
+
+            }
+            finally
+            {
+                proxy.Stop();
+                await answering;
+            }
+
+            // And once the CSMS itself is there, on the same port.
+            var later           = ACSMS(laterDirectory, laterPort);
+
+            try
+            {
+
+                await later.Start();
+                await UntilItIsBack(later);
+
+                Assert.Multiple(() => {
+                    Assert.That(later.StationServer?.WebSocketConnections.Count(),  Is.GreaterThan(0),
+                                $"The CSMS came up behind the proxy's 503s, and the controller did not reach it within {BackWithin.TotalSeconds:F0} s.");
+                    Assert.That(downstream.CSMSConnected,                           Is.True, downstream.CSMSLastProblem);
+                });
+
+            }
+            finally
+            {
+                await later.DisposeAsync();
+                TestControllers.Remove(laterDirectory);
+            }
+
+        }
+
+        #endregion
+
+        #region HangingUpInTheMiddleOfAnAttemptIsNotARefusal()
+
+        /// <summary>
+        /// A controller stopped while an attempt of its client waits for the
+        /// CSMS to answer does not say that the CSMS turned it away.
+        /// </summary>
+        /// <remarks>
+        /// Hanging up ends the client's dialling, and the attempt it cuts off
+        /// ends with an answer of its own making - which is nobody's refusal,
+        /// however much it looks like one once the client has stopped.
+        /// </remarks>
+        [Test]
+        public async Task HangingUpInTheMiddleOfAnAttemptIsNotARefusal()
+        {
+
+            var laterPort       = TestControllers.FreePort();
+
+            downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
+                                                       DialsAgainQuickly:  true);
+
+            await downstream.Start();
+
+            Assert.That(downstream.CSMSLastProblem, Does.Contain("dialled again by itself"),
+                        "The controller does not go on dialling, so this test tests nothing.");
+
+            // Something on the port that takes the connection and the upgrade,
+            // and never answers either.
+            var asked           = 0;
+            var held            = new List<System.Net.Sockets.TcpClient>();
+            var silent          = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, laterPort);
+
+            silent.Start();
+
+            var listening       = Task.Run(async () => {
+
+                                      while (true)
+                                      {
+
+                                          System.Net.Sockets.TcpClient tcp;
+
+                                          try
+                                          {
+                                              tcp = await silent.AcceptTcpClientAsync();
+                                          }
+                                          catch
+                                          {
+                                              return;
+                                          }
+
+                                          lock (held)
+                                              held.Add(tcp);
+
+                                          var stream  = tcp.GetStream();
+                                          var buffer  = new Byte[4096];
+                                          var request = "";
+
+                                          try
+                                          {
+                                              while (!request.Contains("\r\n\r\n"))
+                                              {
+                                                  var read = await stream.ReadAsync(buffer);
+                                                  if (read == 0)
+                                                      break;
+                                                  request += System.Text.Encoding.ASCII.GetString(buffer, 0, read);
+                                              }
+                                          }
+                                          catch
+                                          { }
+
+                                          if (request.Contains("\r\n\r\n"))
+                                              Interlocked.Increment(ref asked);
+
+                                      }
+
+                                  });
+
+            try
+            {
+
+                var giveUp = DateTimeOffset.UtcNow + BackWithin;
+
+                while (DateTimeOffset.UtcNow < giveUp && Volatile.Read(ref asked) < 1)
+                    await Task.Delay(50);
+
+                Assert.That(Volatile.Read(ref asked), Is.GreaterThanOrEqualTo(1),
+                            "The controller never asked the silent end, so this test tests nothing.");
+
+                await downstream.Stop();
+
+                // The attempt that was cut off ends when its connection does,
+                // which may be after this controller has stopped - so the
+                // silent end lets go now, and what is said of it is asked for
+                // once it has had a moment to be said.
+                lock (held)
+                    foreach (var tcp in held)
+                        tcp.Dispose();
+
+                await Task.Delay(TimeSpan.FromSeconds(1));
+
+                Assert.That(downstream.CSMSLastProblem ?? "", Does.Not.Contain("refused"),
+                            "Hanging up in the middle of an attempt was said to be the CSMS's refusal.");
+
+            }
+            finally
+            {
+
+                silent.Stop();
+
+                lock (held)
+                    foreach (var tcp in held)
+                        tcp.Dispose();
+
+                await listening;
+
             }
 
         }
