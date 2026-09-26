@@ -957,6 +957,124 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region ACSMSThatNeverAnswersIsDialledAgain()
+
+        /// <summary>
+        /// A CSMS that takes the connection and the upgrade and never answers
+        /// holds neither the start nor the line: the attempt is given up after
+        /// the upgrade's own time, the client dials again, and the controller
+        /// gets through once something on the port answers.
+        /// </summary>
+        /// <remarks>
+        /// Hermod waited for the first byte of the answer without a deadline,
+        /// so such an attempt hung for good. The start waited out the request
+        /// timeout of 30 seconds, and nothing was dialled again afterwards,
+        /// while the line said that it was. Found by the charging station.
+        /// </remarks>
+        [Test]
+        public async Task ACSMSThatNeverAnswersIsDialledAgain()
+        {
+
+            var laterPort       = TestControllers.FreePort();
+            var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
+
+            // Something on the port that takes the connection and the upgrade,
+            // and never says a word.
+            var accepted        = 0;
+            var held            = new List<System.Net.Sockets.TcpClient>();
+            var silent          = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, laterPort);
+
+            silent.Start();
+
+            var listening       = Task.Run(async () => {
+
+                                      while (true)
+                                      {
+
+                                          System.Net.Sockets.TcpClient tcp;
+
+                                          try
+                                          {
+                                              tcp = await silent.AcceptTcpClientAsync();
+                                          }
+                                          catch
+                                          {
+                                              return;
+                                          }
+
+                                          lock (held)
+                                              held.Add(tcp);
+
+                                          Interlocked.Increment(ref accepted);
+
+                                      }
+
+                                  });
+
+            downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
+                                                       DialsAgainQuickly:  true);
+
+            try
+            {
+
+                var took        = System.Diagnostics.Stopwatch.StartNew();
+                await downstream.Start();
+                took.Stop();
+
+                // Long enough for the first attempt to be given up and another
+                // one to be made.
+                var giveUp      = DateTimeOffset.UtcNow + BackWithin;
+
+                while (DateTimeOffset.UtcNow < giveUp && Volatile.Read(ref accepted) < 2)
+                    await Task.Delay(100);
+
+                Assert.Multiple(() => {
+                    Assert.That(took.Elapsed,               Is.LessThan(TimeSpan.FromSeconds(10)),
+                                "The controller waited for a CSMS that never answers before it said it had started.");
+                    Assert.That(Volatile.Read(ref accepted),  Is.GreaterThanOrEqualTo(2),
+                                $"The first attempt was never given up: one connection in {BackWithin.TotalSeconds:F0} s, and nothing dialled again.");
+                });
+
+            }
+            finally
+            {
+
+                silent.Stop();
+
+                lock (held)
+                    foreach (var tcp in held)
+                        tcp.Dispose();
+
+                await listening;
+
+            }
+
+            // And once something on the port answers.
+            var later           = ACSMS(laterDirectory, laterPort);
+
+            try
+            {
+
+                await later.Start();
+                await UntilItIsBack(later);
+
+                Assert.Multiple(() => {
+                    Assert.That(later.StationServer?.WebSocketConnections.Count(),  Is.GreaterThan(0),
+                                $"A CSMS came up where one had never answered, and the controller did not reach it within {BackWithin.TotalSeconds:F0} s.");
+                    Assert.That(downstream.CSMSConnected,                           Is.True, downstream.CSMSLastProblem);
+                });
+
+            }
+            finally
+            {
+                await later.DisposeAsync();
+                TestControllers.Remove(laterDirectory);
+            }
+
+        }
+
+        #endregion
+
     }
 
 }
