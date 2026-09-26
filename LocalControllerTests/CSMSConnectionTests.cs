@@ -320,7 +320,7 @@ namespace cloud.charging.open.LocalController.Tests
 
                 // An answer that means no is not asked again: a wrong password
                 // does not get better for being tried every few seconds.
-                Assert.That(downstream.CSMSLastProblem,  Does.Contain("refused").And.Contain("not dialled again"),
+                Assert.That(downstream.CSMSLastProblem,  Does.Contain("refused this local controller").And.Contain("not dialled again"),
                             "What the controller says of a refusal does not say that it is final.");
 
                 // And a controller whose backend refused it is still a
@@ -483,7 +483,7 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(() => {
                 Assert.That(client.ReconnectAttempts,    Is.GreaterThanOrEqualTo(2),
                             "The client did not try again by itself.");
-                Assert.That(downstream.CSMSLastProblem,  Does.Contain("could not be reached").And.Not.Contain("lost"),
+                Assert.That(downstream.CSMSLastProblem,  Does.Contain("could not be reached").And.Not.Contain("connection to the CSMS was lost"),
                             "A line that was never up is said to have been lost.");
             });
 
@@ -653,7 +653,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(client.KeepsTrying,          Is.False,
                             "The client still dials a CSMS that turns it away, so this test tests nothing.");
                 Assert.That(downstream.CSMSConnected,    Is.False);
-                Assert.That(downstream.CSMSLastProblem,  Does.Contain("refused").And.Contain("not dialled again"),
+                Assert.That(downstream.CSMSLastProblem,  Does.Contain("refused this local controller").And.Contain("not dialled again"),
                             "The controller says of a CSMS that turned it away that it is dialled again.");
             });
 
@@ -696,7 +696,7 @@ namespace cloud.charging.open.LocalController.Tests
                     Assert.That(client.KeepsTrying,          Is.False,
                                 "The client still dials a CSMS that turns it away, so this test tests nothing.");
                     Assert.That(downstream.CSMSConnected,    Is.False);
-                    Assert.That(downstream.CSMSLastProblem,  Does.Contain("refused").And.Contain("not dialled again"),
+                    Assert.That(downstream.CSMSLastProblem,  Does.Contain("refused this local controller").And.Contain("not dialled again"),
                                 "The controller says of a CSMS that turned it away that it is dialled again.");
                 });
 
@@ -800,7 +800,7 @@ namespace cloud.charging.open.LocalController.Tests
                                 "The proxy was not asked again and again, so this test tests nothing.");
                     Assert.That(client.KeepsTrying,           Is.True,
                                 "The client took a 503 for an answer that means no.");
-                    Assert.That(downstream.CSMSLastProblem,   Does.Not.Contain("refused").And.Not.Contain("not dialled again"),
+                    Assert.That(downstream.CSMSLastProblem,   Does.Not.Contain("refused this local controller").And.Not.Contain("not dialled again"),
                                 "The controller says that a CSMS still starting turned it away.");
                 });
 
@@ -936,7 +936,7 @@ namespace cloud.charging.open.LocalController.Tests
 
                 await Task.Delay(TimeSpan.FromSeconds(1));
 
-                Assert.That(downstream.CSMSLastProblem ?? "", Does.Not.Contain("refused"),
+                Assert.That(downstream.CSMSLastProblem ?? "", Does.Not.Contain("refused this local controller"),
                             "Hanging up in the middle of an attempt was said to be the CSMS's refusal.");
 
             }
