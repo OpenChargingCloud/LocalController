@@ -5,7 +5,7 @@ import type { Page } from '../router';
 import { shell } from '../shell';
 import { errorMessage, formatValue, humanizeKey, whileSaving } from '../ui';
 import { typedSinceDrawn, unsaved } from '../unsaved';
-import { entryOf, nameTaken, readable, withServer, withoutServer, type UsualPorts } from './ntsServers';
+import { entryOf, nameTaken, readable, savedFromDialog, withServer, withoutServer, type UsualPorts } from './ntsServers';
 
 /**
  * What the NTS client allows itself when the local controller has not been told.
@@ -584,6 +584,12 @@ export const ntsPage: Page = {
                             A name and not an address: the key exchange checks the server's TLS certificate
                             against it.
                         </span>
+                        ${shown?.heldTo
+                              ? html`<span class="hint">
+                                         It is held to pins of its own, or learns them on first use. They stay
+                                         with this name: saved under another, the server starts without them.
+                                     </span>`
+                              : ''}
                     </label>
 
                     <label>Priority
@@ -681,7 +687,7 @@ export const ntsPage: Page = {
                 if (ntp.length   > 0 && Number(ntp)   !== usual.ntp)    entry.ntpPort    = Number(ntp);
                 if (data.get('enabled') === null)                        entry.enabled    = false;
 
-                void tell(withServer(list, index, entry));
+                void tell(withServer(list, index, savedFromDialog(shown, entry)));
 
             });
 

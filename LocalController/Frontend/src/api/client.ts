@@ -203,14 +203,45 @@ export interface NTSUpdate {
 
 /**
  * One time server as the configuration names it. Whatever is left out is the
- * usual: priority 0, the usual ports, switched on.
+ * usual: priority 0, the usual ports, switched on, held to nothing beyond what
+ * every server is held to.
  */
-export interface NTSServerEntry {
+export interface NTSServerEntry extends NTSPins {
     hostname:    string;
     priority?:   number;
     ntsKEPort?:  number;
     ntpPort?:    number;
     enabled?:    boolean;
+}
+
+/**
+ * What a time server is held to beyond what every server is held to, as its
+ * entry in the configuration says it: SHA-256 fingerprints of the certificate
+ * it has to show or of the root its chain has to end at - one under the name
+ * a pin always had, several as a list - what a mismatch comes to where that
+ * is not a refusal, and what it is to learn on first use.
+ */
+export interface NTSPins {
+    certificateFingerprint?:   string;
+    certificateFingerprints?:  string[];
+    rootFingerprint?:          string;
+    rootFingerprints?:         string[];
+    onMismatch?:               'record' | 'accept';
+    trustOnFirstUse?:          'root' | 'certificate';
+}
+
+/**
+ * What a time server is held to, as the controller shows it: every pin as a
+ * list, the first of each kind beside it as it was before there could be
+ * several, and the rules spelt out, the default ones included.
+ */
+export interface NTSHeldTo {
+    certificate:      string | null;
+    root:             string | null;
+    certificates:     string[];
+    roots:            string[];
+    onMismatch:       'refuse' | 'record' | 'accept';
+    trustOnFirstUse:  'root' | 'certificate' | null;
 }
 
 /** How one synchronisation of the group went. */
@@ -264,6 +295,13 @@ export interface NTSTimeSource {
      * by - or null before the first exchange.
      */
     rootCA?:        NTSRootCA | null;
+
+    /**
+     * What it is held to beyond what every server is held to, or null where
+     * that is nothing: what the page has to send back with it, as the list it
+     * sends replaces the controller's whole.
+     */
+    heldTo?:        NTSHeldTo | null;
 }
 
 /** A root CA, by a name to call it, its subject, and its SHA-256 fingerprint. */

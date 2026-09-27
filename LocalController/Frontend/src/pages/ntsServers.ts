@@ -1,4 +1,4 @@
-import type { NTSServerEntry, NTSTimeSource } from '../api/client';
+import type { NTSHeldTo, NTSPins, NTSServerEntry, NTSTimeSource } from '../api/client';
 
 /**
  * The list of time servers as the NTS page edits it.
@@ -28,8 +28,18 @@ export function readable(hostname: string): string {
 
 
 /**
+ * Whether two names are the same server's: compared without the root's dot,
+ * and without case.
+ */
+function sameName(one: string, other: string): boolean {
+    return readable(one.trim()).toLowerCase() === readable(other.trim()).toLowerCase();
+}
+
+
+/**
  * A server as the local controller shows it, turned back into what its configuration
- * says - with everything that is the usual left out.
+ * says - with everything that is the usual left out, and what it is held to
+ * kept in.
  *
  * Left out rather than repeated, because the local controller writes back what it is
  * sent: an entry carrying the usual ports and priority 0 becomes an object in
@@ -45,7 +55,70 @@ export function entryOf(source: NTSTimeSource, usual: UsualPorts): NTSServerEntr
     if (source.ntpPort   !== usual.ntp)    entry.ntpPort    = source.ntpPort;
     if (!source.enabled)                   entry.enabled    = false;
 
-    return entry;
+    return { ...entry, ...pinsOf(source.heldTo) };
+
+}
+
+
+/**
+ * What a server is held to beyond what every server is held to, as its entry
+ * in the configuration says it - and nothing at all where that is nothing.
+ *
+ * In every entry sent, because the list sent replaces the local controller's
+ * whole: an entry without them is a server held to nothing from then on.
+ * Measured so: the save of ptbtime2.ptb.de's priority took the root
+ * ptbtime1.ptb.de had learned on first use, and the instruction to learn it,
+ * out of the file and out of effect, and the log said no more than that it
+ * was held to no fingerprint.
+ *
+ * Written the way the local controller writes its file: one certificate or
+ * root under the name a pin always had, several as a list; what a mismatch
+ * comes to only where it is not a refusal, which is what a pin means anyway;
+ * and what is learned on first use only where something is.
+ */
+export function pinsOf(heldTo: NTSHeldTo | null | undefined): NTSPins {
+
+    const pins: NTSPins = {};
+
+    if (!heldTo)
+        return pins;
+
+    if      (heldTo.certificates.length === 1)  pins.certificateFingerprint   = heldTo.certificates[0];
+    else if (heldTo.certificates.length  >  1)  pins.certificateFingerprints  = [...heldTo.certificates];
+
+    if      (heldTo.roots.length === 1)         pins.rootFingerprint          = heldTo.roots[0];
+    else if (heldTo.roots.length  >  1)         pins.rootFingerprints         = [...heldTo.roots];
+
+    if (heldTo.onMismatch !== 'refuse')         pins.onMismatch               = heldTo.onMismatch;
+    if (heldTo.trustOnFirstUse !== null)        pins.trustOnFirstUse          = heldTo.trustOnFirstUse;
+
+    return pins;
+
+}
+
+
+/**
+ * What the dialog saves: what was typed into it, and what the server it edits
+ * is held to - as long as it is still that server.
+ *
+ * The dialog asks for the name, the priority, the ports and whether to ask the
+ * server, and not for what it is held to; a server saved from it must not come
+ * out of it held to nothing. A server given another name is another server,
+ * though: a certificate pin is the fingerprint of one server's certificate, a
+ * learned root is what one server was first believed with, and the local
+ * controller keeps both by name. They stay behind with the old name, and the
+ * new one is held to what every server is held to until somebody says
+ * otherwise.
+ *
+ * @param shown  the server as the local controller showed it, or null for a new one.
+ * @param typed  the entry made of what the dialog's fields say.
+ */
+export function savedFromDialog(shown:  NTSTimeSource | null,
+                                typed:  NTSServerEntry): NTSServerEntry {
+
+    return shown !== null && sameName(shown.hostname, typed.hostname)
+               ? { ...typed, ...pinsOf(shown.heldTo) }
+               : typed;
 
 }
 
@@ -88,9 +161,7 @@ export function nameTaken(list:      readonly NTSServerEntry[],
                           hostname:  string,
                           except:    number | null): boolean {
 
-    const wanted = readable(hostname.trim()).toLowerCase();
-
     return list.some((other, at) => at !== except &&
-                                    readable(other.hostname).toLowerCase() === wanted);
+                                    sameName(other.hostname, hostname));
 
 }
