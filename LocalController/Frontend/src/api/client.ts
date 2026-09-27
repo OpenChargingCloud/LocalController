@@ -91,13 +91,98 @@ export interface Configuration {
 }
 
 
-/** One name server this local controller asks. */
-export interface DNSServer {
+/** What a certificate other than the one a server is held to comes to. */
+export type PinMismatch = 'refuse' | 'record' | 'accept';
+
+/** What a server is held to from the first time it is believed. */
+export type TrustOnFirstUse = 'root' | 'certificate';
+
+/**
+ * What one server is held to beyond what every server is held to, as the
+ * controller reads it back: the certificates it may show and the roots its
+ * chain may end at - any one of them - what a mismatch comes to, and what it
+ * learns the first time it is believed. Every fingerprint is a SHA-256 one, in
+ * the 64 lower-case digits the controller keeps.
+ */
+export interface ServerPins {
+    /** The first certificate and root once more, as they were read when there could be only one of each. */
+    certificate:      string | null;
+    root:             string | null;
+    certificates:     string[];
+    roots:            string[];
+    onMismatch:       PinMismatch;
+    trustOnFirstUse:  TrustOnFirstUse | null;
+}
+
+/**
+ * What a server is held to, in the keys its entry is written with: one of a
+ * kind under the singular key, several under the plural - the way the
+ * configuration file says it, and the way the controller takes it back.
+ */
+export interface PinKeys {
+    certificateFingerprint?:   string;
+    certificateFingerprints?:  string[];
+    rootFingerprint?:          string;
+    rootFingerprints?:         string[];
+    onMismatch?:               PinMismatch;
+    trustOnFirstUse?:          TrustOnFirstUse;
+}
+
+/** What a server was last believed with - pinned or not, another one is noticed. */
+export interface KnownServer {
+    certificate:  string;
+    root:         string | null;
+    since:        string;
+}
+
+/** What the controller made of a server's certificate, in one word. */
+export type JudgementOutcome = 'accepted' | 'recorded' | 'tolerated'
+                             | 'pinMismatch' | 'untrusted' | 'wrongName' | 'noCertificate';
+
+/** What the controller made of the certificate a server showed, the last time it showed one. */
+export interface ServerJudgement {
+    server:       string;
+    service:      string;
+    at:           string;
+    /** Whether the server was used: "recorded" and "tolerated" are, although a fingerprint did not match. */
+    accepted:     boolean;
+    outcome:      JudgementOutcome;
+    certificate:  string | null;
+    root:         string | null;
+    /** The controller's own root it was validated by, where this machine knows none. */
+    anchoredBy:   string | null;
+    heldTo:       Pick<ServerPins, 'certificate' | 'root' | 'certificates' | 'roots'> | null;
+    /** What it was held to from this connection on, trusted on first use. */
+    learned:      TrustOnFirstUse | null;
+    /** What it had been believed with before, where this was another certificate. */
+    previously:   KnownServer | null;
+    /** Only in the answer to a test: what was found, one step after another. */
+    steps?:       { level: 'info' | 'notice' | 'warning' | 'error'; text: string }[];
+}
+
+
+/**
+ * One name server as the local controller is told it: what its configuration
+ * keeps, with what it is held to where it is asked over TLS or HTTPS.
+ */
+export interface DNSServerEntry extends PinKeys {
     /** An IP address or a host name. */
     address:              string;
     port:                 number;
     transport:            string;
     queryTimeoutSeconds:  number | null;
+}
+
+/**
+ * One name server this local controller asks, and what the controller says
+ * about it: what it is held to once more, the way the NTS answer has it, what
+ * was made of its certificate last, and what it was last believed with. Those
+ * three are read and never sent back.
+ */
+export interface DNSServer extends DNSServerEntry {
+    heldTo?:     ServerPins | null;
+    judgement?:  ServerJudgement | null;
+    known?:      KnownServer | null;
 }
 
 /** What may be changed about the name resolution while the controller runs. */
@@ -131,7 +216,7 @@ export interface DNSConfiguration {
 /** What a PUT to the DNS configuration may carry; everything is optional. */
 export interface DNSUpdate {
     enabled?:              boolean;
-    servers?:              DNSServer[];
+    servers?:              DNSServerEntry[];
     queryTimeoutSeconds?:  number;
     recursionDesired?:     boolean | null;
     useCache?:             boolean;
@@ -168,6 +253,8 @@ export interface DNSQueryResult {
     timedOut?:      boolean;
     answers:        DNSRecord[];
     more?:          number;
+    /** What was made of the certificate of every server this asked over TLS or HTTPS, step by step. */
+    certificates?:  ServerJudgement[];
 }
 
 
@@ -203,45 +290,14 @@ export interface NTSUpdate {
 
 /**
  * One time server as the configuration names it. Whatever is left out is the
- * usual: priority 0, the usual ports, switched on, held to nothing beyond what
- * every server is held to.
+ * usual: priority 0, the usual ports, switched on, held to no fingerprint.
  */
-export interface NTSServerEntry extends NTSPins {
+export interface NTSServerEntry extends PinKeys {
     hostname:    string;
     priority?:   number;
     ntsKEPort?:  number;
     ntpPort?:    number;
     enabled?:    boolean;
-}
-
-/**
- * What a time server is held to beyond what every server is held to, as its
- * entry in the configuration says it: SHA-256 fingerprints of the certificate
- * it has to show or of the root its chain has to end at - one under the name
- * a pin always had, several as a list - what a mismatch comes to where that
- * is not a refusal, and what it is to learn on first use.
- */
-export interface NTSPins {
-    certificateFingerprint?:   string;
-    certificateFingerprints?:  string[];
-    rootFingerprint?:          string;
-    rootFingerprints?:         string[];
-    onMismatch?:               'record' | 'accept';
-    trustOnFirstUse?:          'root' | 'certificate';
-}
-
-/**
- * What a time server is held to, as the controller shows it: every pin as a
- * list, the first of each kind beside it as it was before there could be
- * several, and the rules spelt out, the default ones included.
- */
-export interface NTSHeldTo {
-    certificate:      string | null;
-    root:             string | null;
-    certificates:     string[];
-    roots:            string[];
-    onMismatch:       'refuse' | 'record' | 'accept';
-    trustOnFirstUse:  'root' | 'certificate' | null;
 }
 
 /** How one synchronisation of the group went. */
@@ -296,12 +352,17 @@ export interface NTSTimeSource {
      */
     rootCA?:        NTSRootCA | null;
 
+    /** The SHA-256 fingerprint of the certificate the last key exchange showed, which a pin is written down from. */
+    certificate?:   string | null;
+
     /**
      * What it is held to beyond what every server is held to, or null where
      * that is nothing: what the page has to send back with it, as the list it
      * sends replaces the controller's whole.
      */
-    heldTo?:        NTSHeldTo | null;
+    heldTo?:        ServerPins | null;
+    judgement?:     ServerJudgement | null;
+    known?:         KnownServer | null;
 }
 
 /** A root CA, by a name to call it, its subject, and its SHA-256 fingerprint. */

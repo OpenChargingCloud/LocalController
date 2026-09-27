@@ -1,18 +1,36 @@
 /**
- * How long the DNS page waits for the local controller to look something up, asked
- * directly.
+ * How long the DNS page waits for the local controller to look something up, and
+ * what it tells the local controller about a name server, asked directly.
  *
  * Run with `npm test`. What is pinned is what was wrong: the page added the
  * servers' timeouts up, as if the local controller asked them one after another, when
  * it asks all of them at once - and it is what a server asked again takes
- * that the page has to be willing to wait for, not what it takes once.
+ * that the page has to be willing to wait for, not what it takes once. And
+ * that a name server goes back to the local controller with what it is held
+ * to, where it shows a certificate to hold it to, and with nothing the
+ * controller only said about it.
  */
 
 import { strict as assert }  from 'node:assert';
+import { readFileSync }      from 'node:fs';
+import { registerHooks }     from 'node:module';
 import { describe, it }      from 'node:test';
 
 import type { DNSConfiguration, DNSServer } from '../api/client';
-import { allServersTake, oneServerTakes } from './dnsServers.ts';
+
+// The page's helpers are written for webpack, which does not want the
+// extension in a relative import, and they import what a server is held to
+// from pins.ts; Node wants the extension. One hook puts it back - see the
+// client's test.
+registerHooks({
+    resolve(specifier, context, next) {
+        return specifier.startsWith('.') && !specifier.endsWith('.ts')
+                   ? next(`${specifier}.ts`, context)
+                   : next(specifier, context);
+    }
+});
+
+const { allServersTake, entryOf, isEncrypted, oneServerTakes } = await import('./dnsServers.ts');
 
 
 /** A name server as the local controller shows it, with a timeout of its own or none. */
@@ -69,6 +87,62 @@ describe('all of them', () => {
 
         assert.equal(allServersTake(configuration([])), 0);
         assert.equal(allServersTake(null),              0);
+
+    });
+
+});
+
+
+describe('a name server told to the local controller', () => {
+
+    const root = 'a'.repeat(64);
+
+    /** A name server over TLS as the local controller shows it: held to a root, judged, and known. */
+    const overTLS = (): DNSServer => ({
+        address: '1.1.1.1', port: 853, transport: 'TLS', queryTimeoutSeconds: null,
+        rootFingerprint: root, trustOnFirstUse: 'root',
+        heldTo:    { certificate: null, root, certificates: [], roots: [ root ], onMismatch: 'refuse', trustOnFirstUse: 'root' },
+        judgement: null,
+        known:     { certificate: 'b'.repeat(64), root, since: '2026-09-27T10:00:00.0000000+00:00' }
+    });
+
+    it('goes with what it is held to, and without what the controller only said about it', () => {
+
+        assert.deepEqual(entryOf(overTLS()),
+                         { address: '1.1.1.1', port: 853, transport: 'TLS', queryTimeoutSeconds: null,
+                           rootFingerprint: root, trustOnFirstUse: 'root' });
+
+    });
+
+    it('lets go of its pins once it is asked over a transport that shows no certificate, which the controller would refuse', () => {
+
+        // What was measured: 1.1.1.1 over TLS had learned its root, was
+        // switched to UDP on the page and saved, and the local controller
+        // refused the whole save - "'dns.servers[0]' is held to a certificate
+        // and asked over UDP, which shows none" - with no way on the page to
+        // take the pins off.
+        assert.deepEqual(entryOf({ ...overTLS(), transport: 'UDP', port: 53 }),
+                         { address: '1.1.1.1', port: 53, transport: 'UDP', queryTimeoutSeconds: null });
+
+    });
+
+    it('is asked over TLS or HTTPS in all its forms, and over nothing else, for a certificate', () => {
+
+        assert.deepEqual([ 'TLS', 'HTTPS', 'HTTPS_Binary', 'HTTPS_JSON', 'HTTPS_GET' ].map(isEncrypted), [ true, true, true, true, true ]);
+        assert.deepEqual([ 'UDP', 'TCP', 'HTTP', 'HTTP_Binary', 'HTTP_JSON' ].map(isEncrypted),          [ false, false, false, false, false ]);
+
+    });
+
+    it('is what the DNS page saves, and what it compares with to say whether anything was changed', () => {
+
+        // Asked of the page's source, as Node has no browser to open it in.
+        const page = readFileSync(new URL('./dns.ts', import.meta.url), 'utf-8');
+
+        assert.match(page, /servers:\s+servers\.filter\(.*\)\.map\(entryOf\),/,
+                     'the DNS page sends its name servers as it has them, pins on UDP and all');
+
+        assert.match(page, /JSON\.stringify\(servers\.map\(entryOf\)\)/,
+                     'the DNS page says whether its name servers were changed from what it would not send');
 
     });
 

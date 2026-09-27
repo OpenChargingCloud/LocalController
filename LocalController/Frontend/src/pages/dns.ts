@@ -5,7 +5,7 @@ import type { Page } from '../router';
 import { shell } from '../shell';
 import { errorMessage, formatValue, humanizeKey, whileSaving } from '../ui';
 import { typedSinceDrawn, unsaved } from '../unsaved';
-import { allServersTake, oneServerTakes } from './dnsServers';
+import { allServersTake, entryOf, oneServerTakes } from './dnsServers';
 
 /**
  * How this local controller resolves names.
@@ -305,8 +305,10 @@ export const dnsPage: Page = {
 
                 void save({
                     // The servers travel with the settings, because the form is
-                    // where somebody presses Save after editing either.
-                    servers:              servers.filter(server => server.address.trim().length > 0),
+                    // where somebody presses Save after editing either - each
+                    // as its entry in the file, with its pins where it shows a
+                    // certificate to hold it to. See entryOf.
+                    servers:              servers.filter(server => server.address.trim().length > 0).map(entryOf),
                     useCache:             data.get('useCache')     !== null,
                     dnssecOK:             data.get('dnssecOK')     !== null,
                     followCNAMEs:         data.get('followCNAMEs') !== null,
@@ -628,10 +630,12 @@ export const dnsPage: Page = {
 
         // The settings are a form and answer for themselves; the name servers
         // are a list, which is redrawn as it is edited and therefore always
-        // looks untouched - so it is compared with what the local controller last said.
+        // looks untouched - so it is compared with what the local controller last said,
+        // both as they would be sent: what the controller only said about a
+        // server is not the page's to change, and is left out of both.
         const release = unsaved.heldBy(
                             () => typedSinceDrawn(content.querySelector('#dns-form')) ||
-                                  JSON.stringify(servers) !== JSON.stringify(current?.servers ?? [])
+                                  JSON.stringify(servers.map(entryOf)) !== JSON.stringify((current?.servers ?? []).map(entryOf))
                         );
 
         void load();

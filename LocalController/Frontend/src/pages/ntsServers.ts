@@ -1,4 +1,5 @@
-import type { NTSHeldTo, NTSPins, NTSServerEntry, NTSTimeSource } from '../api/client';
+import type { NTSServerEntry, NTSTimeSource } from '../api/client';
+import { draftOf, withPins } from './pins';
 
 /**
  * The list of time servers as the NTS page edits it.
@@ -45,6 +46,13 @@ function sameName(one: string, other: string): boolean {
  * sent: an entry carrying the usual ports and priority 0 becomes an object in
  * the file where a bare name was, and the file stops reading the way somebody
  * would have written it.
+ *
+ * What it is held to in every entry, in the keys the file writes it under,
+ * because the list sent replaces the local controller's whole: an entry
+ * without it is a server held to nothing from then on. Measured so: the save
+ * of ptbtime2.ptb.de's priority took the root ptbtime1.ptb.de had learned on
+ * first use, and the instruction to learn it, out of the file and out of
+ * effect, and the log said no more than that it was held to no fingerprint.
  */
 export function entryOf(source: NTSTimeSource, usual: UsualPorts): NTSServerEntry {
 
@@ -55,44 +63,7 @@ export function entryOf(source: NTSTimeSource, usual: UsualPorts): NTSServerEntr
     if (source.ntpPort   !== usual.ntp)    entry.ntpPort    = source.ntpPort;
     if (!source.enabled)                   entry.enabled    = false;
 
-    return { ...entry, ...pinsOf(source.heldTo) };
-
-}
-
-
-/**
- * What a server is held to beyond what every server is held to, as its entry
- * in the configuration says it - and nothing at all where that is nothing.
- *
- * In every entry sent, because the list sent replaces the local controller's
- * whole: an entry without them is a server held to nothing from then on.
- * Measured so: the save of ptbtime2.ptb.de's priority took the root
- * ptbtime1.ptb.de had learned on first use, and the instruction to learn it,
- * out of the file and out of effect, and the log said no more than that it
- * was held to no fingerprint.
- *
- * Written the way the local controller writes its file: one certificate or
- * root under the name a pin always had, several as a list; what a mismatch
- * comes to only where it is not a refusal, which is what a pin means anyway;
- * and what is learned on first use only where something is.
- */
-export function pinsOf(heldTo: NTSHeldTo | null | undefined): NTSPins {
-
-    const pins: NTSPins = {};
-
-    if (!heldTo)
-        return pins;
-
-    if      (heldTo.certificates.length === 1)  pins.certificateFingerprint   = heldTo.certificates[0];
-    else if (heldTo.certificates.length  >  1)  pins.certificateFingerprints  = [...heldTo.certificates];
-
-    if      (heldTo.roots.length === 1)         pins.rootFingerprint          = heldTo.roots[0];
-    else if (heldTo.roots.length  >  1)         pins.rootFingerprints         = [...heldTo.roots];
-
-    if (heldTo.onMismatch !== 'refuse')         pins.onMismatch               = heldTo.onMismatch;
-    if (heldTo.trustOnFirstUse !== null)        pins.trustOnFirstUse          = heldTo.trustOnFirstUse;
-
-    return pins;
+    return withPins(entry, draftOf(source.heldTo));
 
 }
 
@@ -117,7 +88,7 @@ export function savedFromDialog(shown:  NTSTimeSource | null,
                                 typed:  NTSServerEntry): NTSServerEntry {
 
     return shown !== null && sameName(shown.hostname, typed.hostname)
-               ? { ...typed, ...pinsOf(shown.heldTo) }
+               ? withPins(typed, draftOf(shown.heldTo))
                : typed;
 
 }

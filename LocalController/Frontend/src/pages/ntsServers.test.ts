@@ -10,10 +10,24 @@
 
 import { strict as assert }  from 'node:assert';
 import { readFileSync }      from 'node:fs';
+import { registerHooks }     from 'node:module';
 import { describe, it }      from 'node:test';
 
-import type { NTSHeldTo, NTSTimeSource } from '../api/client';
-import { entryOf, nameTaken, readable, savedFromDialog, withServer, withoutServer } from './ntsServers.ts';
+import type { NTSTimeSource, ServerPins } from '../api/client';
+
+// The page's helpers are written for webpack, which does not want the
+// extension in a relative import, and they import what a server is held to
+// from pins.ts; Node wants the extension. One hook puts it back - see the
+// client's test.
+registerHooks({
+    resolve(specifier, context, next) {
+        return specifier.startsWith('.') && !specifier.endsWith('.ts')
+                   ? next(`${specifier}.ts`, context)
+                   : next(specifier, context);
+    }
+});
+
+const { entryOf, nameTaken, readable, savedFromDialog, withServer, withoutServer } = await import('./ntsServers.ts');
 
 
 const usual = { ntsKE: 4460, ntp: 123 };
@@ -23,7 +37,7 @@ const shown = (hostname: string, more: Partial<NTSTimeSource> = {}): NTSTimeSour
     ({ hostname, priority: 0, ntsKEPort: 4460, ntpPort: 123, enabled: true, ...more });
 
 /** What a server is held to as the local controller shows it: nothing beyond what is given. */
-const heldTo = (more: Partial<NTSHeldTo>): NTSHeldTo =>
+const heldTo = (more: Partial<ServerPins>): ServerPins =>
     ({ certificate: null, root: null, certificates: [], roots: [], onMismatch: 'refuse', trustOnFirstUse: null, ...more });
 
 /** The root ptbtime1.ptb.de and ptbtime2.ptb.de were believed with, and the certificates they showed. */
@@ -57,7 +71,7 @@ describe('what a time server is held to', () => {
 
         // What a local controller said of ptbtime1.ptb.de once it had learned
         // its root on first use, as it said it.
-        const learned: NTSHeldTo = { certificate: null, root, certificates: [], roots: [ root ], onMismatch: 'refuse', trustOnFirstUse: 'root' };
+        const learned: ServerPins = { certificate: null, root, certificates: [], roots: [ root ], onMismatch: 'refuse', trustOnFirstUse: 'root' };
 
         assert.deepEqual(entryOf(shown('ptbtime1.ptb.de.', { heldTo: learned }), usual),
                          { hostname: 'ptbtime1.ptb.de', rootFingerprint: root, trustOnFirstUse: 'root' });
