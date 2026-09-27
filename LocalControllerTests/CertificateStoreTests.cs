@@ -136,6 +136,12 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(store["usages"]!.Values<String>(),               Is.EqualTo(new[] { "dns", "nts" }), "what a page may offer");
                 Assert.That(store["keysAreUnencrypted"]!.Value<Boolean>(),   Is.False);
 
+                Assert.That(store["kinds"]!["tlsRoot"]!["usages"]?.Values<String>(),         Is.EqualTo(new[] { "dns", "nts" }), "what a page may offer a root");
+                Assert.That(store["kinds"]!["tlsServer"]!["usages"]?.Values<String>(),       Is.EqualTo(new[] { "dns", "nts" }));
+                Assert.That(store["kinds"]!["tlsIdentity"]!["hasUsages"]!.Value<Boolean>(),  Is.False,
+                            "a local controller names no listener an identity could be told of, so a page offers it nothing - not the services a root vouches for");
+                Assert.That(store["kinds"]!["tlsIdentity"]!["usages"]?.Children().Any(),     Is.False);
+
                 Assert.That(Path.GetFullPath(store["directory"]!.Value<String>()!),
                             Is.EqualTo(Path.GetFullPath(Path.Combine(Directory, "certificates"))),
                             "beside the configuration file, which is what it is measured from");
@@ -243,6 +249,12 @@ namespace cloud.charging.open.LocalController.Tests
                                                       new JProperty("usages",   "dns")
                                                   ));
 
+            var (identity, idSaid)   = await Send(http, HttpMethod.Post, "api/v1/certificates", new JObject(
+                                                      new JProperty("kind",     "tlsIdentity"),
+                                                      new JProperty("content",  Identity("Not For The Name Servers")),
+                                                      new JProperty("usages",   new JArray("dns"))
+                                                  ));
+
             var (_, store)           = await Send(http, HttpMethod.Get, "api/v1/certificates");
 
             Assert.Multiple(() => {
@@ -252,6 +264,8 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(kindSaid.ToString(),           Does.Contain("tlsRoot, tlsServer, tlsIdentity"));
                 Assert.That(notAList,                      Is.EqualTo(HttpStatusCode.BadRequest));
                 Assert.That(listSaid.ToString(),           Does.Contain("has to be a list of usages"));
+                Assert.That(identity,                      Is.EqualTo(HttpStatusCode.BadRequest));
+                Assert.That(idSaid.ToString(),             Does.Contain("names none"), "an identity is told listeners, and a local controller has none");
                 Assert.That(store["certificates"]!.Values().SelectMany(kind => kind.Children()).Any(),
                             Is.False,
                             "nothing refused was half-imported");

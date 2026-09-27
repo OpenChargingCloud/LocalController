@@ -80,13 +80,22 @@ namespace cloud.charging.open.LocalController
                                    new JProperty("description",     kind.Describe()),
                                    new JProperty("trustAnchor",     kind.IsTrustAnchor()),
                                    new JProperty("needsPrivateKey", kind.NeedsPrivateKey()),
-                                   new JProperty("hasUsages",       kind.HasUsages())
+                                   // Whether one of the kind is told what it is for
+                                   // in this store, and what it may be told - the
+                                   // store's word and not the kind's: a TLS identity
+                                   // is told the listeners a kind of node names, and
+                                   // a local controller names none, so it is told
+                                   // nothing. Asked of the kind, the page offered an
+                                   // identity "dns" and "nts", which the store
+                                   // refuses, as the vehicle and the station found.
+                                   new JProperty("hasUsages",       Certificates.HasUsages(kind)),
+                                   new JProperty("usages",          new JArray(Certificates.UsagesFor(kind)))
                                )))
                        )),
 
                        // What a TLS root or a server certificate may be told it is
-                       // for, so that a page offers these and nothing the store
-                       // would refuse.
+                       // for - the services it vouches for - as it was said before
+                       // every kind said its own above.
                        new JProperty("usages",       new JArray(Certificates.Usages)),
 
                        new JProperty("certificates", byKind),

@@ -371,9 +371,11 @@ copied into the right directory by hand is taken in at the next start, or by
 A TLS root and a server certificate are told what they are for - the name
 servers, the time servers, or every use - at the upload and later: a root kept
 for the name servers alone vouches for no time server, and only a root kept for
-every use vouches for the CSMS. The dialog in which a
-time server or a name server is pinned offers the store's certificates for its
-service, and a pinned fingerprint the store keeps is named by its label.
+every use vouches for the CSMS. A TLS identity is told nothing: a local
+controller names no listeners it could be shown on some of and not others, so
+the page offers it no uses. The dialog in which a time server or a name server
+is pinned offers the store's certificates for its service, and a pinned
+fingerprint the store keeps is named by its label.
 
 It is the vehicle's store and the vehicle's page, over the same routes -
 `GET` and `POST /api/v1/certificates`, `POST /api/v1/certificates/reload`, and
