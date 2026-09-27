@@ -1160,7 +1160,9 @@ table.records {
     // One colour per level, used by the chip in a line and by the line itself.
     &.level.debug     { color: #64748b; border-color: #cbd5e1; background: #f1f5f9; }
     &.level.info      { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
-    &.level.notice    { color: #0f766e; border-color: #99f6e4; background: #f0fdfa; }
+    // No margin below it, which the box called "notice" has: in the level chip
+    // of a log line it still held that line at 39 px, where the others are 24.
+    &.level.notice    { color: #0f766e; border-color: #99f6e4; background: #f0fdfa; margin-bottom: 0; }
     &.level.warning   { color: #92400e; border-color: #fde68a; background: $color-warn-bg; }
     &.level.error     { color: $color-error; border-color: #fecaca; background: $color-error-bg; }
     &.level.critical  { color: #ffffff; border-color: #7f1d1d; background: #b91c1c; }
@@ -1261,6 +1263,23 @@ table.records {
     gap:            0.4rem;
     padding:        0.1rem 0.8rem;
     border-left:    3px solid transparent;
+
+    // "notice" is a level of the log as well as the box a page says something
+    // in, and a line of that level was drawn as that box: a frame, a larger
+    // type and a margin below, in the middle of the log - measured, 43 px of
+    // line and 16 of margin where every other line is 24. Here it is a line,
+    // with the accent at its edge as the other levels have their colour there.
+    // Before the hover below, so that a notice line lights up as every other
+    // one does.
+    &.notice {
+        background:     none;
+        border:         0;
+        border-left:    3px solid $color-accent;
+        border-radius:  0;
+        margin-bottom:  0;
+        padding:        0.1rem 0.8rem;
+        font-size:      inherit;
+    }
 
     &:hover {
         background: rgba($color-accent, 0.05);
