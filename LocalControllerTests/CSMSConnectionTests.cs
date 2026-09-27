@@ -227,6 +227,38 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region (private static) APortWhereNothingAnswers(out Port)
+
+        /// <summary>
+        /// A port on which a connection is refused, as on that of a CSMS that is
+        /// down - and which nothing else on this machine can have until the
+        /// reservation is let go.
+        /// </summary>
+        /// <remarks>
+        /// Bound and not listened on. A port let go, dialled for seconds and
+        /// then bound by a CSMS is a port any outgoing connection on the
+        /// machine may be given as its own in the meantime, and then the CSMS
+        /// cannot have it: seen once, as AddressAlreadyInUse for the charging
+        /// station server of the CSMS that was to come up.
+        /// </remarks>
+        /// <param name="Port">The port.</param>
+        private static System.Net.Sockets.Socket APortWhereNothingAnswers(out UInt16 Port)
+        {
+
+            var reservation = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork,
+                                                            System.Net.Sockets.SocketType.Stream,
+                                                            System.Net.Sockets.ProtocolType.Tcp);
+
+            reservation.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0));
+
+            Port = (UInt16) ((System.Net.IPEndPoint) reservation.LocalEndPoint!).Port;
+
+            return reservation;
+
+        }
+
+        #endregion
+
         #region (private) UntilItHasGivenUp(Client)
 
         /// <summary>
@@ -451,7 +483,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ACSMSThatIsDownAtTheStartIsReachedOnceItIsUp()
         {
 
-            var laterPort       = TestControllers.FreePort();
+            using var reservation  = APortWhereNothingAnswers(out var laterPort);
             var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
 
             downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
@@ -491,6 +523,9 @@ namespace cloud.charging.open.LocalController.Tests
 
             try
             {
+
+                // Let go at the last moment, so that the CSMS has the port.
+                reservation.Dispose();
 
                 await later.Start();
                 await UntilItIsBack(later);
@@ -580,7 +615,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStoppedControllerDialsNoMore()
         {
 
-            var laterPort       = TestControllers.FreePort();
+            using var reservation  = APortWhereNothingAnswers(out var laterPort);
             var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
 
             downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
@@ -597,6 +632,9 @@ namespace cloud.charging.open.LocalController.Tests
 
             try
             {
+
+                // Let go at the last moment, so that the CSMS has the port.
+                reservation.Dispose();
 
                 await later.Start();
 
@@ -672,7 +710,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ACSMSThatComesUpAndRefusesIsNotSaidToBeTriedAgain()
         {
 
-            var laterPort       = TestControllers.FreePort();
+            using var reservation  = APortWhereNothingAnswers(out var laterPort);
             var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
 
             downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
@@ -688,6 +726,9 @@ namespace cloud.charging.open.LocalController.Tests
 
             try
             {
+
+                // Let go at the last moment, so that the CSMS has the port.
+                reservation.Dispose();
 
                 await later.Start();
                 await UntilItHasGivenUp(client);
@@ -852,7 +893,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task HangingUpInTheMiddleOfAnAttemptIsNotARefusal()
         {
 
-            var laterPort       = TestControllers.FreePort();
+            using var reservation  = APortWhereNothingAnswers(out var laterPort);
 
             downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
                                                        DialsAgainQuickly:  true);
@@ -867,6 +908,9 @@ namespace cloud.charging.open.LocalController.Tests
             var asked           = 0;
             var held            = new List<System.Net.Sockets.TcpClient>();
             var silent          = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, laterPort);
+
+            // Let go at the last moment, so that the silent end has the port.
+            reservation.Dispose();
 
             silent.Start();
 
