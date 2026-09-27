@@ -293,10 +293,13 @@ export const certificateStorePage: Page = {
                         : days <= expiringSoon ? html`<span class="chip warn">${days} day(s) left</span>`
                         :                        html`<span class="chip">on</span>`;
 
+            const signsIn = entry.id === current?.chosen?.csmsClientCertificate;
+
             return html`
                 <tr>
                     <td>
                         ${entry.label}
+                        ${signsIn ? html`<span class="chip ok" title="Chosen on the CSMS page; deleted only once another one is">signs in to the CSMS</span>` : ''}
                         <br /><code class="muted" title="SHA-256: ${entry.thumbprint}">${entry.id}</code>
                         ${hasUsages(entry.kind)
                               ? html`<br /><span class="chips usages-of">

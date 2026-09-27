@@ -273,13 +273,29 @@ namespace cloud.charging.open.LocalController
         /// DELETE /api/v1/certificates/{id}: take a certificate out of the
         /// store and delete its file.
         /// </summary>
+        /// <remarks>
+        /// Refused while the CSMS connection still names it, and named in the
+        /// refusal. Deleting it anyway would leave a controller configured to
+        /// sign in with something that is not there, which is discovered at the
+        /// next dialling rather than here - and switching it off is what
+        /// somebody taking a certificate out of service usually meant.
+        /// </remarks>
         private Task<HTTPResponse> DeleteStoreCertificate(HTTPRequest Request)
         {
 
             if (!TryAuthorize(Request, Permission.Edit(NodeResources.Certificates), true, out _, out var refused))
                 return Task.FromResult(refused);
 
-            if (!Controller.Certificates.Remove(HandleOf(Request), out var error))
+            var handle = HandleOf(Request);
+
+            if (Controller.UsedByCSMS(handle) is { } field)
+                return Task.FromResult(
+                           ErrorJSON(Request, HTTPStatusCode.Conflict,
+                                     $"That certificate is what 'csms.{field}' names. Choose another one for the CSMS " +
+                                      "connection first, or switch this one off instead of deleting it.")
+                       );
+
+            if (!Controller.Certificates.Remove(handle, out var error))
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.NotFound, error));
 
             return Task.FromResult(

@@ -408,9 +408,11 @@ namespace cloud.charging.open.LocalController.Tests
         #region ProfileThreeSaysWhatIsMissingRatherThanFailingAtTheOtherEnd()
 
         /// <summary>
-        /// The client certificate store of this controller's own does not exist
-        /// yet. That is said here, where somebody can read it, rather than left
-        /// to the CSMS to refuse for a reason nobody at this end would see.
+        /// Profile 3 signs in with a TLS identity of the certificate store, and
+        /// a password set for profiles 1 and 2 does not stand in for one. With
+        /// none chosen, that is said here, where somebody can read it, rather
+        /// than left to the CSMS to refuse for a reason nobody at this end
+        /// would see.
         /// </summary>
         [Test]
         public async Task ProfileThreeSaysWhatIsMissingRatherThanFailingAtTheOtherEnd()
@@ -423,7 +425,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(downstream.CSMSConnected,    Is.False);
-                Assert.That(downstream.CSMSLastProblem,  Does.Contain("client certificate"));
+                Assert.That(downstream.CSMSLastProblem,  Does.Contain("TLS identity").And.Contain("none is chosen"));
             });
 
         }

@@ -1,4 +1,4 @@
-import { api, type CSMSConfiguration } from '../api/client';
+import { api, type Certificate, type CSMSConfiguration } from '../api/client';
 import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '../html';
 import type { Page } from '../router';
@@ -43,6 +43,13 @@ export const csmsPage: Page = {
 
         let cancelled = false;
         let csms: CSMSConfiguration | null = null;
+
+        /**
+         * The TLS identities of the certificate store, to choose the one
+         * security profile 3 signs in with - or null where this person may
+         * not read the store, and the choice is shown but not offered.
+         */
+        let identities: Certificate[] | null = null;
 
 
         function draw(): void {
@@ -106,7 +113,11 @@ export const csmsPage: Page = {
                         ` : ''}
 
                         <dt>Signs in as</dt>
-                        <dd>${settings.credentials.username ?? html`<em>nothing set</em>`}</dd>
+                        <dd>${settings.securityProfile === 3
+                                  ? settings.clientCertificateIs
+                                        ? html`its certificate <strong>${settings.clientCertificateIs.label ?? settings.clientCertificateIs.id}</strong>`
+                                        : html`<em>no TLS identity chosen</em>`
+                                  : settings.credentials.username ?? html`<em>nothing set</em>`}</dd>
 
                     </dl>
 
@@ -114,7 +125,7 @@ export const csmsPage: Page = {
                         <div class="notice warn">${settings.state.lastProblem}</div>
                     `}
 
-                    ${settings.enabled && !settings.state.hasCredentials ? html`
+                    ${settings.enabled && settings.securityProfile !== 3 && !settings.state.hasCredentials ? html`
                         <div class="notice warn">
                             This local controller is meant to report to a CSMS but has nothing to sign in with.
                             Set it below.
@@ -169,9 +180,11 @@ export const csmsPage: Page = {
                         <div class="notice">
                             <strong>Profile 1 sends the password in the clear.</strong> The line to a backend
                             crosses networks this site does not own, so profile 2 is the least that makes sense
-                            outside a laboratory. Profile 3 needs a client certificate of this controller's own,
-                            which there is no store for yet - it is refused with that said rather than tried.
+                            outside a laboratory. Profile 3 signs in with a TLS identity of this controller's own,
+                            chosen below from the <a href="/configuration/certificates">certificate store</a>.
                         </div>
+
+                        ${identityField(settings)}
 
                         <label>Ping every
                             <input type="number" name="pingEvery" min="5" max="3600"
@@ -197,6 +210,51 @@ export const csmsPage: Page = {
                     </form>
 
                 </section>
+            `;
+
+        }
+
+
+        /**
+         * The TLS identity security profile 3 signs in with: chosen from the
+         * store's identities, and what the controller says about the one that
+         * is chosen - that it is missing, or switched off, before a dialling
+         * finds out.
+         *
+         * Offered only to somebody who may read the store; to anybody else the
+         * one chosen is named, and the choice is left alone when they save.
+         */
+        function identityField(settings: CSMSConfiguration): HTMLFragment {
+
+            const chosen = settings.clientCertificateIs;
+            const state  = chosen === undefined
+                               ? ''
+                               : chosen.missing
+                                     ? html`<div class="notice warn">The identity ${chosen.id} chosen here is not in the certificate store.</div>`
+                                     : chosen.usable === false
+                                           ? html`<div class="notice warn">${chosen.label} is switched off, or not valid today - profile 3 cannot sign in with it.</div>`
+                                           : '';
+
+            return html`
+                <label>TLS identity, for security profile 3
+                    ${identities === null
+                          ? html`<input type="text" value="${chosen ? `${chosen.label ?? ''} (${chosen.id})` : 'none'}" disabled />
+                                 <span class="hint">Choosing one takes reading the certificate store, which this account may not.</span>`
+                          : html`<select name="clientCertificate" ${mayChange ? '' : html`disabled`}>
+                                     <option value="" ${chosen === undefined ? html`selected` : ''}>none</option>
+                                     ${identities.map(identity => html`
+                                         <option value="${identity.id}" ${chosen?.id === identity.id ? html`selected` : ''}>
+                                             ${identity.label} (${identity.id})${identity.usable ? '' : ' - not usable'}
+                                         </option>
+                                     `)}
+                                 </select>
+                                 <span class="hint">
+                                     What this controller presents in TLS, with its private key, imported on the
+                                     certificate store's page. The CSMS knows it by the last segment of the address,
+                                     as every OCPP client says who it is.
+                                 </span>`}
+                </label>
+                ${state}
             `;
 
         }
@@ -274,14 +332,18 @@ export const csmsPage: Page = {
 
                 event.preventDefault();
 
-                const form = event.target as HTMLFormElement;
+                const form     = event.target as HTMLFormElement;
+                const identity = form.querySelector<HTMLSelectElement>('select[name="clientCertificate"]');
 
                 void save({
                     enabled:                isChecked(form, 'enabled'),
                     url:                    field(form, 'url', false),
                     securityProfile:        Number(field(form, 'securityProfile')),
                     pingEvery:              Number(field(form, 'pingEvery')),
-                    reconnectInitialDelay:  Number(field(form, 'reconnectInitialDelay'))
+                    reconnectInitialDelay:  Number(field(form, 'reconnectInitialDelay')),
+                    // Left out where it was not offered, which leaves it alone;
+                    // none is said as null.
+                    ...(identity === null ? {} : { clientCertificate: identity.value.length > 0 ? identity.value : null })
                 });
 
             });
@@ -410,12 +472,21 @@ export const csmsPage: Page = {
             try
             {
 
-                const settings = await api.csms.get();
+                // The store beside the settings: it only offers the identities
+                // to choose from, and a store this person may not read is no
+                // reason to show no page.
+                const [settings, kept] = await Promise.all([
+                                             api.csms.get(),
+                                             auth.can('certificates', 'read')
+                                                 ? api.certificates.get().then(store => store.certificates.tlsIdentity ?? [], () => null)
+                                                 : Promise.resolve(null)
+                                         ]);
 
                 if (cancelled)
                     return;
 
-                csms = settings;
+                csms       = settings;
+                identities = kept;
 
                 draw();
 

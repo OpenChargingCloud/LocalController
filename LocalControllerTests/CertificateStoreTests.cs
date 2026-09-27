@@ -308,6 +308,65 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region TheIdentityTheCSMSSignsInWithIsNotDeletedUnderIt()
+
+        /// <summary>
+        /// Chosen for the CSMS connection, an identity is marked on the store's
+        /// page, described on the CSMS page, and not deleted until something
+        /// else is chosen - switched off it may be, and the CSMS page says so.
+        /// </summary>
+        [Test]
+        public async Task TheIdentityTheCSMSSignsInWithIsNotDeletedUnderIt()
+        {
+
+            using var http  = await SignedIn();
+
+            var (_, entry)        = await Send(http, HttpMethod.Post, "api/v1/certificates", new JObject(
+                                                   new JProperty("kind",     "tlsIdentity"),
+                                                   new JProperty("content",  Identity("lc-003")),
+                                                   new JProperty("label",    "Towards the CSMS")
+                                               ));
+
+            var id                = entry["id"]!.Value<String>()!;
+            var path              = $"api/v1/certificates/{id}";
+
+            Assert.That(Controller.TryUpdateCSMSConfiguration(new JObject(new JProperty("clientCertificate", id)), out var chooseError),
+                        Is.True, chooseError);
+
+            var (_, store)        = await Send(http, HttpMethod.Get,    "api/v1/certificates");
+            var (_, csms)         = await Send(http, HttpMethod.Get,    "api/v1/configuration/csms");
+            var (refused, said)   = await Send(http, HttpMethod.Delete, path);
+
+            var (_, _)            = await Send(http, HttpMethod.Patch,  path, new JObject(new JProperty("active", false)));
+            var (_, switchedOff)  = await Send(http, HttpMethod.Get,    "api/v1/configuration/csms");
+
+            Assert.That(Controller.TryUpdateCSMSConfiguration(new JObject(new JProperty("clientCertificate", JValue.CreateNull())), out var noneError),
+                        Is.True, noneError);
+
+            var (deleted, _)      = await Send(http, HttpMethod.Delete, path);
+            var (_, missing)      = await Send(http, HttpMethod.Get,    "api/v1/configuration/csms");
+
+            Assert.Multiple(() => {
+
+                Assert.That(store["chosen"]!["csmsClientCertificate"]!.Value<String>(),  Is.EqualTo(id), "the store's page marks it");
+
+                Assert.That(csms["clientCertificateIs"]!["label"]!.Value<String>(),      Is.EqualTo("Towards the CSMS"));
+                Assert.That(csms["clientCertificateIs"]!["usable"]!.Value<Boolean>(),    Is.True);
+
+                Assert.That(refused,                                                     Is.EqualTo(HttpStatusCode.Conflict), said.ToString());
+                Assert.That(said.ToString(),                                             Does.Contain("'csms.clientCertificate'"));
+
+                Assert.That(switchedOff["clientCertificateIs"]!["usable"]!.Value<Boolean>(), Is.False, "the CSMS page says it is switched off");
+
+                Assert.That(deleted,                                                     Is.EqualTo(HttpStatusCode.OK), "with none chosen, it goes");
+                Assert.That(missing["clientCertificateIs"],                              Is.Null, "none is chosen, so none is described");
+
+            });
+
+        }
+
+        #endregion
+
         #region AnIdentityWithoutItsKeyIsRefused()
 
         [Test]

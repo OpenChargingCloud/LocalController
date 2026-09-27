@@ -77,6 +77,17 @@ answer that means no, such as a wrong password, is not asked again before the
 controller is restarted, whether it comes at the start or on the way back. The
 CSMS page says which of these it is, and since when the line is up.
 
+Security profile 3 signs in with a TLS identity of the certificate store -
+chosen on the CSMS page, and kept as `clientCertificate` in the `csms` section
+by its handle - rather than with a password; one that is not chosen, not in the
+store, switched off or out of its validity is said so, and not dialled with.
+Over TLS, the CSMS's certificate is judged by the node as a time server's is:
+issued for the name it is dialled at, and chaining to a root this machine
+trusts or to a TLS root of the store kept for every use. What it was believed
+with is remembered in `known-servers.json`, and another certificate than before
+is said. A CSMS reads who is dialling from the last segment of the address, as
+OCPP has every client say it: `wss://csms.example.org/ocpp/lc001`.
+
 
 ## Running it
 
@@ -342,7 +353,8 @@ a vehicle's: the **TLS roots** a server this controller connects to may chain
 to - a time server, a name server over TLS or HTTPS - beside the ones this
 machine trusts; the **server certificates** of such servers, kept so that one
 can be held to its fingerprint; and the **TLS identities** this controller
-presents itself, each with its private key. It lives in `certificates/` beside
+presents itself, each with its private key - the one it signs in to the CSMS
+with under security profile 3 among them. It lives in `certificates/` beside
 `configuration.json`, one file per certificate and an `index.json` saying what
 each is called, whether it is switched on and what it is kept for; a file
 copied into the right directory by hand is taken in at the next start, or by
@@ -350,7 +362,8 @@ copied into the right directory by hand is taken in at the next start, or by
 
 A TLS root and a server certificate are told what they are for - the name
 servers, the time servers, or every use - at the upload and later: a root kept
-for the name servers alone vouches for no time server. The dialog in which a
+for the name servers alone vouches for no time server, and only a root kept for
+every use vouches for the CSMS. The dialog in which a
 time server or a name server is pinned offers the store's certificates for its
 service, and a pinned fingerprint the store keeps is named by its label.
 
@@ -363,7 +376,9 @@ stores of their own they have always had, on the pages "Server certificates" and
 "Accepted chains".
 
 The private keys are kept unencrypted, as the vehicle's are, and the page says
-so as soon as there is one.
+so as soon as there is one. The identity the CSMS connection signs in with is
+marked on the page, and is not deleted until another one is chosen - switching
+it off is what taking it out of service usually means.
 
 
 ## Who may open it

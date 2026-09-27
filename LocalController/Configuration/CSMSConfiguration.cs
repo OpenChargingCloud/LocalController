@@ -66,6 +66,7 @@ namespace cloud.charging.open.LocalController.Configuration
     /// <param name="RequestTimeout">How long a request upwards may take before it is given up on.</param>
     /// <param name="ReconnectInitialDelay">How long to wait before the first attempt to dial again.</param>
     /// <param name="ReconnectMaxDelay">The longest the waiting between attempts may grow to.</param>
+    /// <param name="ClientCertificate">The TLS identity of this controller's certificate store it signs in with under security profile 3, by its handle; empty for none, and null where nothing was said.</param>
     public sealed record CSMSConfiguration(Boolean?                Enabled                      = null,
                                            String?                 URL                          = null,
                                            Byte?                   SecurityProfile              = null,
@@ -76,7 +77,8 @@ namespace cloud.charging.open.LocalController.Configuration
                                            TimeSpan?               PingEvery                    = null,
                                            TimeSpan?               RequestTimeout               = null,
                                            TimeSpan?               ReconnectInitialDelay        = null,
-                                           TimeSpan?               ReconnectMaxDelay            = null)
+                                           TimeSpan?               ReconnectMaxDelay            = null,
+                                           String?                 ClientCertificate            = null)
     {
 
         #region Data
@@ -141,6 +143,13 @@ namespace cloud.charging.open.LocalController.Configuration
         /// </summary>
         public const Int32  MaxNodeIdLength      = 48;
 
+        /// <summary>
+        /// The longest the handle of a certificate may be: a whole SHA-256
+        /// fingerprint, where somebody wrote that rather than its first
+        /// sixteen digits.
+        /// </summary>
+        public const Int32  MaxHandleLength      = 64;
+
         #endregion
 
         #region Properties
@@ -157,6 +166,13 @@ namespace cloud.charging.open.LocalController.Configuration
         /// </summary>
         public Boolean WantsClientCertificate
             => (SecurityProfile ?? DefaultSecurityProfile) == 3;
+
+        /// <summary>
+        /// The handle of the TLS identity chosen to sign in with, or null
+        /// where none is.
+        /// </summary>
+        public String? ChosenClientCertificate
+            => ClientCertificate is { Length: > 0 } handle ? handle : null;
 
         #endregion
 
@@ -178,7 +194,8 @@ namespace cloud.charging.open.LocalController.Configuration
                     PingEvery                   ?? DefaultPingEvery,
                     RequestTimeout              ?? DefaultRequestTimeout,
                     ReconnectInitialDelay       ?? DefaultReconnectInitialDelay,
-                    ReconnectMaxDelay           ?? DefaultReconnectMaxDelay);
+                    ReconnectMaxDelay           ?? DefaultReconnectMaxDelay,
+                    ClientCertificate);
 
         #endregion
 
@@ -200,7 +217,8 @@ namespace cloud.charging.open.LocalController.Configuration
                     Changes.PingEvery                   ?? PingEvery,
                     Changes.RequestTimeout              ?? RequestTimeout,
                     Changes.ReconnectInitialDelay       ?? ReconnectInitialDelay,
-                    Changes.ReconnectMaxDelay           ?? ReconnectMaxDelay);
+                    Changes.ReconnectMaxDelay           ?? ReconnectMaxDelay,
+                    Changes.ClientCertificate           ?? ClientCertificate);
 
         #endregion
 
@@ -227,6 +245,9 @@ namespace cloud.charging.open.LocalController.Configuration
             if (MinimumTLSVersion  != AsBuilt.MinimumTLSVersion)   yield return "minimumTLSVersion";
             if (PingEvery          != AsBuilt.PingEvery)           yield return "pingEvery";
             if (RequestTimeout     != AsBuilt.RequestTimeout)      yield return "requestTimeout";
+
+            if (ChosenClientCertificate != AsBuilt.ChosenClientCertificate)
+                yield return "clientCertificate";
 
             if (!(Subprotocols ?? []).SequenceEqual(AsBuilt.Subprotocols ?? []))
                 yield return "subprotocols";
@@ -257,10 +278,35 @@ namespace cloud.charging.open.LocalController.Configuration
                 !ConfigurationReader.TryReadSeconds(JSON, "pingEvery",                   SectionName, 5, 3600,                   out var pingEvery,      out Error) ||
                 !ConfigurationReader.TryReadSeconds(JSON, "requestTimeout",              SectionName, 1, 600,                   out var requestTimeout, out Error) ||
                 !ConfigurationReader.TryReadSeconds(JSON, "reconnectInitialDelay",       SectionName, 1, 600,                   out var initialDelay,   out Error) ||
-                !ConfigurationReader.TryReadSeconds(JSON, "reconnectMaxDelay",           SectionName, 1, 3600,                   out var maxDelay,       out Error))
+                !ConfigurationReader.TryReadSeconds(JSON, "reconnectMaxDelay",           SectionName, 1, 3600,                   out var maxDelay,       out Error) ||
+                !ConfigurationReader.TryReadString (JSON, "clientCertificate",           SectionName, MaxHandleLength,  out var identity,       out Error))
             {
                 return false;
             }
+
+            #region The TLS identity is a handle of the certificate store, or none
+
+            // Null said out loud is none, as an empty string is: the page says
+            // none as null, and a save that merges what it sends into the file
+            // needs something to write over the old handle with.
+            if (identity is null && JSON.TryGetValue("clientCertificate", out var identityToken) &&
+                (identityToken.Type == JTokenType.Null ||
+                 identityToken.Type == JTokenType.String && identityToken.Value<String>()!.Trim().Length == 0))
+            {
+                identity = "";
+            }
+
+            identity = identity?.Trim();
+
+            if (identity is { Length: > 0 } &&
+                (identity.Length < 16 || !identity.All(Uri.IsHexDigit)))
+            {
+                Error = $"'{SectionName}.clientCertificate' is '{identity}', and has to be the handle of a TLS identity in the certificate " +
+                         "store: the first 16 digits of its SHA-256 fingerprint, or all of them.";
+                return false;
+            }
+
+            #endregion
 
             #region The security profile has to be one of the three
 
@@ -351,7 +397,8 @@ namespace cloud.charging.open.LocalController.Configuration
                                 pingEvery,
                                 requestTimeout,
                                 initialDelay,
-                                maxDelay
+                                maxDelay,
+                                identity?.ToLowerInvariant()
                             );
 
             return true;
@@ -380,6 +427,7 @@ namespace cloud.charging.open.LocalController.Configuration
             if (RequestTimeout             is not null)  json.Add("requestTimeout",              RequestTimeout.Value.TotalSeconds);
             if (ReconnectInitialDelay      is not null)  json.Add("reconnectInitialDelay",       ReconnectInitialDelay.Value.TotalSeconds);
             if (ReconnectMaxDelay          is not null)  json.Add("reconnectMaxDelay",           ReconnectMaxDelay.Value.TotalSeconds);
+            if (ClientCertificate          is not null)  json.Add("clientCertificate",           ClientCertificate);
 
             return json;
 

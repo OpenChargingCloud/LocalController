@@ -91,6 +91,13 @@ namespace cloud.charging.open.LocalController
 
                        new JProperty("certificates", byKind),
 
+                       // Which handle the CSMS connection signs in with, so that
+                       // the page can mark it without also reading the CSMS
+                       // settings.
+                       new JProperty("chosen",       new JObject(
+                           new JProperty("csmsClientCertificate",  csmsSettings.ChosenClientCertificate)
+                       )),
+
                        // Said here because this is the page where somebody is
                        // looking at the consequences of it, rather than only in
                        // the log at a start.

@@ -18,6 +18,8 @@
 #region Usings
 
 using System.Diagnostics.CodeAnalysis;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 
 using Newtonsoft.Json.Linq;
 
@@ -29,6 +31,7 @@ using cloud.charging.open.protocols.WWCP.NetworkingNode;
 
 using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.protocols.WWCP.Node.Logging;
+using cloud.charging.open.protocols.WWCP.Node.Certificates;
 using cloud.charging.open.LocalController.OCPP;
 
 #endregion
@@ -59,6 +62,13 @@ namespace cloud.charging.open.LocalController
     {
 
         #region Data
+
+        /// <summary>
+        /// What the CSMS is to this controller where the node judges its
+        /// certificate: a service of its own, whose TLS roots of the store are
+        /// the ones kept for every use.
+        /// </summary>
+        public const String        CSMSService        = "csms";
 
         /// <summary>
         /// What the CSMS connection is configured as, with every field filled in.
@@ -184,14 +194,16 @@ namespace cloud.charging.open.LocalController
                 return;
             }
 
-            if (csmsSettings.WantsClientCertificate)
+            // Profile 3 signs in with a TLS identity of this controller's own
+            // certificate store. One that is not there, not usable or not an
+            // identity is said plainly rather than dialled without, which the
+            // other end would refuse with a message nobody here could act on.
+            System.Net.Security.SslStreamCertificateContext? identity = null;
+
+            if (csmsSettings.WantsClientCertificate &&
+                !TryCSMSIdentity(out identity, out var identityProblem))
             {
-                // Profile 3 needs a certificate of this controller's own, and
-                // that store is not built yet. Said plainly rather than dialled
-                // without one, which would be refused at the other end with a
-                // message nobody here could act on.
-                csmsLastProblem = "Security profile 3 needs a client certificate of this local controller's own, " +
-                                  "and there is no store for one yet. Use security profile 2 until there is.";
+                csmsLastProblem = identityProblem;
                 Log.Critical(csmsLastProblem, "ocpp", "csms", "tls");
                 return;
             }
@@ -199,7 +211,11 @@ namespace cloud.charging.open.LocalController
             var authentication = CSMSLogin.HTTPAuthentication();
             var totpConfig     = CSMSLogin.TOTPConfig();
 
-            if (authentication is null && totpConfig is null)
+            // A password or a token is how profiles 1 and 2 say who is dialling.
+            // Profile 3 says it with the certificate; one given beside it is
+            // sent as well, for a CSMS that asks for both.
+            if (!csmsSettings.WantsClientCertificate &&
+                authentication is null && totpConfig is null)
             {
                 csmsLastProblem = $"This local controller has no credentials to sign in to {url} with. " +
                                    "Set them under Configuration.";
@@ -208,6 +224,26 @@ namespace cloud.charging.open.LocalController
             }
 
             #endregion
+
+            // The CSMS's certificate is judged by the node, as a time server's
+            // and a name server's are: issued for the name it is dialled at,
+            // chaining to a root this machine trusts or to a TLS root of this
+            // controller's store kept for every use - and remembered, so that
+            // one turning up with another certificate than before is said.
+            var host = new Uri(url).Host;
+
+            RemoteTLSServerCertificateValidationHandler<org.GraphDefined.Vanaheimr.Hermod.WebSocket.IWebSocketClient>? judgeTheCSMS = null;
+
+            if (csmsSettings.WantsTLS)
+                judgeTheCSMS = (sender, certificate, chain, client, errors) => {
+
+                    var judgement = JudgeServer(CSMSService, host, null, certificate, chain, errors, Evidence: false);
+
+                    return judgement.Accepted
+                               ? TLSValidationResult.Success()
+                               : TLSValidationResult.Failed($"The CSMS's certificate was refused: {OutcomeSaid(judgement.Outcome)}.");
+
+                };
 
             // Before the first attempt, and by the node, which gives it to the
             // client it makes: a client whose first attempt failed had ended by
@@ -221,8 +257,10 @@ namespace cloud.charging.open.LocalController
                                    );
 
             var signedIn = $"This local controller signed in to the CSMS at {url} " +
-                           $"({(totpConfig is not null ? "with a one-time token" : "with a password")}, " +
+                           $"({(csmsSettings.WantsClientCertificate ? "with its certificate" : totpConfig is not null ? "with a one-time token" : "with a password")}, " +
                            $"security profile {csmsSettings.SecurityProfile}).";
+
+            var attempted = TimeProvider.GetUtcNow();
 
             try
             {
@@ -241,6 +279,9 @@ namespace cloud.charging.open.LocalController
                                          RequestTimeout:            csmsSettings.RequestTimeout,
 
                                          TLSProtocols:              csmsSettings.MinimumTLSVersion,
+
+                                         RemoteCertificateValidator: judgeTheCSMS,
+                                         ClientCertificateContext:   identity,
 
                                          DNSClient:                 DNSClient
 
@@ -268,8 +309,16 @@ namespace cloud.charging.open.LocalController
                     // is still starting - which the client comes back from.
                     var why          = response?.HTTPBodyAsJSONObject?["message"]?.Value<String>();
 
+                    // Nor has one whose certificate this controller did not
+                    // believe - but that is worth saying in its own words
+                    // rather than as a CSMS that could not be reached.
+                    var judged       = LastJudgementOf(CSMSService, host);
+                    var unbelieved   = judged is { Accepted: false } && judged.At >= attempted;
+
                     csmsLastProblem  = (response?.HTTPRequest is null
-                                           ? $"The CSMS at {url} could not be reached{(why is null ? "" : $": {why.TrimEnd('.')}")}."
+                                           ? unbelieved
+                                                 ? $"The CSMS at {url} showed a certificate this local controller does not believe: {OutcomeSaid(judged!.Outcome)}."
+                                                 : $"The CSMS at {url} could not be reached{(why is null ? "" : $": {why.TrimEnd('.')}")}."
                                            : TheCSMSClient()?.KeepsTrying == true
                                                  ? $"The CSMS at {url} cannot let this local controller in yet: {response.HTTPStatusCode}."
                                                  : $"The CSMS at {url} refused this local controller: {response.HTTPStatusCode}.") +
@@ -475,6 +524,177 @@ namespace cloud.charging.open.LocalController
         #endregion
 
 
+        #region (private) TryCSMSIdentity(out Identity, out Problem)
+
+        /// <summary>
+        /// The TLS identity chosen to sign in to the CSMS with under security
+        /// profile 3, with the certificates that travel with it - or why there
+        /// is none to sign in with.
+        /// </summary>
+        /// <remarks>
+        /// Read from the certificate store at every dialling rather than kept:
+        /// an identity switched off, renewed or deleted on the store's page is
+        /// what the next attempt goes by.
+        /// </remarks>
+        private Boolean TryCSMSIdentity([NotNullWhen(true)]  out SslStreamCertificateContext?  Identity,
+                                        [NotNullWhen(false)] out String?                       Problem)
+        {
+
+            Identity  = null;
+            Problem   = null;
+
+            if (csmsSettings.ChosenClientCertificate is not String handle)
+            {
+                Problem = "Security profile 3 signs in with a TLS identity of this local controller's own, and none is chosen. " +
+                          "Import one on the certificate store's page and choose it for the CSMS connection.";
+                return false;
+            }
+
+            var entry = Certificates.Get(handle) ?? Certificates.ByFingerprint(handle);
+
+            if (entry is null)
+            {
+                Problem = $"The TLS identity {handle} chosen for the CSMS connection is not in the certificate store.";
+                return false;
+            }
+
+            if (entry.Kind != CertificateKind.TLSIdentity)
+            {
+                Problem = $"'{entry.Label}' ({entry.Id}), chosen for the CSMS connection, is not a TLS identity " +
+                          $"this local controller could sign in with, but a {entry.Kind.Describe()}.";
+                return false;
+            }
+
+            if (!entry.IsUsable)
+            {
+                Problem = $"The TLS identity '{entry.Label}' ({entry.Id}) chosen for the CSMS connection is " +
+                          (!entry.IsActive     ? "switched off"
+                         : entry.IsExpired     ? $"expired since {entry.NotAfter:yyyy-MM-dd}"
+                         : entry.IsNotYetValid ? $"not valid before {entry.NotBefore:yyyy-MM-dd}"
+                         :                       "not usable") + ".";
+                return false;
+            }
+
+            if (!Certificates.TryLoad(entry, out var certificate, out var error))
+            {
+                Problem = $"The TLS identity '{entry.Label}' ({entry.Id}) chosen for the CSMS connection could not be read: {error.TrimEnd('.')}.";
+                return false;
+            }
+
+            if (!certificate.HasPrivateKey)
+            {
+                certificate.Dispose();
+                Problem = $"The TLS identity '{entry.Label}' ({entry.Id}) chosen for the CSMS connection has no private key to sign in with.";
+                return false;
+            }
+
+            // Loaded once more, with a key the platform keeps for as long as the
+            // certificate is used - as the station port's own certificates are.
+            // The store reads its keys as ephemeral, and SChannel on Windows
+            // takes no key it cannot find again: the first handshake with one
+            // failed with "the credentials supplied to the package were not
+            // recognized".
+            X509Certificate2 presented;
+
+            try
+            {
+                var password = Guid.NewGuid().ToString("N");
+                presented    = X509CertificateLoader.LoadPkcs12(certificate.Export(X509ContentType.Pkcs12, password),
+                                                                password,
+                                                                X509KeyStorageFlags.Exportable);
+            }
+            catch (Exception e)
+            {
+                Problem = $"The TLS identity '{entry.Label}' ({entry.Id}) chosen for the CSMS connection could not be made ready to present: {e.Message.TrimEnd('.')}.";
+                return false;
+            }
+            finally
+            {
+                certificate.Dispose();
+            }
+
+            // The certificates in its file besides its own - the sub-CAs a
+            // CSMS needs to build its chain up to a root it trusts.
+            var chain = new X509Certificate2Collection();
+
+            try
+            {
+
+                var file   = Certificates.FullPath(entry);
+                var others = Path.GetExtension(file).ToLowerInvariant() is ".p12" or ".pfx"
+                                 ? X509CertificateLoader.LoadPkcs12CollectionFromFile(file, null, X509KeyStorageFlags.EphemeralKeySet)
+                                 : LoadPEM(file);
+
+                foreach (var other in others)
+                    if (!String.Equals(other.Thumbprint, presented.Thumbprint, StringComparison.OrdinalIgnoreCase))
+                        chain.Add(other);
+
+                static X509Certificate2Collection LoadPEM(String File)
+                {
+                    var collection = new X509Certificate2Collection();
+                    collection.ImportFromPemFile(File);
+                    return collection;
+                }
+
+            }
+            catch
+            {
+                // A file that yields its certificate but no collection has no
+                // sub-CAs worth sending: the certificate alone is what there is.
+            }
+
+            Identity = SslStreamCertificateContext.Create(presented, chain, offline: true);
+            return true;
+
+        }
+
+        #endregion
+
+        #region (private static) OutcomeSaid(Outcome)
+
+        /// <summary>
+        /// What the node made of a server's certificate, in a few words - the
+        /// words of the pages, which say the same of a time server's.
+        /// </summary>
+        private static String OutcomeSaid(String Outcome)
+
+            => Outcome switch {
+                   "accepted"       => "believed",
+                   "recorded"       => "used, although not what it is held to - recorded",
+                   "tolerated"      => "used, although not what it is held to",
+                   "pinMismatch"    => "not what it is held to",
+                   "untrusted"      => "it chains to no root that is trusted",
+                   "wrongName"      => "it was not issued for its name",
+                   "noCertificate"  => "it showed no certificate",
+                   _                => Outcome
+               };
+
+        #endregion
+
+        #region UsedByCSMS(Handle)
+
+        /// <summary>
+        /// The setting of the CSMS connection that names this certificate, or
+        /// null where none does.
+        /// </summary>
+        public String? UsedByCSMS(String? Handle)
+        {
+
+            if (Handle is null or { Length: 0 } || csmsSettings.ChosenClientCertificate is not String chosen)
+                return null;
+
+            var entry = Certificates.Get(Handle);
+
+            return String.Equals(chosen, Handle,          StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(chosen, entry?.Thumbprint, StringComparison.OrdinalIgnoreCase)
+                       ? "clientCertificate"
+                       : null;
+
+        }
+
+        #endregion
+
+
         #region CSMSConfigurationJSON()
 
         /// <summary>
@@ -485,6 +705,31 @@ namespace cloud.charging.open.LocalController
         {
 
             var json = csmsSettings.ToJSON();
+
+            // The TLS identity chosen for security profile 3, resolved against
+            // the store, so that the page can say what is chosen - and that it
+            // is missing, or switched off - without reading the store, which not
+            // everybody who may look at this page may do.
+            if (csmsSettings.ChosenClientCertificate is String handle)
+            {
+
+                var entry = Certificates.Get(handle) ?? Certificates.ByFingerprint(handle);
+
+                json.Add("clientCertificateIs", entry is null
+                                                    ? new JObject(
+                                                          new JProperty("id",       handle),
+                                                          new JProperty("missing",  true)
+                                                      )
+                                                    : new JObject(
+                                                          new JProperty("id",        entry.Id),
+                                                          new JProperty("missing",   false),
+                                                          new JProperty("label",     entry.Label),
+                                                          new JProperty("subject",   entry.Subject),
+                                                          new JProperty("notAfter",  entry.NotAfter.ToString("o")),
+                                                          new JProperty("usable",    entry.IsUsable && entry.Kind == CertificateKind.TLSIdentity)
+                                                      ));
+
+            }
 
             json.Add("state", new JObject(
                 new JProperty("connected",           csmsConnected),

@@ -319,6 +319,10 @@ export interface CertificateStore {
     /** What a certificate of a kind that has usages may be told it is for. */
     usages?:       string[];
     certificates:  Record<CertificateKind, Certificate[]>;
+    /** Which handle the CSMS connection signs in with under security profile 3. */
+    chosen?: {
+        csmsClientCertificate:  string | null;
+    };
     /** Whether anything in the store carries a private key, which is kept unencrypted. */
     keysAreUnencrypted: boolean;
 }
@@ -724,6 +728,10 @@ export interface CSMSConfiguration {
     requestTimeout:              number;
     reconnectInitialDelay:       number;
     reconnectMaxDelay:           number;
+    /** The TLS identity of the certificate store security profile 3 signs in with, by its handle; empty for none. */
+    clientCertificate?:          string;
+    /** That identity as the store has it - or that it has none by that handle. */
+    clientCertificateIs?:        { id: string; missing: boolean; label?: string; subject?: string; notAfter?: string; usable?: boolean };
     credentials:                 CSMSCredentials;
     state: {
         connected:           boolean;
@@ -745,6 +753,8 @@ export interface CSMSUpdate {
     requestTimeout?:              number;
     reconnectInitialDelay?:       number;
     reconnectMaxDelay?:           number;
+    /** The TLS identity security profile 3 signs in with; null for none, and left out to leave it alone. */
+    clientCertificate?:           string | null;
 }
 
 /** A way a charging station can prove who it is. */
