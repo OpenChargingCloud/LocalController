@@ -68,8 +68,8 @@ export const ntsPage: Page = {
                 void load();
         });
 
-        const mayChange = auth.can('changeNetworkSettings');
-        const mayTest   = auth.can('runDiagnostics');
+        const mayChange = auth.can('nts', 'edit');
+        const mayTest   = auth.can('nts', 'run');
 
         let cancelled = false;
         let current: NTSConfiguration | null = null;

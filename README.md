@@ -38,10 +38,20 @@ below the node's `/api`.
 
 | Page | What it changes | Permission |
 |------|-----------------|------------|
-| Configuration | nothing - it answers "what am I running" | `readConfiguration` |
-| DNS client | the name servers and how they are asked; a test lookup, of all of them or of one | `changeNetworkSettings`, `runDiagnostics` |
-| NTS client | the time servers and the rules for believing them; a synchronisation, and a test of one server step by step | `changeNetworkSettings`, `runDiagnostics` |
-| Logs | nothing - it reads | `readConfiguration` |
+| Configuration | nothing - it answers "what am I running" | `configuration:read` |
+| DNS client | the name servers and how they are asked; a test lookup, of all of them or of one | `dns:edit`, `dns:run` |
+| NTS client | the time servers and the rules for believing them; a synchronisation, and a test of one server step by step | `nts:edit`, `nts:run` |
+| CSMS connection | where the controller reports to, how it dials, and what it signs in with | `csms:edit` |
+| Charging stations | the server the charging stations connect to: its port, the security profiles it accepts, the names it is reachable as, what it logs | `stations:edit` |
+| Logins and groups | which charging stations may sign in, with what, and what their group allows them | `stations:edit` |
+| Server certificates | the keys this controller presents, and the certificates that answer them | `certificates:edit` |
+| Accepted chains | which certificate authorities a charging station may be vouched for by | `certificates:edit` |
+| Logs | nothing - it reads | anybody signed in |
+
+Looking at a page takes `read` on the resource in its column: `dns:read` for
+the DNS client, `stations:read` for the charging stations. The clock, the log
+and the event stream are for anybody signed in. Which roles hold what is under
+"Who may open it" below.
 
 Everything on the DNS and NTS pages takes effect the moment it is saved, for
 everything inside the controller that resolves a name or reads a clock, and is
@@ -334,23 +344,43 @@ controller's own API reads. Basic auth and API keys work just as well, because
 Hermod offers all three.
 
 What somebody may do comes from the user groups they are in. Each group is one
-role, under the same name:
+role, under the same name, and a role is a list of permissions, each an
+operation on a resource - written `dns:edit`. That is the model of every node,
+described in [WWCP_Node](https://github.com/OpenChargingCloud/WWCP_Node) under
+"Who may sign in"; the operations are `read`, `edit` and `run`, and the
+resources are the node's `configuration`, `dns`, `nts` and `certificates` and
+the two a local controller adds: `csms`, the line up to the CSMS, and
+`stations`, the charging stations and which of them may sign in.
 
 | Role | May |
 |------|-----|
-| `viewer` | read the configuration and the log |
-| `cpo` | that, and change the name and time servers, and test them |
-| `systemadmin` | everything this controller can be told |
+| `viewer` | read everything: `*:read` |
+| `cpo` | that, and run the site: change the name and time servers and ask them (`dns` and `nts`, `edit` and `run`), and change the line up to the CSMS and the charging stations (`csms:edit`, `stations:edit`) |
+| `systemadmin` | everything this controller can be told, the certificates included |
 
-The three groups are made at every start, so a group deleted by hand does not
-leave a role nobody can ever hold again. A group that is not one of these
-grants nothing - a role this controller has never heard of is a role it cannot
-enforce.
+The viewer and the administrators are the node's, the CPO is the local
+controller's. The certificates are the one resource only the administrators may
+change: somebody who can add a certificate authority can let in a charging
+station that nobody issued a password to.
+
+The `roles` section of `configuration.json` adds roles, or says differently what
+one of them may do - and a role there that names a resource this controller
+does not have stops the start, rather than quietly granting nothing:
+
+```json
+"roles": { "support": [ "dns:read", "stations:read" ] }
+```
+
+The groups are made at every start, so a group deleted by hand does not leave a
+role nobody can ever hold again. A group that is none of these, and none the
+file names, grants nothing - a role this controller has never heard of is a
+role it cannot enforce.
 
 Membership is asked on every request rather than remembered at the sign-in, so
 taking somebody out of a group takes effect on their next request. The
-permissions travel to the browser so a page can grey out what somebody may not
-do - a courtesy, not a lock: every request is checked again on arrival.
+permissions travel to the browser, spelt out resource by resource, so a page can
+grey out what somebody may not do - a courtesy, not a lock: every request is
+checked again on arrival.
 
 
 ## Your participation

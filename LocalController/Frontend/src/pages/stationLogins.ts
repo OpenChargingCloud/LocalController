@@ -40,7 +40,7 @@ export const stationLoginsPage: Page = {
                 void load();
         });
 
-        const mayChange = auth.can('changeStationSettings');
+        const mayChange = auth.can('stations', 'edit');
 
         let cancelled = false;
         let store: StationLogins | null = null;

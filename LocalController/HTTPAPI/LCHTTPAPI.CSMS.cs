@@ -22,7 +22,7 @@ using Newtonsoft.Json.Linq;
 using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 
-using cloud.charging.open.LocalController.Web;
+using cloud.charging.open.protocols.WWCP.Node.Web;
 
 #endregion
 
@@ -66,7 +66,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> GetCSMS(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ReadConfiguration, false, out _, out var refused))
+            if (!TryAuthorize(Request, Permission.Read(LocalControllerAccess.CSMS), false, out _, out var refused))
                 return Task.FromResult(refused);
 
             return Task.FromResult(
@@ -87,7 +87,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutCSMS(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.CSMS), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
@@ -122,7 +122,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutCSMSCredentials(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.CSMS), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
@@ -202,7 +202,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> DeleteCSMSCredentials(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.CSMS), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!Controller.CSMSLogin.TryClear(out var error))

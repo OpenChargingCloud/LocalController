@@ -41,7 +41,7 @@ export const ocppServerPage: Page = {
                 void load();
         });
 
-        const mayChange = auth.can('changeStationSettings');
+        const mayChange = auth.can('stations', 'edit');
 
         let cancelled = false;
         let server:   OCPPServerConfiguration | null = null;

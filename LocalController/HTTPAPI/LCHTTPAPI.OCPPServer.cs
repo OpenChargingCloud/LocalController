@@ -26,7 +26,7 @@ using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 
 using cloud.charging.open.LocalController.OCPP;
-using cloud.charging.open.LocalController.Web;
+using cloud.charging.open.protocols.WWCP.Node.Web;
 
 #endregion
 
@@ -40,9 +40,10 @@ namespace cloud.charging.open.LocalController
     /// </summary>
     /// <remarks>
     /// Four pages worth of routes, in four groups, and the groups are not the
-    /// same permission. Reading is reading; changing the server and the list of
-    /// charging stations is a day's work on a site; generating a key and naming
-    /// a certificate authority is neither. See <see cref="Permissions"/>.
+    /// same resource. Reading is reading; changing the server and the list of
+    /// charging stations is "stations", a day's work on a site; generating a
+    /// key and naming a certificate authority is "certificates", which is
+    /// neither. See <see cref="LocalControllerAccess"/>.
     /// </remarks>
     public partial class LCHTTPAPI
     {
@@ -98,7 +99,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> GetOCPPServer(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ReadConfiguration, false, out _, out var refused))
+            if (!TryAuthorize(Request, Permission.Read(LocalControllerAccess.Stations), false, out _, out var refused))
                 return Task.FromResult(refused);
 
             return Task.FromResult(
@@ -118,7 +119,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutOCPPServer(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
@@ -146,7 +147,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> GetCertificates(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ReadConfiguration, false, out _, out var refused))
+            if (!TryAuthorize(Request, Permission.Read(NodeResources.Certificates), false, out _, out var refused))
                 return Task.FromResult(refused);
 
             // Recomputed before it is shown: what is wrong with a certificate
@@ -173,7 +174,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PostCertificateRequest(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(NodeResources.Certificates), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
@@ -226,7 +227,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> GetCertificateRequest(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ReadConfiguration, false, out _, out var refused))
+            if (!TryAuthorize(Request, Permission.Read(NodeResources.Certificates), false, out _, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -261,7 +262,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutCertificate(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(NodeResources.Certificates), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -315,7 +316,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> DeleteCertificate(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(NodeResources.Certificates), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -343,7 +344,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> GetTrust(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ReadConfiguration, false, out _, out var refused))
+            if (!TryAuthorize(Request, Permission.Read(NodeResources.Certificates), false, out _, out var refused))
                 return Task.FromResult(refused);
 
             return Task.FromResult(
@@ -359,7 +360,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PostTrust(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(NodeResources.Certificates), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
@@ -395,7 +396,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutTrust(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(NodeResources.Certificates), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -426,7 +427,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> DeleteTrust(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ManageCertificates, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(NodeResources.Certificates), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -453,7 +454,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> GetStations(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ReadConfiguration, false, out _, out var refused))
+            if (!TryAuthorize(Request, Permission.Read(LocalControllerAccess.Stations), false, out _, out var refused))
                 return Task.FromResult(refused);
 
             return Task.FromResult(
@@ -475,7 +476,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PostStation(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
@@ -516,7 +517,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutStation(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -570,7 +571,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutStationTOTP(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -656,7 +657,7 @@ namespace cloud.charging.open.LocalController
                                                 String            What)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out var user, out var refused))
                 return refused;
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -682,7 +683,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> DeleteStation(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -713,7 +714,7 @@ namespace cloud.charging.open.LocalController
             // Asked before the body is looked at, like every other route here:
             // somebody who may not change anything should be told that and not
             // what this controller thinks of their JSON.
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out _, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out _, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
@@ -729,7 +730,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> PutGroup(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out _, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out _, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))
@@ -757,7 +758,7 @@ namespace cloud.charging.open.LocalController
                                         JObject      JSON)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out var user, out var refused))
                 return refused;
 
             #region The ways in it accepts
@@ -822,7 +823,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> DeleteGroup(HTTPRequest Request)
         {
 
-            if (!TryAuthorize(Request, Permissions.ChangeStationSettings, true, out var user, out var refused))
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
             if (!TryGetId(Request, out var id, out var badRequest))

@@ -296,7 +296,7 @@ describe('signing in', () => {
                     // What the HTTPExt API answers: its own shape, no roles.
                     ? new Response(JSON.stringify({ '@context': '', description: 'signed in' }),
                                    { status: 201, headers: { 'Content-Type': 'application/json' } })
-                    : new Response(JSON.stringify({ username: 'root', roles: ['cpo'], permissions: ['runDiagnostics'] }),
+                    : new Response(JSON.stringify({ username: 'root', roles: ['cpo'], permissions: ['dns:run'] }),
                                    { status: 200, headers: { 'Content-Type': 'application/json' } })
             );
         });

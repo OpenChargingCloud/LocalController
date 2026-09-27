@@ -34,18 +34,26 @@ export interface LogPage {
 }
 
 /**
- * What somebody signed in to this local controller may do.
+ * What a role may be allowed to touch on this local controller: what every
+ * node has, and what a local controller adds to it.
+ */
+export type Resource = 'configuration' | 'dns' | 'nts' | 'certificates'
+                     | 'csms' | 'stations';
+
+/** How a resource may be touched. */
+export type Operation = 'read' | 'edit' | 'run';
+
+/**
+ * What somebody signed in to this local controller may do: an operation on a
+ * resource, written "dns:edit".
  *
  * A copy of what the controller enforces, not the enforcement: it is here so a
  * page can grey out what this person may not do instead of offering it and
  * letting them find out by being refused. Every request is checked again on
  * arrival, so editing this list in a browser buys a button that answers 403.
+ * Spelt out resource by resource by the controller, so "*" never arrives here.
  */
-export type Permission = 'readConfiguration'
-                       | 'changeNetworkSettings'
-                       | 'runDiagnostics'
-                       | 'changeStationSettings'
-                       | 'manageCertificates';
+export type Permission = `${Resource}:${Operation}`;
 
 /** Who is signed in to the web interface. */
 export interface Me {

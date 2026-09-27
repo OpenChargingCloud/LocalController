@@ -39,7 +39,7 @@ export const csmsPage: Page = {
                 void load();
         });
 
-        const mayChange = auth.can('changeStationSettings');
+        const mayChange = auth.can('csms', 'edit');
 
         let cancelled = false;
         let csms: CSMSConfiguration | null = null;

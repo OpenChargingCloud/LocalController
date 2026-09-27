@@ -42,7 +42,7 @@ export const serverCertificatesPage: Page = {
                 void load();
         });
 
-        const mayManage = auth.can('manageCertificates');
+        const mayManage = auth.can('certificates', 'edit');
 
         let cancelled = false;
         let store:  ServerCertificates      | null = null;

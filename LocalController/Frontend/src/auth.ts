@@ -1,4 +1,4 @@
-import { api, ApiError, onUnauthorized, type Me, type Permission } from './api/client';
+import { api, ApiError, onUnauthorized, type Me, type Operation, type Resource } from './api/client';
 import { fromURL } from './basePath';
 
 type Listener = (user: Me | null) => void;
@@ -62,8 +62,8 @@ class AuthState {
      * every request again when it arrives, so a page that got this wrong shows
      * a button that answers 403 rather than one that works.
      */
-    can(permission: Permission): boolean {
-        return this.user?.permissions?.includes(permission) ?? false;
+    can(resource: Resource, operation: Operation): boolean {
+        return this.user?.permissions?.includes(`${resource}:${operation}`) ?? false;
     }
 
     /** Router guard: the sign-in page with a way back, or null when signed in. */
