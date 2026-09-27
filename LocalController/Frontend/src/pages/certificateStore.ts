@@ -187,6 +187,11 @@ export const certificateStorePage: Page = {
         function importCard() {
 
             const store = current!;
+
+            // Drawn as the kind chosen, as the browser would choose it anyway,
+            // so that an untouched form is one: a select with no option drawn
+            // as selected counts as typed into - see typedSinceDrawn - and
+            // leaving the page asked about a draft nobody had begun.
             const first = kindsShown()[0];
 
             return html`
@@ -208,7 +213,7 @@ export const certificateStorePage: Page = {
                         <label>What it is for
                             <select name="kind" id="import-kind" ${busy ? html`disabled` : ''}>
                                 ${kindsShown().map(kind => html`
-                                    <option value="${kind}">${store.kinds[kind].description}</option>
+                                    <option value="${kind}" ${kind === first ? html`selected` : ''}>${store.kinds[kind].description}</option>
                                 `)}
                             </select>
                         </label>

@@ -235,13 +235,21 @@ export const csmsPage: Page = {
                                            ? html`<div class="notice warn">${chosen.label} is switched off, or not valid today - profile 3 cannot sign in with it.</div>`
                                            : '';
 
+            // None is drawn as chosen whenever no identity offered is the one
+            // chosen - also where that one is missing from the store, or is no
+            // identity - as the browser would choose it anyway: a select with
+            // no option drawn as selected counts as typed into - see
+            // typedSinceDrawn - and leaving the page asked about a draft
+            // nobody had begun.
+            const offered = identities?.some(identity => identity.id === chosen?.id) ?? false;
+
             return html`
                 <label>TLS identity, for security profile 3
                     ${identities === null
                           ? html`<input type="text" value="${chosen ? `${chosen.label ?? ''} (${chosen.id})` : 'none'}" disabled />
                                  <span class="hint">Choosing one takes reading the certificate store, which this account may not.</span>`
                           : html`<select name="clientCertificate" ${mayChange ? '' : html`disabled`}>
-                                     <option value="" ${chosen === undefined ? html`selected` : ''}>none</option>
+                                     <option value="" ${offered ? '' : html`selected`}>none</option>
                                      ${identities.map(identity => html`
                                          <option value="${identity.id}" ${chosen?.id === identity.id ? html`selected` : ''}>
                                              ${identity.label} (${identity.id})${identity.usable ? '' : ' - not usable'}
