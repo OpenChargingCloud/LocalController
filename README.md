@@ -42,6 +42,7 @@ below the node's `/api`.
 | DNS client | the name servers and how they are asked; a test lookup, of all of them or of one | `dns:edit`, `dns:run` |
 | NTS client | the time servers and the rules for believing them; a synchronisation, and a test of one server step by step | `nts:edit`, `nts:run` |
 | CSMS connection | where the controller reports to, how it dials, and what it signs in with | `csms:edit` |
+| Certificate store | the TLS roots of the servers the controller connects to, their certificates, and what it presents in TLS itself | `certificates:edit` |
 | Charging stations | the server the charging stations connect to: its port, the security profiles it accepts, the names it is reachable as, what it logs | `stations:edit` |
 | Logins and groups | which charging stations may sign in, with what, and what their group allows them | `stations:edit` |
 | Server certificates | the keys this controller presents, and the certificates that answer them | `certificates:edit` |
@@ -332,6 +333,37 @@ stream ends too, without the entry, and the browser's next try is answered with
 a 401. One opened with an API key ends the same way once the key is revoked or
 has run out. One opened with Basic auth has neither, and is held to its account
 instead.
+
+
+## The certificate store
+
+The node's store, with the kinds of TLS in it and none of ISO 15118's, which are
+a vehicle's: the **TLS roots** a server this controller connects to may chain
+to - a time server, a name server over TLS or HTTPS - beside the ones this
+machine trusts; the **server certificates** of such servers, kept so that one
+can be held to its fingerprint; and the **TLS identities** this controller
+presents itself, each with its private key. It lives in `certificates/` beside
+`configuration.json`, one file per certificate and an `index.json` saying what
+each is called, whether it is switched on and what it is kept for; a file
+copied into the right directory by hand is taken in at the next start, or by
+"Re-read the directory" on the page.
+
+A TLS root and a server certificate are told what they are for - the name
+servers, the time servers, or every use - at the upload and later: a root kept
+for the name servers alone vouches for no time server. The dialog in which a
+time server or a name server is pinned offers the store's certificates for its
+service, and a pinned fingerprint the store keeps is named by its label.
+
+It is the vehicle's store and the vehicle's page, over the same routes -
+`GET` and `POST /api/v1/certificates`, `POST /api/v1/certificates/reload`, and
+`GET`, `PATCH` and `DELETE /api/v1/certificates/{id}` - at `certificates:read`
+to look and `certificates:edit` to change. The charging station port's own keys
+and the chains it accepts from charging stations are not in it: they keep the
+stores of their own they have always had, on the pages "Server certificates" and
+"Accepted chains".
+
+The private keys are kept unencrypted, as the vehicle's are, and the page says
+so as soon as there is one.
 
 
 ## Who may open it

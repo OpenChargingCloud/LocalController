@@ -233,6 +233,11 @@ namespace cloud.charging.open.LocalController
             RegisterOCPPServerRoutes();
             RegisterCSMSRoutes();
 
+            // This controller's own certificate store: the TLS roots and the
+            // certificates of the servers it connects to, and what it presents
+            // itself; see LCHTTPAPI.Certificates.cs.
+            RegisterCertificateStoreRoutes();
+
             AddHandler(HTTPPath.Root + "v1/logs",          GetLogs,           HTTPMethod.GET);
 
             AddHandler(HTTPMethod.GET,
@@ -242,7 +247,7 @@ namespace cloud.charging.open.LocalController
 
             // Everything else below /api answers with a JSON 404 instead of
             // the single-page-application stub of the web interface.
-            foreach (var method in new[] { HTTPMethod.GET, HTTPMethod.HEAD, HTTPMethod.POST, HTTPMethod.PUT, HTTPMethod.DELETE })
+            foreach (var method in new[] { HTTPMethod.GET, HTTPMethod.HEAD, HTTPMethod.POST, HTTPMethod.PUT, HTTPMethod.PATCH, HTTPMethod.DELETE })
                 AddHandler(HTTPPath.Root + "{path..}", UnknownPath, method);
 
         }

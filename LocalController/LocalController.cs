@@ -31,6 +31,7 @@ using OCPPv2_1_LC = cloud.charging.open.protocols.OCPPv2_1.LocalController;
 
 using cloud.charging.open.protocols.WWCP.Node;
 using cloud.charging.open.protocols.WWCP.Node.Logging;
+using cloud.charging.open.protocols.WWCP.Node.Certificates;
 using cloud.charging.open.protocols.WWCP.Node.Configuration;
 
 using cloud.charging.open.LocalController.Configuration;
@@ -229,13 +230,16 @@ namespace cloud.charging.open.LocalController
                    NTSClient:          NTSClient,
                    Frontend:           Frontend ?? new EmbeddedContentSource(HTTPRoot, typeof(LocalController).Assembly),
 
-                   // None of the kinds the node's store keeps - those are
-                   // ISO 15118's. What a local controller presents and
-                   // believes is its station port's, in stores of its own:
-                   // ocpp-server-keys and ocpp-client-trust. So there is no
-                   // store directory of the node's beside the configuration
-                   // file either.
-                   CertificateKinds:   [],
+                   // TLS's kinds of the node's store, and none of ISO 15118's,
+                   // which are a vehicle's: the roots a server this controller
+                   // connects to may chain to - a time server, a name server,
+                   // the CSMS - the certificates of such servers, kept to hold
+                   // one to by its fingerprint, and what this controller
+                   // presents in TLS itself. What its station port presents
+                   // and which chains it accepts from charging stations stay
+                   // in the stores of their own they have always had:
+                   // ocpp-server-keys and ocpp-client-trust.
+                   CertificateKinds:   [ CertificateKind.TLSRoot, CertificateKind.TLSServer, CertificateKind.TLSIdentity ],
 
                    Log:                Log,
                    LogToConsole:       LogToConsole,

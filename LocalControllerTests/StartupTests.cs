@@ -21,6 +21,8 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using cloud.charging.open.protocols.WWCP.Node.Certificates;
+
 using cloud.charging.open.LocalController.Configuration;
 
 #endregion
@@ -182,22 +184,23 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region AControllerKeepsNoCertificateStoreOfTheNodes()
+        #region AControllerKeepsTheKindsOfTLSInTheNodesStore()
 
         /// <summary>
         /// The node below keeps the certificates its kind asks for, and a
-        /// local controller asks for none: nothing is made beside the
-        /// configuration file for them, at construction or at a start.
+        /// local controller asks for TLS's: the roots of the servers it
+        /// connects to, their certificates, and what it presents itself - and
+        /// none of ISO 15118's, which are a vehicle's.
         /// </summary>
         /// <remarks>
-        /// The kinds that store knows are ISO 15118's. What a controller
-        /// presents to its charging stations and whom it believes are in
-        /// stores of its own, and until the node could be told so, every start
-        /// made a certificates directory with an index.json in it beside the
-        /// file - which, below a repository, is a tree git calls dirty.
+        /// Until it had a use for them it asked for none, and nothing was made
+        /// beside the configuration file. Now it has one, the store lives
+        /// there, in certificates/, which the repository ignores like the
+        /// accounts. What a controller presents to its charging stations, and
+        /// which of their chains it believes, stay in stores of their own.
         /// </remarks>
         [Test]
-        public async Task AControllerKeepsNoCertificateStoreOfTheNodes()
+        public async Task AControllerKeepsTheKindsOfTLSInTheNodesStore()
         {
 
             await using var controller = TestControllers.New(directory, TestControllers.Offline);
@@ -206,11 +209,13 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
 
-                Assert.That(Directory.Exists(Path.Combine(directory, "certificates")), Is.False,
-                            "A certificate store of the node's was made beside the configuration file.");
+                Assert.That(controller.Certificates.Kinds,
+                            Is.EquivalentTo(new[] { CertificateKind.TLSRoot, CertificateKind.TLSServer, CertificateKind.TLSIdentity }),
+                            "The node's store keeps other kinds of certificate than a controller has use for.");
 
-                Assert.That(controller.Certificates.Kinds,                               Is.Empty,
-                            "The node's store keeps kinds of certificate a controller has no use for.");
+                Assert.That(Path.GetFullPath(controller.Certificates.Directory),
+                            Is.EqualTo(Path.GetFullPath(Path.Combine(directory, "certificates"))),
+                            "The node's store is not beside the configuration file, which is what it is measured from.");
 
             });
 

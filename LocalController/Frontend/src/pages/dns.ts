@@ -6,8 +6,8 @@ import { shell } from '../shell';
 import { errorMessage, formatValue, humanizeKey, whileSaving } from '../ui';
 import { typedSinceDrawn, unsaved } from '../unsaved';
 import { allServersTake, entryOf, isEncrypted, oneServerTakes } from './dnsServers';
-import { keysOf, pinsIn, saysAnything, withPins } from './pins';
-import { certificateVerdictView, heldToView, judgementView, pinsFieldset, readPinsFieldset, shownView, wirePinsFieldset } from './pinViews';
+import { keysOf, pinsIn, saysAnything, withPins, type StoreOffers } from './pins';
+import { certificateVerdictView, heldToView, judgementView, pinsFieldset, readPinsFieldset, shownView, storeOffers, wirePinsFieldset } from './pinViews';
 
 /**
  * How this local controller resolves names.
@@ -55,6 +55,13 @@ export const dnsPage: Page = {
 
         /** The servers on screen; edited as a list and sent as one value. */
         let servers: DNSServer[] = [];
+
+        /**
+         * The roots and server certificates the store keeps for the name
+         * servers, to be picked in a server's dialog and to name a pinned
+         * fingerprint by - or null where this person may not read the store.
+         */
+        let offers: StoreOffers | null = null;
 
         let result: DNSQueryResult | null = null;
         let testing = false;
@@ -321,8 +328,8 @@ export const dnsPage: Page = {
                     ${saved === undefined
                           ? html`<span class="muted">not saved yet</span>`
                           : html`${certificateVerdictView(saved.judgement, saved.known)}
-                                 ${shownView(saved.judgement, saved.known)}`}
-                    ${heldToView(pins, changed)}
+                                 ${shownView(saved.judgement, saved.known, offers?.nameOf)}`}
+                    ${heldToView(pins, offers?.nameOf, changed)}
                 </div>
             `;
 
@@ -376,7 +383,8 @@ export const dnsPage: Page = {
                                               name,
                                               certificate:  saved.judgement?.certificate ?? saved.known?.certificate ?? null,
                                               root:         saved.judgement?.root        ?? saved.known?.root        ?? null
-                                          }
+                                          },
+                          offers
                       })}
 
                     <div class="form-actions">
@@ -624,7 +632,7 @@ export const dnsPage: Page = {
             if (judged.length > 0)
                 return html`
                     <h3>Certificates</h3>
-                    ${judged.map(judgement => judgementView(judgement))}
+                    ${judged.map(judgement => judgementView(judgement, offers?.nameOf))}
                 `;
 
             if (result.certificates !== undefined && !result.asked &&
@@ -828,12 +836,16 @@ export const dnsPage: Page = {
 
             try
             {
-                const loaded = await api.dns.get();
+                // The store beside the configuration and not after it: it only
+                // names fingerprints and offers them in a server's dialog, and
+                // a store this person may not read is no reason to show no page.
+                const [ loaded, kept ] = await Promise.all([ api.dns.get(), storeOffers('dns') ]);
 
                 if (cancelled)
                     return;
 
                 current = loaded;
+                offers  = kept;
                 servers = loaded.servers.map(server => ({ ...server }));
 
                 draw();

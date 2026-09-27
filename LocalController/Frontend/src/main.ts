@@ -14,6 +14,7 @@ import { configurationPage }      from './pages/configuration';
 import { dnsPage }                from './pages/dns';
 import { ntsPage }                from './pages/nts';
 import { csmsPage }               from './pages/csms';
+import { certificateStorePage }   from './pages/certificateStore';
 import { ocppServerPage }         from './pages/ocppServer';
 import { stationLoginsPage }      from './pages/stationLogins';
 import { serverCertificatesPage } from './pages/serverCertificates';
@@ -43,6 +44,7 @@ const router = new Router({
         { path: '/configuration/nts',   page: ntsPage,            guard: auth.requireSignIn },
 
         { path: '/configuration/csms',                      page: csmsPage,               guard: auth.requireSignIn },
+        { path: '/configuration/certificates',              page: certificateStorePage,   guard: auth.requireSignIn },
         { path: '/configuration/ocpp-server',               page: ocppServerPage,         guard: auth.requireSignIn },
         { path: '/configuration/ocpp-server/logins',        page: stationLoginsPage,      guard: auth.requireSignIn },
         { path: '/configuration/ocpp-server/certificates',  page: serverCertificatesPage, guard: auth.requireSignIn },

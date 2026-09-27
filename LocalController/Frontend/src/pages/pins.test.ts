@@ -13,8 +13,8 @@
 import { strict as assert }  from 'node:assert';
 import { describe, it }      from 'node:test';
 
-import type { ServerPins } from '../api/client';
-import { draftOf, keysOf, noPins, normalisedFingerprint, parseFingerprints, pinsIn, pinsText, readPins, withPins } from './pins.ts';
+import type { Certificate, CertificateStore, ServerPins } from '../api/client';
+import { draftOf, keysOf, noPins, normalisedFingerprint, offersOf, parseFingerprints, pinsIn, pinsText, readPins, withPins } from './pins.ts';
 
 
 const root         = 'a'.repeat(64);
@@ -215,6 +215,52 @@ describe('what the fields of a dialog say', () => {
     it('learns nothing and refuses a mismatch where the lists say something else', () => {
 
         assert.deepEqual(readPins(fields({ onMismatch: 'whatever', trustOnFirstUse: 'none' })).draft, noPins());
+
+    });
+
+});
+
+
+describe('what the certificate store offers a server', () => {
+
+    /** A certificate as the store shows it. */
+    const kept = (label: string, thumbprint: string, more: Partial<Certificate> = {}): Certificate => ({
+        id: thumbprint.slice(0, 16), kind: 'tlsRoot', fileName: '', label, subject: `CN=${label}`, issuer: `CN=${label}`,
+        serialNumber: '01', thumbprint, notBefore: '', notAfter: '', keyAlgorithm: 'ECDSA', hasPrivateKey: false,
+        chainLength: 0, active: true, importedAt: '', expired: false, notYetValid: false, usable: true, description: '',
+        usages: null, ...more
+    });
+
+    const store = {
+        certificates: {
+            tlsRoot:      [ kept('For Every Use', root),
+                            kept('For Clocks',    otherRoot,             { usages: [ 'nts' ] }),
+                            kept('Switched Off',  'e'.repeat(64),        { usable: false, active: false }) ],
+            tlsServer:    [ kept('Resolver',      certificate,           { kind: 'tlsServer', usages: [ 'dns' ] }) ],
+            tlsIdentity:  [ kept('Towards the CSMS', renewal,            { kind: 'tlsIdentity', hasPrivateKey: true }) ]
+        }
+    } as unknown as CertificateStore;
+
+    it('is what is for this service or for every use, and usable', () => {
+
+        const forNames = offersOf(store, 'dns');
+
+        assert.deepEqual(forNames.roots.map(entry => entry.label),        [ 'For Every Use' ]);
+        assert.deepEqual(forNames.certificates.map(entry => entry.label), [ 'Resolver' ]);
+
+        const forClocks = offersOf(store, 'nts');
+
+        assert.deepEqual(forClocks.roots.map(entry => entry.label),        [ 'For Every Use', 'For Clocks' ]);
+        assert.deepEqual(forClocks.certificates.map(entry => entry.label), []);
+
+    });
+
+    it('names any fingerprint the store keeps, whatever it keeps it as', () => {
+
+        const offers = offersOf(store, 'nts');
+
+        assert.equal(offers.nameOf(renewal.toUpperCase()), 'Towards the CSMS');
+        assert.equal(offers.nameOf('f'.repeat(64)),        undefined);
 
     });
 

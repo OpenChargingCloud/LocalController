@@ -1,7 +1,8 @@
-import type { KnownServer, ServerJudgement } from '../api/client';
+import { api, type KnownServer, type ServerJudgement } from '../api/client';
+import { auth } from '../auth';
 import { html, must, type HTMLFragment } from '../html';
 import { formatValue } from '../ui';
-import { outcomeText, outcomeTone, pinsText, readPins, shortFingerprint, type PinsDraft } from './pins';
+import { offersOf, outcomeText, outcomeTone, pinsText, readPins, shortFingerprint, type PinsDraft, type StoreOffers } from './pins';
 
 /**
  * The certificate of a server this local controller connects to - a time
@@ -12,8 +13,8 @@ import { outcomeText, outcomeTone, pinsText, readPins, shortFingerprint, type Pi
  * One module for both pages because it is one question on both: a server that
  * has to be this one, and not merely one a certificate authority vouches for.
  * The decisions are in pins.ts; this only draws them. The vehicle's pages draw
- * them the same way, and offer fingerprints from a certificate store besides,
- * which a local controller does not have.
+ * them the same way, from a module the vehicle calls serverCertificates.ts -
+ * which here is the page of the charging station port's own certificates.
  */
 
 
@@ -33,21 +34,49 @@ function dayOf(iso: string): string {
 }
 
 
-/** Where a server's dialog is opened, and what it can offer to be added. */
+/** Where a server's dialog is opened, and what it can offer to be picked. */
 export interface PinsContext {
-    /** "nts" or "dns": which server this is, for the words. */
+    /** "nts" or "dns": which roots and server certificates of the store are for it. */
     service:  'nts' | 'dns';
     /**
      * The server, and the certificate and root it showed the last time it was
      * asked - which is what a pin is most often written down from.
      */
     shown:    { name: string; certificate: string | null; root: string | null } | null;
+    /** What the certificate store keeps for this service, where this person may read it. */
+    offers:   StoreOffers | null;
+}
+
+
+/**
+ * What the certificate store keeps for a service, or null where the person
+ * signed in may not read it or it cannot be read - the fields are there
+ * either way, and a fingerprint can always be typed.
+ */
+export async function storeOffers(service: 'nts' | 'dns'): Promise<StoreOffers | null> {
+
+    if (!auth.can('certificates', 'read'))
+        return null;
+
+    try
+    {
+        return offersOf(await api.certificates.get(), service);
+    }
+    catch
+    {
+        return null;
+    }
+
 }
 
 
 /** A fingerprint in a row: its first digits, the whole of it where the pointer rests. */
-function fingerprintView(fingerprint: string): HTMLFragment {
-    return html`<code class="fingerprint-short" title="SHA-256: ${fingerprint}">${shortFingerprint(fingerprint)}</code>`;
+function fingerprintView(fingerprint: string, nameOf?: (fingerprint: string) => string | undefined): HTMLFragment {
+
+    const name = nameOf?.(fingerprint);
+
+    return html`<code class="fingerprint-short" title="SHA-256: ${fingerprint}">${name ?? shortFingerprint(fingerprint)}</code>`;
+
 }
 
 
@@ -91,7 +120,8 @@ export function certificateVerdictView(judgement: ServerJudgement | null | undef
  * with.
  */
 export function shownView(judgement: ServerJudgement | null | undefined,
-                          known:     KnownServer     | null | undefined): HTMLFragment {
+                          known:     KnownServer     | null | undefined,
+                          nameOf?:   (fingerprint: string) => string | undefined): HTMLFragment {
 
     const certificate  = judgement?.certificate ?? known?.certificate ?? null;
     const root         = judgement?.root        ?? known?.root        ?? null;
@@ -101,7 +131,7 @@ export function shownView(judgement: ServerJudgement | null | undefined,
 
     return html`
         <span class="muted">
-            certificate ${fingerprintView(certificate)}${root ? html`, root ${fingerprintView(root)}` : ''}
+            certificate ${fingerprintView(certificate, nameOf)}${root ? html`, root ${fingerprintView(root, nameOf)}` : ''}
         </span>
     `;
 
@@ -116,9 +146,10 @@ export function shownView(judgement: ServerJudgement | null | undefined,
  *                 controller holds it to.
  */
 export function heldToView(draft:    PinsDraft,
+                           nameOf?:  (fingerprint: string) => string | undefined,
                            unsaved = false): HTMLFragment {
 
-    const text = pinsText(draft);
+    const text = pinsText(draft, nameOf);
 
     if (text === null)
         return unsaved ? html`<span class="muted">held to no fingerprint <em>once saved</em></span>` : html``;
@@ -132,17 +163,18 @@ export function heldToView(draft:    PinsDraft,
  * The fields that say what a server is held to, for the dialog of a time
  * server or of a name server.
  *
- * Fingerprints are typed or pasted one to a line, and the one there is the
- * best source for - what the server showed last - can be added with a click
- * rather than copied by hand. A time server's certificate is evidence for the
- * time this local controller keeps, so the list of what a mismatch comes to
- * says where each goes.
+ * Fingerprints are typed or pasted one to a line, and the ones there are
+ * better sources for - what the server showed last, what the certificate
+ * store keeps - can be added with a click rather than copied by hand. A
+ * time server's certificate is evidence for the time this local controller
+ * keeps, so the list of what a mismatch comes to says where each goes.
  */
 export function pinsFieldset(draft: PinsDraft, context: PinsContext): HTMLFragment {
 
     const what     = context.service === 'nts' ? 'time server' : 'name server';
     const evidence = context.service === 'nts';
     const shown    = context.shown;
+    const offers   = context.offers;
 
     return html`
         <fieldset class="pins">
@@ -162,7 +194,8 @@ export function pinsFieldset(draft: PinsDraft, context: PinsContext): HTMLFragme
             </label>
 
             ${offerView('pinCertificates', shown?.certificate ?? null, draft.certificates,
-                        shown === null ? '' : `Add the one ${shown.name} showed`)}
+                        shown === null ? '' : `Add the one ${shown.name} showed`,
+                        offers?.certificates ?? [], `... or a server certificate kept for ${context.service.toUpperCase()}`)}
 
             <label>Roots its chain may end at
                 <textarea name="pinRoots" rows="2" spellcheck="false" autocomplete="off"
@@ -174,7 +207,8 @@ export function pinsFieldset(draft: PinsDraft, context: PinsContext): HTMLFragme
             </label>
 
             ${offerView('pinRoots', shown?.root ?? null, draft.roots,
-                        shown === null ? '' : `Add the root its chain ended at`)}
+                        shown === null ? '' : `Add the root its chain ended at`,
+                        offers?.roots ?? [], `... or a TLS root kept for ${context.service.toUpperCase()}`)}
 
             <label>When it shows another one
                 <select name="pinMismatch">
@@ -209,21 +243,33 @@ export function pinsFieldset(draft: PinsDraft, context: PinsContext): HTMLFragme
 
 
 /**
- * The way to add a fingerprint to one of the lists without typing it: the one
- * the server showed, where it is not in the list already.
+ * The ways to add a fingerprint to one of the lists without typing it: the one
+ * the server showed, and the ones the certificate store keeps for this service.
  */
-function offerView(list:        'pinCertificates' | 'pinRoots',
-                   shown:       string | null,
-                   already:     string[],
-                   shownLabel:  string): HTMLFragment {
+function offerView(list:          'pinCertificates' | 'pinRoots',
+                   shown:         string | null,
+                   already:       string[],
+                   shownLabel:    string,
+                   kept:          { thumbprint: string; label: string; id: string }[],
+                   keptLabel:     string): HTMLFragment {
 
-    if (shown === null || shownLabel.length === 0 || already.includes(shown))
+    const offerShown = shown !== null && shownLabel.length > 0 && !already.includes(shown);
+
+    if (!offerShown && kept.length === 0)
         return html``;
 
     return html`
         <div class="pin-offers">
-            <button type="button" class="btn small" data-pin-add="${list}" data-fingerprint="${shown}"
-                    title="${shown}">${shownLabel}</button>
+            ${offerShown
+                  ? html`<button type="button" class="btn small" data-pin-add="${list}" data-fingerprint="${shown}"
+                                 title="${shown}">${shownLabel}</button>`
+                  : ''}
+            ${kept.length > 0
+                  ? html`<select data-pin-pick="${list}" aria-label="${keptLabel}">
+                             <option value="">${keptLabel}</option>
+                             ${kept.map(entry => html`<option value="${entry.thumbprint}">${entry.label} (${entry.id})</option>`)}
+                         </select>`
+                  : ''}
         </div>
     `;
 
@@ -236,15 +282,9 @@ function offerView(list:        'pinCertificates' | 'pinRoots',
  */
 export function wirePinsFieldset(dialog: HTMLElement): void {
 
-    dialog.addEventListener('click', event => {
+    const add = (list: string, fingerprint: string): void => {
 
-        const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-pin-add]');
-
-        if (button === null)
-            return;
-
-        const area        = dialog.querySelector<HTMLTextAreaElement>(`textarea[name="${button.dataset.pinAdd}"]`);
-        const fingerprint = button.dataset.fingerprint ?? '';
+        const area = dialog.querySelector<HTMLTextAreaElement>(`textarea[name="${list}"]`);
 
         if (area === null || fingerprint.length === 0)
             return;
@@ -254,7 +294,31 @@ export function wirePinsFieldset(dialog: HTMLElement): void {
         if (!lines.some(line => line.toLowerCase() === fingerprint.toLowerCase()))
             area.value = [ ...lines, fingerprint ].join('\n');
 
+    };
+
+    dialog.addEventListener('click', event => {
+
+        const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-pin-add]');
+
+        if (button === null)
+            return;
+
+        add(button.dataset.pinAdd!, button.dataset.fingerprint ?? '');
+
         button.hidden = true;
+
+    });
+
+    dialog.addEventListener('change', event => {
+
+        const select = (event.target as HTMLElement).closest<HTMLSelectElement>('[data-pin-pick]');
+
+        if (select === null)
+            return;
+
+        add(select.dataset.pinPick!, select.value);
+
+        select.value = '';
 
     });
 
@@ -278,7 +342,10 @@ export function readPinsFieldset(form: HTMLFormElement): { draft: PinsDraft; err
  * What was made of one certificate in a test, step by step: the verdict, what
  * it showed, and every step that led there.
  */
-export function judgementView(judgement: ServerJudgement): HTMLFragment {
+export function judgementView(judgement: ServerJudgement,
+                              nameOf?:   (fingerprint: string) => string | undefined): HTMLFragment {
+
+    const root = judgement.root === null ? '-' : `${nameOf?.(judgement.root) ?? ''}${nameOf?.(judgement.root) ? ' - ' : ''}${judgement.root}`;
 
     return html`
         <div class="judgement">
@@ -290,7 +357,7 @@ export function judgementView(judgement: ServerJudgement): HTMLFragment {
 
             <div class="kv-list">
                 <div class="kv"><span class="k">Certificate</span><span class="v">${judgement.certificate ?? '-'}</span></div>
-                <div class="kv"><span class="k">Root</span><span class="v">${judgement.root ?? '-'}</span></div>
+                <div class="kv"><span class="k">Root</span><span class="v">${root}</span></div>
                 ${judgement.anchoredBy
                       ? html`<div class="kv"><span class="k">Validated by</span><span class="v">this local controller's root ${judgement.anchoredBy}</span></div>`
                       : ''}

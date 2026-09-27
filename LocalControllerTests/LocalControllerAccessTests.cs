@@ -406,6 +406,12 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("POST",    "api/v1/configuration/ocpp-server/trust",                   "certificates:edit")]
         [TestCase("PUT",     "api/v1/configuration/ocpp-server/trust/t1",                "certificates:edit")]
         [TestCase("DELETE",  "api/v1/configuration/ocpp-server/trust/t1",                "certificates:edit")]
+        [TestCase("GET",     "api/v1/certificates",                                      "certificates:read")]
+        [TestCase("POST",    "api/v1/certificates",                                      "certificates:edit")]
+        [TestCase("POST",    "api/v1/certificates/reload",                               "certificates:edit")]
+        [TestCase("GET",     "api/v1/certificates/c1",                                   "certificates:read")]
+        [TestCase("PATCH",   "api/v1/certificates/c1",                                   "certificates:edit")]
+        [TestCase("DELETE",  "api/v1/certificates/c1",                                   "certificates:edit")]
         public async Task EveryRouteAsksForItsOwnPermission(String Method, String Path, String Permission)
         {
 

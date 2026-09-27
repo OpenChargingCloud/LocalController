@@ -894,8 +894,10 @@ input, textarea, select {
     font-size:    0.78rem;
 }
 
-// The fields of a dialog that say what a server's certificate is held to.
-fieldset.pins {
+// A group of fields in a dialog: what a server's certificate is held to, what
+// a certificate is kept for.
+fieldset.pins,
+fieldset.usages {
 
     display:         flex;
     flex-direction:  column;

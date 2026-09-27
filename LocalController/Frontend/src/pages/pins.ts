@@ -1,4 +1,4 @@
-import type { JudgementOutcome, PinKeys, PinMismatch, ServerJudgement, ServerPins, TrustOnFirstUse } from '../api/client';
+import type { Certificate, CertificateStore, JudgementOutcome, PinKeys, PinMismatch, ServerJudgement, ServerPins, TrustOnFirstUse } from '../api/client';
 
 /**
  * What a time server or a name server is held to, as the pages edit it.
@@ -9,8 +9,7 @@ import type { JudgementOutcome, PinKeys, PinMismatch, ServerJudgement, ServerPin
  * around it only draw and ask.
  *
  * The vehicle's and the charging station's pages hold their servers to pins
- * the same way, from the same rules; what a local controller does not have is
- * a certificate store to offer fingerprints from, so nothing here reads one.
+ * the same way, from the same rules.
  */
 
 
@@ -246,10 +245,45 @@ export function readPins(fields: { certificates: string; roots: string; onMismat
 }
 
 
+/** What the certificate store has to offer a server's dialog. */
+export interface StoreOffers {
+    /** The TLS roots a chain of this service may end at. */
+    roots:         Certificate[];
+    /** The server certificates kept for this service. */
+    certificates:  Certificate[];
+    /** What the store calls a fingerprint, whatever it keeps it as. */
+    nameOf:        (fingerprint: string) => string | undefined;
+}
+
+/**
+ * The roots and server certificates the store keeps for a service, to be
+ * picked rather than typed: only the ones that are switched on and inside
+ * their validity, and only the ones for this service or for every use - a
+ * root uploaded for the name servers alone is not offered to a time server,
+ * because it was uploaded to vouch for no time.
+ *
+ * @param service  "dns" or "nts".
+ */
+export function offersOf(store: CertificateStore, service: string): StoreOffers {
+
+    const forService  = (entry: Certificate) => entry.usable &&
+                                                (entry.usages === null || entry.usages === undefined || entry.usages.includes(service));
+
+    const names       = new Map(Object.values(store.certificates ?? {}).flat().
+                                       map(entry => [ entry.thumbprint.toLowerCase(), entry.label ] as const));
+
+    return {
+        roots:         (store.certificates?.tlsRoot   ?? []).filter(forService),
+        certificates:  (store.certificates?.tlsServer ?? []).filter(forService),
+        nameOf:        fingerprint => names.get(fingerprint.toLowerCase())
+    };
+
+}
+
+
 /**
  * A fingerprint short enough for a row: its first sixteen digits, which is
- * also the handle the certificate stores of the other nodes call a
- * certificate by.
+ * also the handle the certificate store calls a certificate by.
  */
 export function shortFingerprint(fingerprint: string): string {
     return fingerprint.length > 16 ? `${fingerprint.slice(0, 16)}…` : fingerprint;
@@ -257,11 +291,11 @@ export function shortFingerprint(fingerprint: string): string {
 
 
 /**
- * What a draft holds a server to, in words - "root 1a2b3c4d5e6f7a8b… or
- * 9c8d7e6f5a4b3c2d…, refused otherwise" - or null where it holds it to
+ * What a draft holds a server to, in words - "root ISRG Root X1 or
+ * 1a2b3c4d5e6f7a8b…, refused otherwise" - or null where it holds it to
  * nothing and learns nothing.
  *
- * @param nameOf  what to call a fingerprint, where something has a name for
+ * @param nameOf  what the certificate store calls a fingerprint, where it has
  *                it; the fingerprint's first digits otherwise.
  */
 export function pinsText(draft:   PinsDraft,
