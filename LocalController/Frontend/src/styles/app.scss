@@ -855,10 +855,115 @@ input, textarea, select {
     }
 }
 
+// A name server's row, and under it - where it is asked over TLS or HTTPS -
+// what was made of its certificate and what it is held to.
+.server-entry {
+    display:         flex;
+    flex-direction:  column;
+    gap:             0.2rem;
+}
+
+// What was made of a server's certificate, in a line that wraps: the verdict
+// as a chip, what it showed, what it is held to. The same under a name
+// server's row and in a time server's root CA column.
+.server-certificate {
+
+    display:      flex;
+    flex-wrap:    wrap;
+    align-items:  center;
+    gap:          0.25rem 0.6rem;
+    color:        $color-muted;
+    min-width:    0;
+
+    .held-to {
+        color:          $color-text;
+        overflow-wrap:  anywhere;
+    }
+
+    em {
+        color:       $color-warn;
+        font-style:  normal;
+    }
+
+}
+
+// A fingerprint in a line of text: its first digits, with the whole of it
+// where the pointer rests.
+.fingerprint-short {
+    font-family:  $font-mono;
+    font-size:    0.78rem;
+}
+
+// The fields of a dialog that say what a server's certificate is held to.
+fieldset.pins {
+
+    display:         flex;
+    flex-direction:  column;
+    gap:             0.7rem;
+    margin:          0;
+    padding:         0.75rem 0.9rem 0.9rem;
+    border:          1px solid $color-border;
+    border-radius:   $radius;
+    min-width:       0;
+
+    legend {
+        padding:    0 0.35rem;
+        font-size:  0.85rem;
+        color:      $color-muted;
+    }
+
+    // A fingerprint is compared character by character, so it is shown in a
+    // typewriter face - and breaks anywhere, having nowhere else to.
+    textarea {
+        font-family:    $font-mono;
+        font-size:      0.78rem;
+        resize:         vertical;
+        overflow-wrap:  anywhere;
+    }
+
+    .hint {
+        margin:     0;
+        font-size:  0.8rem;
+    }
+
+}
+
+// The way to add a fingerprint without typing it, right under its list.
+.pin-offers {
+    display:      flex;
+    flex-wrap:    wrap;
+    align-items:  center;
+    gap:          0.4rem;
+    margin-top:   -0.35rem;
+}
+
+// What was made of one certificate in a test of the name servers.
+.judgement {
+
+    margin-top:  0.6rem;
+
+    + .judgement {
+        border-top:   1px solid $color-border;
+        padding-top:  0.6rem;
+    }
+
+    .judgement-head {
+        display:        flex;
+        flex-wrap:      wrap;
+        align-items:    center;
+        gap:            0.5rem;
+        margin-bottom:  0.4rem;
+        word-break:     break-all;
+    }
+
+}
+
 // The dialog a time server is added, changed or deleted in: the test's dialog,
-// narrower, because it holds a form and not a log.
+// narrower, because it holds a form and not a log - but wide enough for a
+// fingerprint to fit one line of what its certificate is held to. At 36rem
+// its last digit went onto a line of its own, in the vehicle's.
 .server-dialog {
-    width:  min(30rem, 92vw);
+    width:  min(40rem, 92vw);
 }
 
 // Asking a name server something, and what it said.

@@ -69,32 +69,6 @@ export function entryOf(source: NTSTimeSource, usual: UsualPorts): NTSServerEntr
 
 
 /**
- * What the dialog saves: what was typed into it, and what the server it edits
- * is held to - as long as it is still that server.
- *
- * The dialog asks for the name, the priority, the ports and whether to ask the
- * server, and not for what it is held to; a server saved from it must not come
- * out of it held to nothing. A server given another name is another server,
- * though: a certificate pin is the fingerprint of one server's certificate, a
- * learned root is what one server was first believed with, and the local
- * controller keeps both by name. They stay behind with the old name, and the
- * new one is held to what every server is held to until somebody says
- * otherwise.
- *
- * @param shown  the server as the local controller showed it, or null for a new one.
- * @param typed  the entry made of what the dialog's fields say.
- */
-export function savedFromDialog(shown:  NTSTimeSource | null,
-                                typed:  NTSServerEntry): NTSServerEntry {
-
-    return shown !== null && sameName(shown.hostname, typed.hostname)
-               ? withPins(typed, draftOf(shown.heldTo))
-               : typed;
-
-}
-
-
-/**
  * The list with one server replaced, or with one added at the end when there
  * is no place given.
  *

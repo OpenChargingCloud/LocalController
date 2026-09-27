@@ -147,3 +147,26 @@ describe('a name server told to the local controller', () => {
     });
 
 });
+
+
+describe('what the DNS page does with what a name server is held to', () => {
+
+    // Asked of the page's source, as Node has no browser to open it in, and
+    // the views it draws with cannot be loaded here.
+    const page = readFileSync(new URL('./dns.ts', import.meta.url), 'utf-8');
+
+    it('takes it from the server\'s dialog into the list on screen, which Save sends', () => {
+
+        assert.match(page, /servers\[index\] = withPins\(servers\[index\], pins\.draft\);/,
+                     'the DNS page does not take a server\'s pins from its dialog into the list');
+
+    });
+
+    it('says of a server asked over a transport that shows no certificate that it lets go of its pins once saved', () => {
+
+        assert.match(page, /: saysAnything\(pinsIn\(server\)\)/,
+                     'the DNS page lets a server go of its pins without saying so first');
+
+    });
+
+});

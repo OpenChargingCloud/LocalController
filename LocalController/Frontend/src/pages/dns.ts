@@ -5,7 +5,9 @@ import type { Page } from '../router';
 import { shell } from '../shell';
 import { errorMessage, formatValue, humanizeKey, whileSaving } from '../ui';
 import { typedSinceDrawn, unsaved } from '../unsaved';
-import { allServersTake, entryOf, oneServerTakes } from './dnsServers';
+import { allServersTake, entryOf, isEncrypted, oneServerTakes } from './dnsServers';
+import { keysOf, pinsIn, saysAnything, withPins } from './pins';
+import { certificateVerdictView, heldToView, judgementView, pinsFieldset, readPinsFieldset, shownView, wirePinsFieldset } from './pinViews';
 
 /**
  * How this local controller resolves names.
@@ -18,6 +20,10 @@ import { allServersTake, entryOf, oneServerTakes } from './dnsServers';
  * Switching name resolution off takes the servers away from the client, which
  * is what off means: a query then fails at once instead of quietly going to
  * whatever the machine happens to have configured.
+ *
+ * A name server asked over TLS or HTTPS shows a certificate, and its row says
+ * what the local controller made of it and what it is held to; a dialog changes the
+ * latter in the list on screen, which is saved with everything else.
  */
 export const dnsPage: Page = {
 
@@ -101,44 +107,7 @@ export const dnsPage: Page = {
 
                     </section>
 
-                    <section class="card">
-
-                        <h2><i class="fa-solid fa-server"></i> Name servers</h2>
-
-                        <div class="server-list" id="servers">
-                            ${servers.length === 0
-                                  ? html`<p class="muted small">No name server configured.</p>`
-                                  : servers.map((server, index) => html`
-                                      <div class="server-row" data-index="${index}">
-                                          <input type="text" data-field="address" data-index="${index}"
-                                                 value="${server.address}" placeholder="address or host name"
-                                                 ${mayChange ? '' : html`disabled`} />
-                                          <input type="number" data-field="port" data-index="${index}"
-                                                 value="${server.port}" min="1" max="65535" class="port"
-                                                 ${mayChange ? '' : html`disabled`} />
-                                          <select data-field="transport" data-index="${index}" ${mayChange ? '' : html`disabled`}>
-                                              ${configuration.limits.transports.map(transport => html`
-                                                  <option value="${transport}" ${transport === server.transport ? html`selected` : ''}>${transport}</option>
-                                              `)}
-                                          </select>
-                                          <button type="button" class="btn small" data-ask="${index}"
-                                                  title="Ask this server, and only this one"
-                                                  ${mayTest ? '' : html`disabled`}>Test</button>
-                                          <button type="button" class="btn small danger" data-remove="${index}"
-                                                  ${mayChange ? '' : html`disabled`}>Remove</button>
-                                      </div>
-                                  `)}
-                        </div>
-
-                        <div class="form-actions">
-                            <button type="button" id="add-server" class="btn"
-                                    ${!mayChange || servers.length >= configuration.limits.maxServers ? html`disabled` : ''}>
-                                Add a server
-                            </button>
-                            <span class="hint">At most ${configuration.limits.maxServers}. They are asked in parallel; the first usable answer wins.</span>
-                        </div>
-
-                    </section>
+                    <section class="card" id="name-servers"></section>
 
                     <section class="card">
 
@@ -241,16 +210,227 @@ export const dnsPage: Page = {
 
             `);
 
+            drawServers();
             wire();
+
+        }
+
+
+        /**
+         * The name servers, one row each - and under a row over TLS or HTTPS,
+         * its certificate.
+         *
+         * Drawn apart from the rest of the page, because adding, removing and
+         * pinning a server redraws the list, and redrawing the whole page threw
+         * away whatever had just been typed into the settings below it.
+         */
+        function drawServers(): void {
+
+            const configuration = current!;
+
+            render(must<HTMLElement>(content, '#name-servers'), html`
+
+                <h2><i class="fa-solid fa-server"></i> Name servers</h2>
+
+                <div class="server-list" id="servers">
+                    ${servers.length === 0
+                          ? html`<p class="muted small">No name server configured.</p>`
+                          : servers.map((server, index) => serverView(server, index))}
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" id="add-server" class="btn"
+                            ${!mayChange || servers.length >= configuration.limits.maxServers ? html`disabled` : ''}>
+                        Add a server
+                    </button>
+                    <span class="hint">At most ${configuration.limits.maxServers}. They are asked in parallel; the first usable answer wins.</span>
+                </div>
+
+            `);
+
+        }
+
+
+        /** One name server: its address, port and transport, and what can be done with it. */
+        function serverView(server: DNSServer, index: number): HTMLFragment {
+
+            const configuration  = current!;
+            const encrypted      = isEncrypted(server.transport);
+
+            return html`
+                <div class="server-entry">
+
+                    <div class="server-row" data-index="${index}">
+                        <input type="text" data-field="address" data-index="${index}"
+                               value="${server.address}" placeholder="address or host name"
+                               ${mayChange ? '' : html`disabled`} />
+                        <input type="number" data-field="port" data-index="${index}"
+                               value="${server.port}" min="1" max="65535" class="port"
+                               ${mayChange ? '' : html`disabled`} />
+                        <select data-field="transport" data-index="${index}" ${mayChange ? '' : html`disabled`}>
+                            ${configuration.limits.transports.map(transport => html`
+                                <option value="${transport}" ${transport === server.transport ? html`selected` : ''}>${transport}</option>
+                            `)}
+                        </select>
+                        ${encrypted
+                              ? html`<button type="button" class="btn small" data-pins="${index}"
+                                             title="What its certificate is held to" aria-label="What its certificate is held to"
+                                             ${mayChange ? '' : html`disabled`}>
+                                         <i class="fa-solid fa-certificate"></i>
+                                     </button>`
+                              : ''}
+                        <button type="button" class="btn small" data-ask="${index}"
+                                title="Ask this server, and only this one"
+                                ${mayTest ? '' : html`disabled`}>Test</button>
+                        <button type="button" class="btn small danger" data-remove="${index}"
+                                ${mayChange ? '' : html`disabled`}>Remove</button>
+                    </div>
+
+                    ${encrypted
+                          ? certificateView(server)
+                          : saysAnything(pinsIn(server))
+                                ? html`<div class="server-certificate small">
+                                           <span class="chip warn">
+                                               held to a certificate, which ${server.transport} does not show: saved, it lets go of that
+                                           </span>
+                                       </div>`
+                                : ''}
+
+                </div>
+            `;
+
+        }
+
+
+        /**
+         * What the local controller made of a server's certificate, and what the list on
+         * screen holds it to.
+         *
+         * The local controller's word only for the server as the local controller has it: a row
+         * whose address, port or transport was changed and not saved is
+         * another server, whose certificate nobody has looked at yet.
+         */
+        function certificateView(server: DNSServer): HTMLFragment {
+
+            const saved    = asTheControllerHasIt(server);
+            const pins     = pinsIn(server);
+            const changed  = JSON.stringify(keysOf(pins)) !== JSON.stringify(keysOf(pinsIn(saved ?? {})));
+
+            return html`
+                <div class="server-certificate small">
+                    ${saved === undefined
+                          ? html`<span class="muted">not saved yet</span>`
+                          : html`${certificateVerdictView(saved.judgement, saved.known)}
+                                 ${shownView(saved.judgement, saved.known)}`}
+                    ${heldToView(pins, changed)}
+                </div>
+            `;
+
+        }
+
+
+        /** The server as the local controller has it, where it has one at that address, port and transport. */
+        function asTheControllerHasIt(server: DNSServer): DNSServer | undefined {
+
+            return current?.servers.find(other => other.address   === server.address &&
+                                                  other.port      === server.port    &&
+                                                  other.transport === server.transport);
+
+        }
+
+
+        /**
+         * Say what one server's certificate is held to, in a dialog - into the
+         * list on screen, which "Save" below sends with everything else: the
+         * list is one value to the local controller, and this is one more change to it.
+         */
+        function editPins(index: number): void {
+
+            const server = servers[index];
+
+            if (server === undefined)
+                return;
+
+            const saved   = asTheControllerHasIt(server);
+            const name    = server.address.includes(':') ? `[${server.address}]:${server.port}` : `${server.address}:${server.port}`;
+            const dialog  = document.createElement('dialog');
+
+            dialog.className = 'test-dialog server-dialog';
+
+            document.body.appendChild(dialog);
+
+            /** Shut it and take it away - both, as not every browser fires "close". */
+            const dismiss = (): void => { dialog.close(); dialog.remove(); };
+
+            render(dialog, html`
+
+                <h2><i class="fa-solid fa-certificate"></i> ${name} over ${server.transport}</h2>
+
+                <form id="pins-form" class="form-stack">
+
+                    ${pinsFieldset(pinsIn(server), {
+                          service:  'dns',
+                          shown:    saved === undefined
+                                        ? null
+                                        : {
+                                              name,
+                                              certificate:  saved.judgement?.certificate ?? saved.known?.certificate ?? null,
+                                              root:         saved.judgement?.root        ?? saved.known?.root        ?? null
+                                          }
+                      })}
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn primary">Take it into the list</button>
+                        <button type="button" class="btn" id="pins-cancel">Cancel</button>
+                        <span id="pins-error" class="form-error" role="alert"></span>
+                    </div>
+
+                    <span class="hint">The local controller is told when the list is saved, with "Save" under the settings.</span>
+
+                </form>
+
+            `);
+
+            const form = must<HTMLFormElement>(dialog, '#pins-form');
+
+            form.addEventListener('submit', event => {
+
+                event.preventDefault();
+
+                const pins = readPinsFieldset(form);
+
+                if (pins.error !== undefined) {
+                    must<HTMLElement>(dialog, '#pins-error').textContent = pins.error;
+                    return;
+                }
+
+                servers[index] = withPins(servers[index], pins.draft);
+
+                dismiss();
+                drawServers();
+
+            });
+
+            must<HTMLButtonElement>(dialog, '#pins-cancel').addEventListener('click', dismiss);
+
+            wirePinsFieldset(dialog);
+
+            dialog.addEventListener('close',  dismiss);
+            dialog.addEventListener('cancel', dismiss);
+
+            dialog.showModal();
 
         }
 
 
         function wire(): void {
 
-            const list = must<HTMLElement>(content, '#servers');
+            // On the card and not on what is in it, because the list is redrawn
+            // on its own and a listener on a row that was redrawn away would be
+            // listening to nothing.
+            const card = must<HTMLElement>(content, '#name-servers');
 
-            list.addEventListener('input', event => {
+            card.addEventListener('input', event => {
 
                 const input = event.target as HTMLInputElement;
                 const index = Number(input.dataset.index);
@@ -266,29 +446,43 @@ export const dnsPage: Page = {
 
             });
 
-            list.addEventListener('change', event => {
+            card.addEventListener('change', event => {
 
                 const select = event.target as HTMLSelectElement;
 
-                if (select.dataset.field === 'transport')
+                // Redrawn, because whether a row has a certificate to show
+                // depends on it.
+                if (select.dataset.field === 'transport') {
                     servers[Number(select.dataset.index)].transport = select.value;
-
-            });
-
-            list.addEventListener('click', event => {
-
-                const remove = (event.target as HTMLElement).closest<HTMLElement>('[data-remove]');
-
-                if (remove) {
-                    servers.splice(Number(remove.dataset.remove), 1);
-                    draw();
+                    drawServers();
                 }
 
             });
 
-            must<HTMLButtonElement>(content, '#add-server').addEventListener('click', () => {
-                servers.push({ address: '', port: 53, transport: 'UDP', queryTimeoutSeconds: null });
-                draw();
+            card.addEventListener('click', event => {
+
+                const target  = event.target as HTMLElement;
+                const button  = target.closest<HTMLButtonElement>('button');
+
+                if (button === null || button.disabled)
+                    return;
+
+                if (button.id === 'add-server') {
+                    servers.push({ address: '', port: 53, transport: 'UDP', queryTimeoutSeconds: null });
+                    drawServers();
+                }
+
+                else if (button.dataset.remove !== undefined) {
+                    servers.splice(Number(button.dataset.remove), 1);
+                    drawServers();
+                }
+
+                else if (button.dataset.pins !== undefined)
+                    editPins(Number(button.dataset.pins));
+
+                else if (button.dataset.ask !== undefined)
+                    lookUp(Number(button.dataset.ask));
+
             });
 
             must<HTMLInputElement>(content, '#enabled').addEventListener('change', event => {
@@ -306,8 +500,8 @@ export const dnsPage: Page = {
                 void save({
                     // The servers travel with the settings, because the form is
                     // where somebody presses Save after editing either - each
-                    // as its entry in the file, with its pins where it shows a
-                    // certificate to hold it to. See entryOf.
+                    // with what it is held to, and with nothing of what the
+                    // local controller only said about it.
                     servers:              servers.filter(server => server.address.trim().length > 0).map(entryOf),
                     useCache:             data.get('useCache')     !== null,
                     dnssecOK:             data.get('dnssecOK')     !== null,
@@ -321,15 +515,6 @@ export const dnsPage: Page = {
             });
 
             must<HTMLButtonElement>(content, '#look-up').addEventListener('click', () => lookUp(null));
-
-            list.addEventListener('click', event => {
-
-                const asking = (event.target as HTMLElement).closest<HTMLElement>('[data-ask]');
-
-                if (asking && !(asking as HTMLButtonElement).disabled)
-                    lookUp(Number(asking.dataset.ask));
-
-            });
 
         }
 
@@ -416,8 +601,43 @@ export const dnsPage: Page = {
                               ${result.more ? html`<p class="muted small">and ${result.more} more.</p>` : ''}
                           `}
 
+                    ${certificatesView(result)}
+
                 </div>
             `;
+
+        }
+
+        /**
+         * What was made of the certificate of every server the test reached
+         * over TLS or HTTPS - the most likely reason such a server answered
+         * nothing, and the one most worth seeing.
+         *
+         * A test of all servers asks over the connections the local controller keeps
+         * open, and a certificate is looked at when a connection is made: where
+         * none was, that is said rather than nothing.
+         */
+        function certificatesView(result: DNSQueryResult): HTMLFragment {
+
+            const judged = result.certificates ?? [];
+
+            if (judged.length > 0)
+                return html`
+                    <h3>Certificates</h3>
+                    ${judged.map(judgement => judgementView(judgement))}
+                `;
+
+            if (result.certificates !== undefined && !result.asked &&
+                (current?.servers ?? []).some(server => isEncrypted(server.transport)))
+                return html`
+                    <p class="muted small">
+                        No certificate was looked at: the connections to the name servers over TLS or HTTPS
+                        were open already, and a certificate is looked at when a connection is made. The
+                        Test of a server's own row makes a new one.
+                    </p>
+                `;
+
+            return html``;
 
         }
 
@@ -631,8 +851,8 @@ export const dnsPage: Page = {
         // The settings are a form and answer for themselves; the name servers
         // are a list, which is redrawn as it is edited and therefore always
         // looks untouched - so it is compared with what the local controller last said,
-        // both as they would be sent: what the controller only said about a
-        // server is not the page's to change, and is left out of both.
+        // both as the local controller would be told them: a pin changed in a dialog
+        // and changed back is no change, whichever order its keys came in.
         const release = unsaved.heldBy(
                             () => typedSinceDrawn(content.querySelector('#dns-form')) ||
                                   JSON.stringify(servers.map(entryOf)) !== JSON.stringify((current?.servers ?? []).map(entryOf))
