@@ -1,5 +1,5 @@
-import type { DNSConfiguration, DNSServerEntry } from '../api/client';
-import { pinsIn, withPins } from './pins';
+import type { DNSConfiguration, DNSServer, DNSServerEntry } from '../api/client';
+import { pinsIn, withAsShown, withPins } from './pins';
 
 /**
  * How long the DNS page waits for the local controller to look something up,
@@ -52,6 +52,25 @@ export function entryOf(server: DNSServerEntry): DNSServerEntry {
     return isEncrypted(server.transport)
                ? withPins(entry, pinsIn(server))
                : entry;
+
+}
+
+
+/**
+ * A name server as the page sends it: its entry, and - for a server the page
+ * loaded - what the page showed it held to, so that the controller changes
+ * only what was changed on the page and keeps a root the server learned while
+ * the page was open; see asShown.
+ *
+ * Not for a server added on the page, which the controller has nothing of,
+ * and not in what the page compares to say whether anything was changed: what
+ * a server was shown held to is never a change.
+ */
+export function sentOf(server: DNSServer): DNSServerEntry {
+
+    return server.heldTo === undefined
+               ? entryOf(server)
+               : withAsShown(entryOf(server), server.heldTo);
 
 }
 

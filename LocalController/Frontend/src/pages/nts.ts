@@ -5,8 +5,8 @@ import type { Page } from '../router';
 import { shell } from '../shell';
 import { errorMessage, formatValue, humanizeKey, whileSaving } from '../ui';
 import { typedSinceDrawn, unsaved } from '../unsaved';
-import { entryOf, nameTaken, readable, withServer, withoutServer, type UsualPorts } from './ntsServers';
-import { draftOf, withPins, type StoreOffers } from './pins';
+import { nameTaken, readable, sentOf, withServer, withoutServer, type UsualPorts } from './ntsServers';
+import { asShown, draftOf, withPins, type StoreOffers } from './pins';
 import { certificateVerdictView, heldToView, pinsFieldset, readPinsFieldset, storeOffers, wirePinsFieldset } from './pinViews';
 
 /**
@@ -94,10 +94,13 @@ export const ntsPage: Page = {
             };
         }
 
-        /** The list as the local controller has it, as entries it can be told again. */
+        /**
+         * The list as the local controller has it, as entries it can be told
+         * again - each with what the page showed it held to.
+         */
         function entries(): NTSServerEntry[] {
             const usual = usualPorts();
-            return (current?.timeSources ?? []).map(source => entryOf(source, usual));
+            return (current?.timeSources ?? []).map(source => sentOf(source, usual));
         }
 
 
@@ -719,6 +722,11 @@ export const ntsPage: Page = {
                 if (ntsKE.length > 0 && Number(ntsKE) !== usual.ntsKE)  entry.ntsKEPort  = Number(ntsKE);
                 if (ntp.length   > 0 && Number(ntp)   !== usual.ntp)    entry.ntpPort    = Number(ntp);
                 if (data.get('enabled') === null)                        entry.enabled    = false;
+
+                // And what the dialog showed it held to, so that the local
+                // controller changes only what was changed here - see asShown.
+                if (shown !== null)
+                    entry.pinsAsShown = asShown(shown.heldTo);
 
                 void tell(withServer(list, index, withPins(entry, pins.draft)));
 

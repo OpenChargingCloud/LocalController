@@ -211,6 +211,29 @@ export function withPins<T extends PinKeys>(entry: T, draft: PinsDraft): T {
 
 
 /**
+ * What a server was shown held to, in the keys an entry says it with - sent
+ * back as the entry's "pinsAsShown", so that the controller changes only what
+ * was changed on the page.
+ *
+ * The page sends the whole list, from what it loaded, and a server that
+ * learned its root on first use while the page was open is held to it by
+ * then, without the page having shown it. Measured so: the save of another
+ * server's priority took that root out of the file and out of effect. Told
+ * what the page showed, the controller keeps it - and still takes away a pin
+ * that was shown and is not sent.
+ */
+export function asShown(heldTo: ServerPins | null | undefined): PinKeys {
+    return keysOf(draftOf(heldTo));
+}
+
+
+/** The entry with what the page showed its server held to beside it - see asShown. */
+export function withAsShown<T extends { pinsAsShown?: PinKeys }>(entry: T, heldTo: ServerPins | null | undefined): T {
+    return { ...entry, pinsAsShown: asShown(heldTo) };
+}
+
+
+/**
  * What a dialog's fields say a server is held to - or the one sentence that
  * says what is wrong with them, naming the line that is.
  *

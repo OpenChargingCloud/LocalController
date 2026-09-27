@@ -13,8 +13,8 @@
 import { strict as assert }  from 'node:assert';
 import { describe, it }      from 'node:test';
 
-import type { Certificate, CertificateStore, ServerPins } from '../api/client';
-import { draftOf, keysOf, noPins, normalisedFingerprint, offersOf, parseFingerprints, pinsIn, pinsText, readPins, withPins } from './pins.ts';
+import type { Certificate, CertificateStore, NTSServerEntry, ServerPins } from '../api/client';
+import { asShown, draftOf, keysOf, noPins, normalisedFingerprint, offersOf, parseFingerprints, pinsIn, pinsText, readPins, withAsShown, withPins } from './pins.ts';
 
 
 const root         = 'a'.repeat(64);
@@ -119,6 +119,45 @@ describe('a draft told to the local controller', () => {
         withPins(entry, noPins());
 
         assert.deepEqual(entry, { hostname: 'time.local', rootFingerprint: root });
+
+    });
+
+});
+
+
+describe('what the page showed a server held to', () => {
+
+    // A save sends the whole list, from what the page loaded; a server that
+    // learned its root on first use while the page was open is held to it by
+    // then, and the page did not show it. Sent beside what the page sends, it
+    // is what lets the controller keep that root and still take away a pin
+    // the page showed and no longer sends.
+
+    it('is said in the keys an entry says it with', () => {
+
+        assert.deepEqual(asShown(heldTo({ trustOnFirstUse: 'root' })),
+                         { trustOnFirstUse: 'root' });
+
+        assert.deepEqual(asShown(heldTo({ root, roots: [ root, otherRoot ], onMismatch: 'record' })),
+                         { rootFingerprints: [ root, otherRoot ], onMismatch: 'record' });
+
+    });
+
+    it('is nothing for a server shown held to nothing - which is still said', () => {
+
+        assert.deepEqual(asShown(null),       {});
+        assert.deepEqual(asShown(undefined),  {});
+
+    });
+
+    it('goes beside what the entry sends, and changes none of it', () => {
+
+        const entry: NTSServerEntry = { hostname: 'ptbtime1.ptb.de', trustOnFirstUse: 'root' };
+
+        assert.deepEqual(withAsShown(entry, heldTo({ trustOnFirstUse: 'root' })),
+                         { hostname: 'ptbtime1.ptb.de', trustOnFirstUse: 'root', pinsAsShown: { trustOnFirstUse: 'root' } });
+
+        assert.deepEqual(entry, { hostname: 'ptbtime1.ptb.de', trustOnFirstUse: 'root' }, 'a new entry, and not this one changed');
 
     });
 

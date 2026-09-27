@@ -27,7 +27,7 @@ registerHooks({
     }
 });
 
-const { entryOf, nameTaken, readable, withServer, withoutServer } = await import('./ntsServers.ts');
+const { entryOf, nameTaken, readable, sentOf, withServer, withoutServer } = await import('./ntsServers.ts');
 
 
 const usual = { ntsKE: 4460, ntp: 123 };
@@ -116,6 +116,40 @@ describe('what a time server is held to', () => {
 });
 
 
+describe('a time server sent back', () => {
+
+    it('goes with what the page showed it held to, so that a root it learned while the page was open is kept', () => {
+
+        // What was measured: ptbtime1.ptb.de learned its root on first use
+        // after the page was loaded, and the save of another server's
+        // priority took it out of the file and out of effect. The entry says
+        // what it is held to as the page shows it; beside it, what the page
+        // showed, from which the local controller can tell that the root was
+        // not taken away here.
+        assert.deepEqual(sentOf(shown('ptbtime1.ptb.de.', { heldTo: heldTo({ trustOnFirstUse: 'root' }) }), usual),
+                         { hostname: 'ptbtime1.ptb.de', trustOnFirstUse: 'root', pinsAsShown: { trustOnFirstUse: 'root' } });
+
+    });
+
+    it('says a server shown held to nothing was shown so', () => {
+
+        assert.deepEqual(sentOf(shown('ptbtime2.ptb.de.', { heldTo: null }), usual),
+                         { hostname: 'ptbtime2.ptb.de', pinsAsShown: {} });
+
+    });
+
+    it('is what the NTS page sends every server of its list as', () => {
+
+        const page = readFileSync(new URL('./nts.ts', import.meta.url), 'utf-8');
+
+        assert.match(page, /\.map\(source => sentOf\(source, usual\)\)/,
+                     'the NTS page sends its list without what it showed each server held to');
+
+    });
+
+});
+
+
 describe('the entry the dialog saves', () => {
 
     // Asked of the page's source, as Node has no browser to open it in, and
@@ -137,6 +171,13 @@ describe('the entry the dialog saves', () => {
 
         assert.match(page, /withServer\(list, index, withPins\(entry, pins\.draft\)\)/,
                      'the NTS dialog saves a server without what its pin fields say');
+
+    });
+
+    it('goes with what the dialog showed the server held to, where it edits one the page loaded', () => {
+
+        assert.match(page, /if \(shown !== null\)\s+entry\.pinsAsShown = asShown\(shown\.heldTo\);/,
+                     'the NTS dialog saves a server without what it showed it held to');
 
     });
 

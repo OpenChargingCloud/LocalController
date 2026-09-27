@@ -245,6 +245,14 @@ A host name written back into this file carries the root label -
 not a stray character. What the controller prints for somebody to read drops it
 again.
 
+A time server, and a name server asked over TLS or HTTPS, may be held to a
+certificate or a root, and may learn one on first use - see WWCP_Node's README.
+What is learned is written into the server's entry at the first key exchange or
+handshake after a save, mostly with the NTS or DNS page still open. So the pages
+send every server back with what they showed it held to, under `pinsAsShown`:
+their next save keeps what was learned in between, and still takes away a pin
+that was shown and removed there.
+
 
 ## The clock
 

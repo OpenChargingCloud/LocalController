@@ -1,5 +1,5 @@
 import type { NTSServerEntry, NTSTimeSource } from '../api/client';
-import { draftOf, withPins } from './pins';
+import { draftOf, withAsShown, withPins } from './pins';
 
 /**
  * The list of time servers as the NTS page edits it.
@@ -65,6 +65,17 @@ export function entryOf(source: NTSTimeSource, usual: UsualPorts): NTSServerEntr
 
     return withPins(entry, draftOf(source.heldTo));
 
+}
+
+
+/**
+ * A time server as the page sends it back: its entry, and what the page
+ * showed it held to - because a root it learned after the page was loaded is
+ * not in what the page shows, and the local controller keeps it only where it
+ * is told so; see asShown.
+ */
+export function sentOf(source: NTSTimeSource, usual: UsualPorts): NTSServerEntry {
+    return withAsShown(entryOf(source, usual), source.heldTo);
 }
 
 

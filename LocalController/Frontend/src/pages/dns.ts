@@ -5,7 +5,7 @@ import type { Page } from '../router';
 import { shell } from '../shell';
 import { errorMessage, formatValue, humanizeKey, whileSaving } from '../ui';
 import { typedSinceDrawn, unsaved } from '../unsaved';
-import { allServersTake, entryOf, isEncrypted, oneServerTakes } from './dnsServers';
+import { allServersTake, entryOf, isEncrypted, oneServerTakes, sentOf } from './dnsServers';
 import { keysOf, pinsIn, saysAnything, withPins, type StoreOffers } from './pins';
 import { certificateVerdictView, heldToView, judgementView, pinsFieldset, readPinsFieldset, shownView, storeOffers, wirePinsFieldset } from './pinViews';
 
@@ -508,9 +508,10 @@ export const dnsPage: Page = {
                 void save({
                     // The servers travel with the settings, because the form is
                     // where somebody presses Save after editing either - each
-                    // with what it is held to, and with nothing of what the
-                    // local controller only said about it.
-                    servers:              servers.filter(server => server.address.trim().length > 0).map(entryOf),
+                    // with what it is held to and what the page showed it held
+                    // to, and with nothing else of what the local controller
+                    // only said about it.
+                    servers:              servers.filter(server => server.address.trim().length > 0).map(sentOf),
                     useCache:             data.get('useCache')     !== null,
                     dnssecOK:             data.get('dnssecOK')     !== null,
                     followCNAMEs:         data.get('followCNAMEs') !== null,

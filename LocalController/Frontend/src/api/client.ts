@@ -171,6 +171,13 @@ export interface DNSServerEntry extends PinKeys {
     port:                 number;
     transport:            string;
     queryTimeoutSeconds:  number | null;
+    /**
+     * What the page showed the server held to, in the keys above: the
+     * controller changes only what was changed on the page, and keeps what the
+     * server learned while the page was open. Only on a server the page
+     * loaded, and never read back.
+     */
+    pinsAsShown?:         PinKeys;
 }
 
 /**
@@ -384,11 +391,18 @@ export interface NTSUpdate {
  * usual: priority 0, the usual ports, switched on, held to no fingerprint.
  */
 export interface NTSServerEntry extends PinKeys {
-    hostname:    string;
-    priority?:   number;
-    ntsKEPort?:  number;
-    ntpPort?:    number;
-    enabled?:    boolean;
+    hostname:       string;
+    priority?:      number;
+    ntsKEPort?:     number;
+    ntpPort?:       number;
+    enabled?:       boolean;
+    /**
+     * What the page showed the server held to, in the keys above: the
+     * controller changes only what was changed on the page, and keeps what the
+     * server learned while the page was open. Only on a server the page
+     * loaded.
+     */
+    pinsAsShown?:   PinKeys;
 }
 
 /** How one synchronisation of the group went. */
