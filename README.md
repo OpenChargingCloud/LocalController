@@ -351,8 +351,7 @@ whoever opened it would still be let in. Once the session it was opened with
 has ended - signed out, expired, or taken back with the account's others - the
 stream ends too, without the entry, and the browser's next try is answered with
 a 401. One opened with an API key ends the same way once the key is revoked or
-has run out. One opened with Basic auth has neither, and is held to its account
-instead.
+has run out, and one opened with Basic auth once its password has changed.
 
 
 ## The certificate store
