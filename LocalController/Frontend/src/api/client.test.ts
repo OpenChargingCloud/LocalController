@@ -326,3 +326,21 @@ describe('signing in', () => {
     });
 
 });
+
+
+describe('the clock', () => {
+
+    it('is asked at /v1/clock, where every node has it now', async () => {
+
+        // At /v1/configuration/time it was the local controller's alone; the
+        // node's JSON API answers that path with its 404 now, which the NTS
+        // page would have shown as a clock nobody can read.
+        fetchThat(answers(200, { now: '2026-09-28T00:00:00Z', legal: false }));
+
+        await api.clock();
+
+        assert.ok(asked[0]!.url.endsWith('/v1/clock'), `the clock was asked at ${asked[0]!.url}`);
+
+    });
+
+});

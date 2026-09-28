@@ -1153,7 +1153,7 @@ export const api = {
     configuration:  () => request<Configuration>('GET', '/configuration'),
 
     /** What time it is here and what that is worth; cheap, and safe to poll. */
-    clock:          () => request<Clock>        ('GET', '/configuration/time'),
+    clock:          () => request<Clock>        ('GET', '/clock'),
 
     dns: {
         get:   ()                    => request<DNSConfiguration>('GET', '/configuration/dns'),

@@ -19,102 +19,54 @@
 
 using Newtonsoft.Json.Linq;
 
-using cloud.charging.open.protocols.WWCP.Node.Certificates;
-
 #endregion
 
 namespace cloud.charging.open.LocalController
 {
 
+    /// <summary>
+    /// What a local controller says about its certificate store beyond what
+    /// every node says - see <see cref="protocols.WWCP.Node.WWCPNode.CertificatesJSON"/>:
+    /// the identity its CSMS connection signs in with.
+    /// </summary>
     public partial class LocalController
     {
 
-        #region CertificatesJSON()
+        #region (protected override) CompleteCertificatesJSON(JSON)
 
         /// <summary>
-        /// Everything in this local controller's certificate store, grouped the
-        /// way it is shown.
+        /// Which handle the CSMS connection signs in with, so that the page can
+        /// mark it without also reading the CSMS settings.
         /// </summary>
-        /// <remarks>
-        /// Groups and not one list, as the vehicle's. The roots are what this
-        /// controller <i>believes</i> of a server it connects to: any number may
-        /// be on at once. The identities are what it <i>presents</i> in TLS,
-        /// with their private keys. The server certificates are neither: what
-        /// it <i>recognises</i>, kept for a time server or a name server to be
-        /// held to by its fingerprint. A page that put them in one table would
-        /// have to explain that difference in a column heading.
-        /// </remarks>
-        public JObject CertificatesJSON()
+        protected override void CompleteCertificatesJSON(JObject JSON)
         {
 
-            // The kinds this store keeps: a page offering a kind the store
-            // refuses would be offering a refusal.
-            var kinds  = Certificates.Kinds;
-            var byKind = new JObject();
-
-            foreach (var kind in kinds)
-                byKind.Add(kind.AsText(),
-                           new JArray(Certificates.ByKind(kind).Select(entry => entry.ToJSON(WithDiagnostics: true))));
-
-            return new JObject(
-
-                       new JProperty("directory",    Certificates.Directory),
-
-                       new JProperty("trustAnchors", new JArray(
-                           kinds.Where(kind =>  kind.IsTrustAnchor()).Select(kind => kind.AsText())
-                       )),
-
-                       new JProperty("credentials",  new JArray(
-                           kinds.Where(kind => !kind.IsTrustAnchor() && !kind.MustNotCarryPrivateKey()).Select(kind => kind.AsText())
-                       )),
-
-                       // Neither believed nor presented, and never with a key: a
-                       // server certificate, kept to recognise a server by.
-                       new JProperty("recognised",   new JArray(
-                           kinds.Where(kind => !kind.IsTrustAnchor() &&  kind.MustNotCarryPrivateKey()).Select(kind => kind.AsText())
-                       )),
-
-                       new JProperty("kinds",        new JObject(
-                           kinds.Select(kind =>
-                               new JProperty(kind.AsText(), new JObject(
-                                   new JProperty("description",     kind.Describe()),
-                                   new JProperty("trustAnchor",     kind.IsTrustAnchor()),
-                                   new JProperty("needsPrivateKey", kind.NeedsPrivateKey()),
-                                   // Whether one of the kind is told what it is for
-                                   // in this store, and what it may be told - the
-                                   // store's word and not the kind's: a TLS identity
-                                   // is told the listeners a kind of node names, and
-                                   // a local controller names none, so it is told
-                                   // nothing. Asked of the kind, the page offered an
-                                   // identity "dns" and "nts", which the store
-                                   // refuses, as the vehicle and the station found.
-                                   new JProperty("hasUsages",       Certificates.HasUsages(kind)),
-                                   new JProperty("usages",          new JArray(Certificates.UsagesFor(kind)))
-                               )))
-                       )),
-
-                       // What a TLS root or a server certificate may be told it is
-                       // for - the services it vouches for - as it was said before
-                       // every kind said its own above.
-                       new JProperty("usages",       new JArray(Certificates.Usages)),
-
-                       new JProperty("certificates", byKind),
-
-                       // Which handle the CSMS connection signs in with, so that
-                       // the page can mark it without also reading the CSMS
-                       // settings.
-                       new JProperty("chosen",       new JObject(
-                           new JProperty("csmsClientCertificate",  csmsSettings.ChosenClientCertificate)
-                       )),
-
-                       // Said here because this is the page where somebody is
-                       // looking at the consequences of it, rather than only in
-                       // the log at a start.
-                       new JProperty("keysAreUnencrypted", Certificates.Entries.Any(entry => entry.HasPrivateKey))
-
-                   );
+            JSON["chosen"] = new JObject(
+                                 new JProperty("csmsClientCertificate",  csmsSettings.ChosenClientCertificate)
+                             );
 
         }
+
+        #endregion
+
+        #region (override) WhatUses(Handle)
+
+        /// <summary>
+        /// The CSMS connection, where it signs in with the certificate of this
+        /// handle - as the sentence a refusal to delete it says.
+        /// </summary>
+        /// <remarks>
+        /// Deleting it anyway would leave a controller configured to sign in
+        /// with something that is not there, which is discovered at the next
+        /// dialling rather than here - and switching it off is what somebody
+        /// taking a certificate out of service usually meant.
+        /// </remarks>
+        public override String? WhatUses(String Handle)
+
+            => UsedByCSMS(Handle) is String field
+                   ? $"That certificate is what 'csms.{field}' names. Choose another one for the CSMS " +
+                      "connection first, or switch this one off instead of deleting it."
+                   : null;
 
         #endregion
 

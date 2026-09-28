@@ -30,8 +30,9 @@ and the HTTP server all of that sits behind - is not here. That is
 vehicle, a charging station and a local controller share, and
 `LocalController` is one `WWCPNode` with an OCPP node, a port for the charging
 stations below it and a line up to the CSMS above: its sections - `ocpp`,
-`ocppServer`, `csms` - go into the same configuration file, and its JSON API
-below the node's `/api`.
+`ocppServer`, `csms` - go into the same configuration file, and its routes into
+the JSON API every node has below `/api` - the node's `NodeHTTPAPI`, with the
+CSMS and the charging station port on top.
 
 
 ## What it can be told
@@ -290,7 +291,7 @@ reads the time from here, so a jump backwards would put two meter readings out
 of order in a record written somewhere else entirely, with nothing in it to say
 why.
 
-`GET /api/v1/configuration/time` is that measurement, and the one word it never
+`GET /api/v1/clock` is that measurement, and the one word it never
 guesses is "legal": that needs a claim the operator wrote into
 `nts.legalTimeAuthority`, a check against those very servers, a recent one, and a
 small difference. It names the group it is checked against, its servers and how
@@ -377,7 +378,7 @@ the page offers it no uses. The dialog in which a time server or a name server
 is pinned offers the store's certificates for its service, and a pinned
 fingerprint the store keeps is named by its label.
 
-It is the vehicle's store and the vehicle's page, over the same routes -
+It is the node's store and every node's routes, the vehicle's among them -
 `GET` and `POST /api/v1/certificates`, `POST /api/v1/certificates/reload`, and
 `GET`, `PATCH` and `DELETE /api/v1/certificates/{id}` - at `certificates:read`
 to look and `certificates:edit` to change. The charging station port's own keys

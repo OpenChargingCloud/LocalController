@@ -468,7 +468,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var nobody   = await SignedInAs("nobody1", null);
 
-            var clock          = await nobody.GetAsync("api/v1/configuration/time");
+            var clock          = await nobody.GetAsync("api/v1/clock");
             var configuration  = await nobody.GetAsync("api/v1/configuration");
             var refusal        = await configuration.Content.ReadAsStringAsync();
 
