@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\LocalController\LocalController.csproj" />
+    <ProjectReference Include="..\..\WWCP_Node\WWCP_Node_TestKit\WWCP_Node_TestKit.csproj" />
   </ItemGroup>
 
 </Project>

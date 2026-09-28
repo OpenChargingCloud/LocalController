@@ -151,6 +151,13 @@ does: the bundle is served, the sign-in works, a change to the name servers
 reaches both the shared DNS client and the file, the log filters, the event
 stream delivers, and a controller that is told to stop stops.
 
+What of that every node has to answer alike is WWCP_Node's conformance suite,
+`NodeConformanceTests` in `WWCP_Node_TestKit`, which
+`LocalControllerConformance` runs against a local controller - see
+[WWCP_Node's README](https://github.com/OpenChargingCloud/WWCP_Node#testing-a-kind-of-node).
+The rest is what only a local controller does: its CSMS, its station port,
+its OCPP identity and the roles and resources that are its own.
+
 Each test gets a controller of its own, on a port the operating system has
 just confirmed is free and with its own directory for the two files a
 controller writes - so they neither fight with each other nor with a
