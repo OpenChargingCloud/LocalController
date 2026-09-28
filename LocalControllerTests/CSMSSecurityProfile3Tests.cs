@@ -263,6 +263,41 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region (private) NoConnectionStays()
+
+        /// <summary>
+        /// Whether the CSMS is left with no connection, within a few seconds.
+        /// </summary>
+        /// <remarks>
+        /// Not asked at one moment: Hermod's WebSocket server lists a connection
+        /// as soon as its TLS handshake is through, before the HTTP upgrade, and
+        /// a client that judges the server's certificate once the handshake is
+        /// through, as SslStream does, leaves a connection in that list for the
+        /// moment it takes to close it. Asked at that moment on a busy Windows
+        /// CI machine, the list was not empty, and the test red. A connection
+        /// the controller had let through would stay, and is what this is about.
+        /// </remarks>
+        private async Task<Boolean> NoConnectionStays()
+        {
+
+            var giveUp = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
+
+            while (upstream.StationServer?.WebSocketConnections.Any() == true)
+            {
+
+                if (DateTimeOffset.UtcNow > giveUp)
+                    return false;
+
+                await Task.Delay(50);
+
+            }
+
+            return true;
+
+        }
+
+        #endregion
+
 
         #region AControllerSignsInWithItsOwnIdentityAndBelievesTheCSMSByItsStore()
 
@@ -324,12 +359,13 @@ namespace cloud.charging.open.LocalController.Tests
         {
 
             var controller = await AControllerThatDials(Root: false);
+            var noneStays  = await NoConnectionStays();
 
             Assert.Multiple(() => {
                 Assert.That(controller.CSMSConnected,           Is.False);
                 Assert.That(controller.CSMSLastProblem,         Does.Contain("showed a certificate this local controller does not believe").
                                                                 And.Contain("chains to no root that is trusted"));
-                Assert.That(upstream.StationServer?.WebSocketConnections.Any(), Is.False);
+                Assert.That(noneStays,                          Is.True, "the CSMS kept a connection of a controller that does not believe it");
             });
 
         }
