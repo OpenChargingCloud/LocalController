@@ -155,22 +155,25 @@ What of that every node has to answer alike is WWCP_Node's conformance suite,
 `NodeConformanceTests` in `WWCP_Node_TestKit`, which
 `LocalControllerConformance` runs against a local controller - see
 [WWCP_Node's README](https://github.com/OpenChargingCloud/WWCP_Node#testing-a-kind-of-node).
-The rest is what only a local controller does: its CSMS, its station port,
-its OCPP identity and the roles and resources that are its own.
+What the node below does without a web interface in front of it - its log,
+its clock, its configuration file, its start - is tested in WWCP_Node's own
+suite, once for every kind of node. The rest is what only a local controller
+does: its CSMS, its station port, its OCPP identity and its section of the
+file, the roles and resources that are its own, and the name its log files
+go by.
 
-Each test gets a controller of its own, on a port the operating system has
-just confirmed is free and with its own directory for the two files a
-controller writes - so they neither fight with each other nor with a
+Each test gets a controller of its own, on a port from the kit's `TestPorts`
+- one the operating system has just confirmed is free, and that no other test
+of the run has been handed - and with its own directory for the two files a
+controller writes: so they neither fight with each other nor with a
 controller somebody has running on 2350 while they work.
 
 **They never touch the network.** The configuration written before each
 controller is built switches the time client off, which is what stops the
-clock check from being scheduled at all - and the few tests that need it on, to
-read what a start writes about the clock, run on a clock whose timers never
-fire. A synchronisation a test asks for goes to an address on a port nobody
-listens on, and the DNS client is only ever asked what it is configured as. A
-test suite that needs a name server to answer is a test suite that fails on a
-train.
+clock check from being scheduled at all; the conformance suite's few tests
+that need it on hold it to a server on this machine that nothing answers on.
+The DNS client is only ever asked what it is configured as. A test suite that
+needs a name server to answer is a test suite that fails on a train.
 
 
 ## Name resolution and the time servers

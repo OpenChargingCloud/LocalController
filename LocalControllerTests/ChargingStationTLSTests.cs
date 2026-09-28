@@ -27,6 +27,7 @@ using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 using cloud.charging.open.LocalController.OCPP;
+using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 #endregion
 
@@ -81,7 +82,7 @@ namespace cloud.charging.open.LocalController.Tests
             // deciding whether a test passes, and it is why these two came
             // and went. ServableChainTests had it right already.
             ca        = TestCA.Create($"Test CA {Guid.NewGuid()}", WithIntermediate: true);
-            port      = TestControllers.FreePort();
+            port      = TestPorts.Free();
 
             #region A key and a certificate, put there before anything starts
 

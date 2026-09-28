@@ -26,6 +26,7 @@ using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 using cloud.charging.open.protocols.WWCP.Node.Certificates;
+using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 using cloud.charging.open.LocalController.OCPP;
 
@@ -81,7 +82,7 @@ namespace cloud.charging.open.LocalController.Tests
             // A name of its own per run - see ChargingStationTLSTests for the
             // machine-wide cache that makes that matter.
             ca                 = TestCA.Create($"Site CA {Guid.NewGuid()}", WithIntermediate: true);
-            csmsPort           = TestControllers.FreePort();
+            csmsPort           = TestPorts.Free();
 
             upstreamDirectory  = TestControllers.TemporaryDirectory("csms-p3-upstream");
             Directory.CreateDirectory(upstreamDirectory);

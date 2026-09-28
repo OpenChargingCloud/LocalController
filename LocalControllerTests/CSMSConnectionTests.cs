@@ -22,6 +22,7 @@ using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 using cloud.charging.open.LocalController.Configuration;
+using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 #endregion
 
@@ -80,7 +81,7 @@ namespace cloud.charging.open.LocalController.Tests
             upstreamDirectory  = TestControllers.TemporaryDirectory("csms-upstream");
             Directory.CreateDirectory(upstreamDirectory);
 
-            csmsPort           = TestControllers.FreePort();
+            csmsPort           = TestPorts.Free();
             upstream           = ACSMS(upstreamDirectory, csmsPort);
 
             await upstream.Start();
@@ -771,7 +772,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ACSMSStillStartingIsNotSaidToHaveRefused()
         {
 
-            var laterPort       = TestControllers.FreePort();
+            var laterPort       = TestPorts.Free();
             var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
             var answered        = 0;
 
@@ -1021,7 +1022,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ACSMSThatNeverAnswersIsDialledAgain()
         {
 
-            var laterPort       = TestControllers.FreePort();
+            var laterPort       = TestPorts.Free();
             var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
 
             // Something on the port that takes the connection and the upgrade,
