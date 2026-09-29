@@ -5,10 +5,7 @@
 import '@fortawesome/fontawesome-free/css/fontawesome.css';
 import '@fortawesome/fontawesome-free/css/solid.css';
 
-import { auth } from './auth';
-import { html, must, render } from '@node/html';
-import { logs } from '@node/logs/store';
-import { Router } from '@node/router';
+import { nodeMenu, startNode } from '@node/start';
 
 import { configurationPage }      from './pages/configuration';
 import { dnsPage }                from './pages/dns';
@@ -19,67 +16,47 @@ import { ocppServerPage }         from './pages/ocppServer';
 import { stationLoginsPage }      from './pages/stationLogins';
 import { serverCertificatesPage } from './pages/serverCertificates';
 import { clientTrustPage }        from './pages/clientTrust';
-import { loginPage }              from './pages/login';
-import { logsPage }               from './pages/logs';
-import { notFoundPage }           from './pages/notFound';
-import { fromURL } from '@node/basePath';
 
+// What a local controller has pages for beside what every node has: the line
+// up to its CSMS, and the server its charging stations connect to. The sign-in,
+// the log, the frame and following the log while somebody is signed in are
+// every node's - see WWCP_Node's start.ts.
+startNode({
 
-const root = document.getElementById('app');
+    name:  'Local Controller',
+    icon:  'fa-sitemap',
 
-if (root === null)
-    throw new Error("The '#app' element is missing!");
-
-render(root, html`<div id="page" class="page"></div>`);
-
-const router = new Router({
-    routes: [
-        // "/" is the configuration, and is a route of its own rather than a
-        // redirect to /configuration: the sign-in remembers where somebody was
-        // going, and for the first visit that is "/" - which would otherwise be
-        // a page that exists on the way in and not on the way back.
-        { path: '/',                    page: configurationPage,  guard: auth.requireSignIn },
-        { path: '/configuration',       page: configurationPage,  guard: auth.requireSignIn },
-        { path: '/configuration/dns',   page: dnsPage,            guard: auth.requireSignIn },
-        { path: '/configuration/nts',   page: ntsPage,            guard: auth.requireSignIn },
-
-        { path: '/configuration/csms',                      page: csmsPage,               guard: auth.requireSignIn },
-        { path: '/configuration/certificates',              page: certificateStorePage,   guard: auth.requireSignIn },
-        { path: '/configuration/ocpp-server',               page: ocppServerPage,         guard: auth.requireSignIn },
-        { path: '/configuration/ocpp-server/logins',        page: stationLoginsPage,      guard: auth.requireSignIn },
-        { path: '/configuration/ocpp-server/certificates',  page: serverCertificatesPage, guard: auth.requireSignIn },
-        { path: '/configuration/ocpp-server/trust',         page: clientTrustPage,        guard: auth.requireSignIn },
-
-        { path: '/logs',                page: logsPage,           guard: auth.requireSignIn },
-        { path: '/login',               page: loginPage }
+    menu: [
+        nodeMenu.configuration([
+            nodeMenu.dns,
+            nodeMenu.nts,
+            { path: '/configuration/csms',                      label: 'CSMS connection',     icon: 'fa-satellite-dish',    permission: [ 'csms:read' ]         },
+            { ...nodeMenu.certificates,                         label: 'Certificate store',   icon: 'fa-vault'                                                  },
+            { path: '/configuration/ocpp-server',               label: 'Charging stations',   icon: 'fa-charging-station',  permission: [ 'stations:read' ]     },
+            { path: '/configuration/ocpp-server/logins',        label: 'Logins and groups',   icon: 'fa-users-gear',        permission: [ 'stations:read' ]     },
+            { path: '/configuration/ocpp-server/certificates',  label: 'Server certificates', icon: 'fa-certificate',       permission: [ 'certificates:read' ] },
+            { path: '/configuration/ocpp-server/trust',         label: 'Accepted chains',     icon: 'fa-user-shield',       permission: [ 'certificates:read' ] }
+        ]),
+        nodeMenu.logs
     ],
-    outlet:       must<HTMLElement>(root, '#page'),
-    notFound:     notFoundPage,
-    titleSuffix:  ' · Local Controller'
-});
 
-// Signed in: follow the controller's log from now on, whichever page is open -
-// so that opening the Logs page shows what happened while somebody was
-// reading the configuration, and not an empty list.
-// Signed out - by the button, or because the session expired and a request
-// came back with 401: close the stream, forget the log, show the sign-in.
-auth.onChange(user => {
+    pages: {
 
-    if (user !== null) {
-        logs.start();
-        return;
+        // "/" is the configuration, and is a page of its own rather than a
+        // redirect to /configuration: the sign-in remembers where somebody was
+        // going, and for the first visit that is "/".
+        '/':                                        configurationPage,
+        '/configuration':                           configurationPage,
+        '/configuration/dns':                       dnsPage,
+        '/configuration/nts':                       ntsPage,
+
+        '/configuration/csms':                      csmsPage,
+        '/configuration/certificates':              certificateStorePage,
+        '/configuration/ocpp-server':               ocppServerPage,
+        '/configuration/ocpp-server/logins':        stationLoginsPage,
+        '/configuration/ocpp-server/certificates':  serverCertificatesPage,
+        '/configuration/ocpp-server/trust':         clientTrustPage
+
     }
 
-    logs.stop();
-
-    if (fromURL(location.pathname) !== '/login')
-        router.navigate(auth.requireSignIn(new URL(location.href)) ?? '/login', true);
-
 });
-
-// Find out who is signed in before the first page renders, so that a reload on
-// a deep URL does not flash the sign-in page on its way back to where it was.
-void (async () => {
-    await auth.refresh();
-    router.start();
-})();

@@ -1,7 +1,7 @@
 import { api, type Configuration } from '../api/client';
 import { html, must, render, type HTMLFragment } from '@node/html';
 import type { Page } from '@node/router';
-import { shell } from '../shell';
+import { shell } from '@node/shell';
 import { errorMessage, formatSince, formatValue, humanizeKey } from '@node/ui';
 
 /**
