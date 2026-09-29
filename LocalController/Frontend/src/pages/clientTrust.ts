@@ -4,7 +4,7 @@ import { html, must, render, type HTMLFragment } from '@node/html';
 import type { Page } from '@node/router';
 import { shell } from '@node/shell';
 import { errorMessage, field, formatTimestamp } from '@node/ui';
-import { typedSinceDrawn, unsaved } from '@node/unsaved';
+import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
 
 /**
  * Which chains a charging station's own certificate may lead to - the other
@@ -330,8 +330,7 @@ export const clientTrustPage: Page = {
 
         // An authority pasted but not yet accepted is work like any other. The
         // switches in the list are in no form: they take effect when flipped.
-        const release = unsaved.heldBy(() => Array.from(content.querySelectorAll<HTMLFormElement>('form')).
-                                                   some(form => typedSinceDrawn(form)));
+        const release = unsaved.heldBy(() => anyFormTypedSinceDrawn(content));
 
         void load();
 

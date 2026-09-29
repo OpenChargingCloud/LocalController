@@ -4,7 +4,7 @@ import { html, must, render, type HTMLFragment } from '@node/html';
 import type { Page } from '@node/router';
 import { shell } from '@node/shell';
 import { errorMessage, field, formatTimestamp } from '@node/ui';
-import { typedSinceDrawn, unsaved } from '@node/unsaved';
+import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
 
 /**
  * Who may sign in to the charging station server, with what, and under which
@@ -701,8 +701,7 @@ export const stationLoginsPage: Page = {
         // The group being edited and the station being added are drafts. The
         // switches and choosers in the list are in no form: they take effect
         // the moment they are touched.
-        const release = unsaved.heldBy(() => Array.from(content.querySelectorAll<HTMLFormElement>('form')).
-                                                   some(form => typedSinceDrawn(form)));
+        const release = unsaved.heldBy(() => anyFormTypedSinceDrawn(content));
 
         void load();
 

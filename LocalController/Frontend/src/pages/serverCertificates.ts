@@ -4,7 +4,7 @@ import { html, must, render, type HTMLFragment } from '@node/html';
 import type { Page } from '@node/router';
 import { shell } from '@node/shell';
 import { errorMessage, field, formatTimestamp } from '@node/ui';
-import { typedSinceDrawn, unsaved } from '@node/unsaved';
+import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
 
 /**
  * The certificates this local controller presents to the charging stations.
@@ -430,8 +430,7 @@ export const serverCertificatesPage: Page = {
 
         // A half-typed subject, or a certificate pasted but not yet taken in,
         // is work like any other.
-        const release = unsaved.heldBy(() => Array.from(content.querySelectorAll<HTMLFormElement>('form')).
-                                                   some(form => typedSinceDrawn(form)));
+        const release = unsaved.heldBy(() => anyFormTypedSinceDrawn(content));
 
         void load();
 

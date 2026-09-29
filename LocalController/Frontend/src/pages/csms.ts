@@ -4,7 +4,7 @@ import { html, must, render, type HTMLFragment } from '@node/html';
 import type { Page } from '@node/router';
 import { shell } from '@node/shell';
 import { errorMessage, field, formatTimestamp, isChecked } from '@node/ui';
-import { typedSinceDrawn, unsaved } from '@node/unsaved';
+import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
 
 /**
  * The charging station management system above this local controller.
@@ -510,8 +510,7 @@ export const csmsPage: Page = {
 
         // Both forms are drafts until they are saved, and a password typed but
         // not saved cannot be read back off the page to try again.
-        const release = unsaved.heldBy(() => Array.from(content.querySelectorAll<HTMLFormElement>('form')).
-                                                   some(form => typedSinceDrawn(form)));
+        const release = unsaved.heldBy(() => anyFormTypedSinceDrawn(content));
 
         void load();
 
