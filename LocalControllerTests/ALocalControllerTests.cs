@@ -24,6 +24,8 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using cloud.charging.open.protocols.WWCP.Node.TestKit;
+
 #endregion
 
 namespace cloud.charging.open.LocalController.Tests
@@ -112,11 +114,11 @@ namespace cloud.charging.open.LocalController.Tests
 
             Directory   = TestControllers.TemporaryDirectory("tests");
 
-            Controller  = TestControllers.New(Directory, Configuration, Clock);
+            // Made again, on fresh ports, where another test run on this
+            // machine took one before the controller could bind it.
+            Controller  = await TestPorts.StartedOnFreshPorts(() => TestControllers.New(Directory, Configuration, Clock));
 
             BaseURL     = Controller.WebInterfaceURL.ToString();
-
-            await Controller.Start();
 
             // After Start(), because that is what makes the account. Null would
             // mean accounts were already there, and the directory is new.
