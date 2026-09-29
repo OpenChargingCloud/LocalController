@@ -1,6 +1,7 @@
 import { api, type Certificate, type CSMSConfiguration } from '../api/client';
 import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '@node/html';
+import { keepDrafts } from '@node/drafts';
 import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
 import { mayButNot, shell } from '@node/shell';
@@ -390,7 +391,7 @@ export const csmsPage: Page = {
                 if (cancelled)
                     return;
 
-                draw();
+                keepDrafts(content, 'connection-form', draw);
 
             }
             catch (problem)
@@ -437,7 +438,7 @@ export const csmsPage: Page = {
                 if (cancelled)
                     return;
 
-                draw();
+                keepDrafts(content, 'credentials-form', draw);
 
             }
             catch (problem)
@@ -460,7 +461,7 @@ export const csmsPage: Page = {
                 csms = await api.csms.removeCredentials();
 
                 if (!cancelled)
-                    draw();
+                    keepDrafts(content, null, draw);
 
             }
             catch (problem)

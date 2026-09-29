@@ -1,6 +1,7 @@
 ﻿import { api, type OCPPServerConfiguration, type OCPPServerUpdate, type StationLogins } from '../api/client';
 import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '@node/html';
+import { keepDrafts } from '@node/drafts';
 import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
 import { mayButNot, shell } from '@node/shell';
@@ -437,7 +438,9 @@ export const ocppServerPage: Page = {
                 return;
 
             must<HTMLInputElement>(content, '#enabled').addEventListener('change', event => {
-                void save({ enabled: (event.target as HTMLInputElement).checked }, 'socket');
+                // A switch, not the form it sits beside: what is typed into
+                // the form stays.
+                void save({ enabled: (event.target as HTMLInputElement).checked }, 'socket', null);
             });
 
             must<HTMLFormElement>(content, '#socket-form').addEventListener('submit', event => {
@@ -513,7 +516,7 @@ export const ocppServerPage: Page = {
         }
 
 
-        async function save(update: OCPPServerUpdate, where: string): Promise<void> {
+        async function save(update: OCPPServerUpdate, where: string, saved: string | null = `${where}-form`): Promise<void> {
 
             const note  = content.querySelector<HTMLElement>(`#${where}-note`);
             const error = content.querySelector<HTMLElement>(`#${where}-error`);
@@ -529,7 +532,7 @@ export const ocppServerPage: Page = {
                 if (cancelled)
                     return;
 
-                draw();
+                keepDrafts(content, saved, draw);
 
             }
             catch (problem)

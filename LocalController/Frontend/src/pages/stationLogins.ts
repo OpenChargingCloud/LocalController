@@ -1,6 +1,7 @@
 import { api, type AuthMethod, type LoginGroup, type StationLogin, type StationLogins } from '../api/client';
 import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '@node/html';
+import { keepDrafts } from '@node/drafts';
 import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
 import { mayButNot, shell } from '@node/shell';
@@ -426,14 +427,14 @@ export const stationLoginsPage: Page = {
         function wire(): void {
 
             content.querySelectorAll<HTMLButtonElement>('.group-edit').forEach(button => {
-                button.addEventListener('click', () => { editing = button.dataset.id ?? null; draw(); });
+                button.addEventListener('click', () => { editing = button.dataset.id ?? null; keepDrafts(content, null, draw); });
             });
 
             const makeOne = content.querySelector<HTMLButtonElement>('#group-new');
-            makeOne?.addEventListener('click', () => { editing = ''; draw(); });
+            makeOne?.addEventListener('click', () => { editing = ''; keepDrafts(content, null, draw); });
 
             const cancel = content.querySelector<HTMLButtonElement>('#group-cancel');
-            cancel?.addEventListener('click', () => { editing = null; draw(); });
+            cancel?.addEventListener('click', () => { editing = null; keepDrafts(content, null, draw); });
 
             content.querySelector<HTMLFormElement>('#group-form')?.addEventListener('submit', event => {
                 event.preventDefault();
@@ -519,7 +520,7 @@ export const stationLoginsPage: Page = {
                     return;
 
                 editing = null;
-                draw();
+                keepDrafts(content, 'group-form', draw);
 
             }
             catch (problem)
@@ -559,7 +560,7 @@ export const stationLoginsPage: Page = {
                                 ? null
                                 : { id, what: 'password', secret: answer.password };
 
-                draw();
+                keepDrafts(content, 'station-form', draw);
 
             }
             catch (problem)
@@ -594,7 +595,7 @@ export const stationLoginsPage: Page = {
                                 ? null
                                 : { id, what: 'TOTP shared secret', secret: answer.sharedSecret };
 
-                draw();
+                keepDrafts(content, null, draw);
 
             }
             catch (problem)
@@ -657,7 +658,7 @@ export const stationLoginsPage: Page = {
                 store     = answer;
                 justMade  = null;
 
-                draw();
+                keepDrafts(content, null, draw);
 
             }
             catch (problem)
@@ -665,16 +666,22 @@ export const stationLoginsPage: Page = {
                 if (!cancelled)
                 {
                     window.alert(errorMessage(problem));
-                    void load();
+                    void load(true);
                 }
             }
 
         }
 
 
-        async function load(): Promise<void> {
+        /**
+         * The logins as the local controller has them now: drawn from nothing -
+         * or, keeping, drawn anew over the page as it is, what is typed on it
+         * kept, after something done on it failed.
+         */
+        async function load(keeping = false): Promise<void> {
 
-            render(content, html`<div class="loading">Loading ...</div>`);
+            if (!keeping)
+                render(content, html`<div class="loading">Loading ...</div>`);
 
             try
             {
@@ -686,7 +693,10 @@ export const stationLoginsPage: Page = {
 
                 store = logins;
 
-                draw();
+                if (keeping)
+                    keepDrafts(content, null, draw);
+                else
+                    draw();
 
             }
             catch (problem)

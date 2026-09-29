@@ -1,6 +1,7 @@
 import { api, type ClientTrust, type OCPPServerConfiguration, type TrustedChain } from '../api/client';
 import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '@node/html';
+import { keepDrafts } from '@node/drafts';
 import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
 import { mayButNot, shell } from '@node/shell';
@@ -262,7 +263,7 @@ export const clientTrustPage: Page = {
                 trust = await api.ocppServer.trust.update(id, { enabled });
 
                 if (!cancelled)
-                    draw();
+                    keepDrafts(content, null, draw);
 
             }
             catch (problem)
@@ -285,7 +286,7 @@ export const clientTrustPage: Page = {
                 trust = await api.ocppServer.trust.remove(id);
 
                 if (!cancelled)
-                    draw();
+                    keepDrafts(content, null, draw);
 
             }
             catch (problem)

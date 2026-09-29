@@ -1,6 +1,7 @@
 import { api, type OCPPServerConfiguration, type ServerCertificate, type ServerCertificates } from '../api/client';
 import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '@node/html';
+import { keepDrafts } from '@node/drafts';
 import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
 import { mayButNot, shell } from '@node/shell';
@@ -324,7 +325,7 @@ export const serverCertificatesPage: Page = {
                 justMade = made;
                 store    = await api.ocppServer.certificates.get();
 
-                draw();
+                keepDrafts(content, 'create-form', draw);
 
             }
             catch (problem)
@@ -355,7 +356,7 @@ export const serverCertificatesPage: Page = {
                 store    = await api.ocppServer.certificates.get();
                 server   = await api.ocppServer.get();
 
-                draw();
+                keepDrafts(content, id, draw);
 
                 if (answer.warnings.length > 0)
                     window.alert(`The certificate was taken in, with something to say about it:\n\n${answer.warnings.join('\n\n')}`);
@@ -386,7 +387,7 @@ export const serverCertificatesPage: Page = {
                 justMade = null;
                 server   = await api.ocppServer.get();
 
-                draw();
+                keepDrafts(content, null, draw);
 
             }
             catch (problem)
