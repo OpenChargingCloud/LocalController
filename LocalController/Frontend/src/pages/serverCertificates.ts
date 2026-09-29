@@ -1,6 +1,7 @@
 import { api, type OCPPServerConfiguration, type ServerCertificate, type ServerCertificates } from '../api/client';
 import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '@node/html';
+import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
 import { shell } from '@node/shell';
 import { errorMessage, field, formatTimestamp } from '@node/ui';
@@ -72,7 +73,7 @@ export const serverCertificatesPage: Page = {
                 ${configuration.reachableAs.length > 0 ? '' : html`
                     <div class="notice warn">
                         This local controller has not been told what it is
-                        <a href="/configuration/ocpp-server">reachable as</a>. A signing request without those names
+                        <a href="${toURL('/configuration/ocpp-server')}">reachable as</a>. A signing request without those names
                         produces a certificate that no charging station will accept, so none can be made yet.
                     </div>
                 `}

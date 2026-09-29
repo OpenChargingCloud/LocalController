@@ -1,6 +1,7 @@
 import { api, type Certificate, type CSMSConfiguration } from '../api/client';
 import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '@node/html';
+import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
 import { shell } from '@node/shell';
 import { errorMessage, field, formatTimestamp, isChecked, numberField } from '@node/ui';
@@ -181,7 +182,7 @@ export const csmsPage: Page = {
                             <strong>Profile 1 sends the password in the clear.</strong> The line to a backend
                             crosses networks this site does not own, so profile 2 is the least that makes sense
                             outside a laboratory. Profile 3 signs in with a TLS identity of this controller's own,
-                            chosen below from the <a href="/configuration/certificates">certificate store</a>.
+                            chosen below from the <a href="${toURL('/configuration/certificates')}">certificate store</a>.
                         </div>
 
                         ${identityField(settings)}

@@ -1,6 +1,7 @@
 ﻿import { api, type OCPPServerConfiguration, type OCPPServerUpdate, type StationLogins } from '../api/client';
 import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '@node/html';
+import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
 import { shell } from '@node/shell';
 import { errorMessage, field, formatTimestamp, isChecked, numberField } from '@node/ui';
@@ -230,7 +231,7 @@ export const ocppServerPage: Page = {
                                   <div class="notice warn">
                                       Profile 2 or 3 is allowed, but there is no server certificate - so this port is
                                       <strong>not encrypted</strong> and only profile 1 can be used on it.
-                                      <a href="/configuration/ocpp-server/certificates">Make a signing request</a>.
+                                      <a href="${toURL('/configuration/ocpp-server/certificates')}">Make a signing request</a>.
                                   </div>
                               `
                               : ''}
@@ -241,7 +242,7 @@ export const ocppServerPage: Page = {
                                       Profile 3 is allowed, but no certificate authority has been named to accept
                                       charging stations from, so none can connect with a certificate. An empty list
                                       is "nobody", not "everybody" &mdash;
-                                      <a href="/configuration/ocpp-server/trust">name one</a>.
+                                      <a href="${toURL('/configuration/ocpp-server/trust')}">name one</a>.
                                   </div>
                               `
                               : ''}
@@ -385,7 +386,7 @@ export const ocppServerPage: Page = {
                     </p>
 
                     <div class="form-actions">
-                        <a class="btn" href="/configuration/ocpp-server/logins">Logins and groups</a>
+                        <a class="btn" href="${toURL('/configuration/ocpp-server/logins')}">Logins and groups</a>
                     </div>
 
                 </section>
