@@ -545,14 +545,27 @@ export const ocppServerPage: Page = {
                 if (error)  error.textContent = errorMessage(problem);
 
                 // What the controller refused is not what it is running, so the
-                // form has to go back to saying what is true.
-                void load(false);
+                // page goes back to saying what is true - a switch flipped back
+                // with it, what is typed into the forms kept, to be put right,
+                // and why it was refused as well. Drawn anew from the answer,
+                // the page threw all three away before anybody could read it.
+                await load(false);
+
+                const refused = content.querySelector<HTMLElement>(`#${where}-error`);
+
+                if (refused)
+                    refused.textContent = errorMessage(problem);
 
             }
 
         }
 
 
+        /**
+         * The page as the controller has it now: from nothing, the first time
+         * and on Reload - or, not showing that it loads, drawn anew over the
+         * page as it is, what is typed into its forms kept.
+         */
         async function load(showLoading = true): Promise<void> {
 
             if (showLoading)
@@ -572,7 +585,10 @@ export const ocppServerPage: Page = {
                 server   = configuration;
                 stations = logins;
 
-                draw();
+                if (showLoading)
+                    draw();
+                else
+                    keepDrafts(content, null, draw);
 
             }
             catch (problem)

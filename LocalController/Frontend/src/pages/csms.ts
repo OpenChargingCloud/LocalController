@@ -403,9 +403,17 @@ export const csmsPage: Page = {
                 if (note)   note.textContent  = '';
                 if (error)  error.textContent = errorMessage(problem);
 
-                // What was refused is not what is running, so the form has to
-                // go back to saying what is true.
-                void load(false);
+                // What was refused is not what is running, so the page goes
+                // back to saying what is true - keeping what is typed into its
+                // forms, to be put right, and why it was refused. Drawn anew
+                // from the controller's answer, it threw all three away before
+                // anybody could read the first.
+                await load(false);
+
+                const refused = content.querySelector<HTMLElement>('#connection-error');
+
+                if (refused)
+                    refused.textContent = errorMessage(problem);
 
             }
 
@@ -473,6 +481,11 @@ export const csmsPage: Page = {
         }
 
 
+        /**
+         * The page as the controller has it now: from nothing, the first time
+         * and on Reload - or, not showing that it loads, drawn anew over the
+         * page as it is, what is typed into its forms kept.
+         */
         async function load(showLoading = true): Promise<void> {
 
             if (showLoading)
@@ -497,7 +510,10 @@ export const csmsPage: Page = {
                 csms       = settings;
                 identities = kept;
 
-                draw();
+                if (showLoading)
+                    draw();
+                else
+                    keepDrafts(content, null, draw);
 
             }
             catch (problem)
