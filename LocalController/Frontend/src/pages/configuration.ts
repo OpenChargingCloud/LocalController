@@ -77,6 +77,9 @@ export const configurationPage: Page = {
                                         <span class="v">
                                             ${formatValue(assembly.version)}
                                             <span class="muted small">${breakable(formatValue(assembly.assembly))}</span>
+                                            ${typeof assembly.commit === 'string'
+                                                  ? html`<span class="muted small commit">${assembly.commit}</span>`
+                                                  : ''}
                                         </span>
                                     </div>
                                 `)}

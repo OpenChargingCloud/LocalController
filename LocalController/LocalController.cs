@@ -435,13 +435,6 @@ namespace cloud.charging.open.LocalController
                          new JProperty("certificates",     ServerCertificates.Entries.Count)
                      )));
 
-            json.Add(new JProperty("assemblies", new JArray(
-                         AssemblyJSON<HTTPServer>                              ("Hermod"),
-                         AssemblyJSON<NTSClient>                               ("Norn"),
-                         AssemblyJSON<WWCPNode>                                ("WWCP Node"),
-                         AssemblyJSON<OCPPv2_1_LC.TestLocalControllerNode>     ("OCPP 2.1")
-                     )));
-
             return json;
 
         }
@@ -493,24 +486,6 @@ namespace cloud.charging.open.LocalController
                );
 
         #endregion
-
-        #region (private static) AssemblyJSON<T>(Name)
-
-        private static JObject AssemblyJSON<T>(String Name)
-        {
-
-            var assembly = typeof(T).Assembly.GetName();
-
-            return new JObject(
-                       new JProperty("name",      Name),
-                       new JProperty("assembly",  assembly.Name),
-                       new JProperty("version",   assembly.Version?.ToString(3))
-                   );
-
-        }
-
-        #endregion
-
 
         #region DisposeAsync()
 
