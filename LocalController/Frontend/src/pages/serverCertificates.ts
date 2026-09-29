@@ -272,18 +272,28 @@ export const serverCertificatesPage: Page = {
         }
 
 
+        /**
+         * The remark on the kind of key chosen - after a drawing anew as well,
+         * which may have put back another choice than the one it drew the
+         * remark for.
+         */
+        function showRemark(): void {
+
+            const chooser = content.querySelector<HTMLSelectElement>('#algorithm');
+            const remark  = content.querySelector<HTMLElement>('#algorithm-remark');
+
+            if (chooser && remark)
+                remark.textContent = store?.algorithms.find(algorithm => algorithm.id === chooser.value)?.remark ?? '';
+
+        }
+
+
         function wire(): void {
 
             if (!mayManage)
                 return;
 
-            const chooser = content.querySelector<HTMLSelectElement>('#algorithm');
-            const remark  = content.querySelector<HTMLElement>('#algorithm-remark');
-
-            chooser?.addEventListener('change', () => {
-                if (remark)
-                    remark.textContent = store?.algorithms.find(algorithm => algorithm.id === chooser.value)?.remark ?? '';
-            });
+            content.querySelector<HTMLSelectElement>('#algorithm')?.addEventListener('change', showRemark);
 
             must<HTMLFormElement>(content, '#create-form').addEventListener('submit', event => {
 
@@ -357,6 +367,7 @@ export const serverCertificatesPage: Page = {
                 server   = await api.ocppServer.get();
 
                 keepDrafts(content, id, draw);
+                showRemark();
 
                 if (answer.warnings.length > 0)
                     window.alert(`The certificate was taken in, with something to say about it:\n\n${answer.warnings.join('\n\n')}`);
@@ -388,6 +399,7 @@ export const serverCertificatesPage: Page = {
                 server   = await api.ocppServer.get();
 
                 keepDrafts(content, null, draw);
+                showRemark();
 
             }
             catch (problem)
