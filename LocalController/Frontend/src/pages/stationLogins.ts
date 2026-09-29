@@ -104,21 +104,23 @@ export const stationLoginsPage: Page = {
                         group with nothing ticked lets nobody in, which is how a whole site is stopped in one move.
                     </p>
 
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Group</th>
-                                <th>Accepts</th>
-                                <th>Profiles</th>
-                                <th>Members</th>
-                                <th>On</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${logins.groups.map(group => groupRow(group))}
-                        </tbody>
-                    </table>
+                    <div class="table-scroll">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Group</th>
+                                    <th>Accepts</th>
+                                    <th>Profiles</th>
+                                    <th>Members</th>
+                                    <th>On</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${logins.groups.map(group => groupRow(group))}
+                            </tbody>
+                        </table>
+                    </div>
 
                     ${editing === null ? '' : groupForm(logins.groups.find(group => group.id === editing) ?? null)}
 
@@ -277,22 +279,24 @@ export const stationLoginsPage: Page = {
                     ${logins.stations.length === 0
                           ? html`<p class="muted">No charging station may sign in yet.</p>`
                           : html`
-                              <table class="table">
-                                  <thead>
-                                      <tr>
-                                          <th>Identification</th>
-                                          <th>What it is</th>
-                                          <th>Group</th>
-                                          <th>Signs in with</th>
-                                          <th>Added</th>
-                                          <th>May sign in</th>
-                                          <th></th>
-                                      </tr>
-                                  </thead>
-                                  <tbody>
-                                      ${logins.stations.map(station => loginRow(station, logins))}
-                                  </tbody>
-                              </table>
+                              <div class="table-scroll">
+                                  <table class="table">
+                                      <thead>
+                                          <tr>
+                                              <th>Identification</th>
+                                              <th>What it is</th>
+                                              <th>Group</th>
+                                              <th>Signs in with</th>
+                                              <th>Added</th>
+                                              <th>May sign in</th>
+                                              <th></th>
+                                          </tr>
+                                      </thead>
+                                      <tbody>
+                                          ${logins.stations.map(station => loginRow(station, logins))}
+                                      </tbody>
+                                  </table>
+                              </div>
                           `}
 
                     <form id="station-form" class="form-row">

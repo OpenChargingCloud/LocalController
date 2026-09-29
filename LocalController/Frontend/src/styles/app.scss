@@ -126,13 +126,15 @@ code.password {
     user-select:    all;
 }
 
-// A plain list of rows - the charging stations that may sign in.
+// A plain list of rows - the charging stations that may sign in - in a
+// .table-scroll, which keeps the space above it and scrolls it inside its
+// card where the card is narrower than the table: on a phone the table stood
+// 37 pixels past the card, and the page scrolled sideways with it.
 table.table {
 
     border-collapse:  collapse;
     width:            100%;
     font-size:        0.85rem;
-    margin-top:       0.75rem;
 
     th, td {
         text-align:     left;
