@@ -7,7 +7,7 @@ import '@fortawesome/fontawesome-free/css/solid.css';
 
 import { auth } from './auth';
 import { html, must, render } from '@node/html';
-import { logs } from './logs/store';
+import { logs } from '@node/logs/store';
 import { Router } from '@node/router';
 
 import { configurationPage }      from './pages/configuration';

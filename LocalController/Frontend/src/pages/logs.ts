@@ -1,10 +1,10 @@
 import { logLevels, type LogEntry, type LogLevel } from '../api/client';
 import { escapeHTML, html, must, render } from '@node/html';
-import { drawOrder, entryAt } from '../logs/order';
-import { logs } from '../logs/store';
+import { drawOrder, entryAt } from '@node/logs/order';
+import { logs } from '@node/logs/store';
 import type { Page } from '@node/router';
 import { shell } from '../shell';
-import { formatTime, formatTimestamp, isAtLeast } from '../ui';
+import { formatTime, formatTimestamp, isAtLeast } from '@node/ui';
 
 /**
  * Everything that happens inside the local controller, as it happens.

@@ -3,7 +3,7 @@ import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '@node/html';
 import type { Page } from '@node/router';
 import { shell } from '../shell';
-import { errorMessage, field, formatTimestamp } from '../ui';
+import { errorMessage, field, formatTimestamp } from '@node/ui';
 import { typedSinceDrawn, unsaved } from '@node/unsaved';
 
 /**
