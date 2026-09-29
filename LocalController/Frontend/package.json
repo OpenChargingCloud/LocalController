@@ -11,7 +11,7 @@
     "build": "webpack --mode production",
     "watch": "webpack --mode development --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"src/**/*.test.ts\"",
+    "test": "node --import ../../../WWCP_Node/Frontend/test/resolve.ts --test \"src/**/*.test.ts\"",
     "typecheck:test": "tsc -p tsconfig.test.json"
   },
   "devDependencies": {

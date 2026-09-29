@@ -1,6 +1,6 @@
 import { api, type KnownServer, type ServerJudgement } from '../api/client';
 import { auth } from '../auth';
-import { html, must, type HTMLFragment } from '../html';
+import { html, must, type HTMLFragment } from '@node/html';
 import { formatValue } from '../ui';
 import { offersOf, outcomeText, outcomeTone, pinsText, readPins, shortFingerprint, type PinsDraft, type StoreOffers } from './pins';
 

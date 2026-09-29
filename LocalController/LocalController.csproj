@@ -55,6 +55,10 @@
   <ItemGroup Label="Frontend">
     <FrontendInput Include="$(FrontendDir)src\**\*" />
     <FrontendInput Include="$(FrontendDir)package.json;$(FrontendDir)package-lock.json;$(FrontendDir)tsconfig.json;$(FrontendDir)webpack.config.js" />
+    <!-- What every kind of node shares, bundled in as "@node/...": without it
+         here, a new WWCP_Node changed only files the build did not look at,
+         the bundle was up to date, and the old one was embedded. -->
+    <FrontendInput Include="$(MSBuildProjectDirectory)\..\..\WWCP_Node\Frontend\src\**\*" />
   </ItemGroup>
 
   <Target Name="NpmInstall" Condition="'$(FrontendBuildEnabled)' == 'true' And !Exists('$(FrontendDir)node_modules')">
@@ -66,6 +70,11 @@
   <Target Name="BuildFrontend" DependsOnTargets="NpmInstall" Inputs="@(FrontendInput)" Outputs="$(FrontendDist)index.html" Condition="'$(FrontendBuildEnabled)' == 'true'">
     <Message Importance="high" Text="Frontend: running 'npm run build' in '$(FrontendDir)' ..." />
     <Exec Command="npm run build" WorkingDirectory="$(FrontendDir)" />
+    <!-- webpack leaves a file alone whose content did not change, and so
+         index.html kept the time of the build before: older than the input
+         that had just been built, the target was never up to date again, and
+         every build ran npm. Touched, it says when it was last built. -->
+    <Touch Files="$(FrontendDist)index.html" />
   </Target>
 
   <Target Name="EmbedFrontend" DependsOnTargets="BuildFrontend" BeforeTargets="BeforeBuild" Condition="'$(DesignTimeBuild)' != 'true'">

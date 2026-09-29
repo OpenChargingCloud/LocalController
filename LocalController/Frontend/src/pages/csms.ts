@@ -1,10 +1,10 @@
 import { api, type Certificate, type CSMSConfiguration } from '../api/client';
 import { auth } from '../auth';
-import { html, must, render, type HTMLFragment } from '../html';
-import type { Page } from '../router';
+import { html, must, render, type HTMLFragment } from '@node/html';
+import type { Page } from '@node/router';
 import { shell } from '../shell';
 import { errorMessage, field, formatTimestamp, isChecked } from '../ui';
-import { typedSinceDrawn, unsaved } from '../unsaved';
+import { typedSinceDrawn, unsaved } from '@node/unsaved';
 
 /**
  * The charging station management system above this local controller.

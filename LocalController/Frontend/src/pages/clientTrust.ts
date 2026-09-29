@@ -1,10 +1,10 @@
 import { api, type ClientTrust, type OCPPServerConfiguration, type TrustedChain } from '../api/client';
 import { auth } from '../auth';
-import { html, must, render, type HTMLFragment } from '../html';
-import type { Page } from '../router';
+import { html, must, render, type HTMLFragment } from '@node/html';
+import type { Page } from '@node/router';
 import { shell } from '../shell';
 import { errorMessage, field, formatTimestamp } from '../ui';
-import { typedSinceDrawn, unsaved } from '../unsaved';
+import { typedSinceDrawn, unsaved } from '@node/unsaved';
 
 /**
  * Which chains a charging station's own certificate may lead to - the other

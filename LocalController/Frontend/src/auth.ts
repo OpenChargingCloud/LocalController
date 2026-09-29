@@ -1,5 +1,5 @@
 import { api, ApiError, onUnauthorized, type Me, type Operation, type Resource } from './api/client';
-import { fromURL } from './basePath';
+import { fromURL } from '@node/basePath';
 
 type Listener = (user: Me | null) => void;
 

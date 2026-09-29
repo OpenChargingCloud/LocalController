@@ -1,10 +1,10 @@
 ﻿import { api, type Clock, type NTSConfiguration, type NTSServerEntry, type NTSServerResult, type NTSSyncResult, type NTSTimeSource, type NTSUpdate, type TimeServerTest } from '../api/client';
 import { auth } from '../auth';
-import { html, must, render, type HTMLFragment } from '../html';
-import type { Page } from '../router';
+import { html, must, render, type HTMLFragment } from '@node/html';
+import type { Page } from '@node/router';
 import { shell } from '../shell';
 import { errorMessage, formatValue, humanizeKey, whileSaving } from '../ui';
-import { typedSinceDrawn, unsaved } from '../unsaved';
+import { typedSinceDrawn, unsaved } from '@node/unsaved';
 import { nameTaken, readable, sentOf, withServer, withoutServer, type UsualPorts } from './ntsServers';
 import { asShown, draftOf, withPins, type StoreOffers } from './pins';
 import { certificateVerdictView, heldToView, pinsFieldset, readPinsFieldset, storeOffers, wirePinsFieldset } from './pinViews';

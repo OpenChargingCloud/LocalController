@@ -1,4 +1,4 @@
-﻿import { config } from '../config';
+﻿import { config } from '@node/config';
 
 
 // What the JSON API answers. Everything below /api/v1 except the sign-in needs

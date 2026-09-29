@@ -1,6 +1,6 @@
 import { auth } from '../auth';
-import { html, render } from '../html';
-import type { Page } from '../router';
+import { html, render } from '@node/html';
+import type { Page } from '@node/router';
 import { menu, shell } from '../shell';
 
 export const notFoundPage: Page = {

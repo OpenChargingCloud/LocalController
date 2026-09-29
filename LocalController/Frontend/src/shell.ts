@@ -1,7 +1,7 @@
 ﻿import { auth } from './auth';
-import { config } from './config';
-import { html, must, render, type HTMLFragment } from './html';
-import { toURL } from './basePath';
+import { config } from '@node/config';
+import { html, must, render, type HTMLFragment } from '@node/html';
+import { toURL } from '@node/basePath';
 
 /**
  * The frame every signed-in page sits in: the menu on the left, a heading and

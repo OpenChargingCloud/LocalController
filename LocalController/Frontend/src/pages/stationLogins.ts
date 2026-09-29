@@ -1,10 +1,10 @@
 import { api, type AuthMethod, type LoginGroup, type StationLogin, type StationLogins } from '../api/client';
 import { auth } from '../auth';
-import { html, must, render, type HTMLFragment } from '../html';
-import type { Page } from '../router';
+import { html, must, render, type HTMLFragment } from '@node/html';
+import type { Page } from '@node/router';
 import { shell } from '../shell';
 import { errorMessage, field, formatTimestamp } from '../ui';
-import { typedSinceDrawn, unsaved } from '../unsaved';
+import { typedSinceDrawn, unsaved } from '@node/unsaved';
 
 /**
  * Who may sign in to the charging station server, with what, and under which
