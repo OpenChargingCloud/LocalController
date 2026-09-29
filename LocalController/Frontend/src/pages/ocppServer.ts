@@ -3,7 +3,7 @@ import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '@node/html';
 import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
-import { shell } from '@node/shell';
+import { mayButNot, shell } from '@node/shell';
 import { errorMessage, field, formatTimestamp, isChecked, numberField } from '@node/ui';
 import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
 
@@ -61,8 +61,7 @@ export const ocppServerPage: Page = {
 
                 ${mayChange ? '' : html`
                     <div class="notice">
-                        Signed in as ${auth.user?.roles.join(', ') ?? 'somebody'}, which may look at the charging
-                        station server but not change it. That needs the CPO or the system administrator role.
+                        ${mayButNot('look at the charging station server', 'change it')}
                     </div>
                 `}
 

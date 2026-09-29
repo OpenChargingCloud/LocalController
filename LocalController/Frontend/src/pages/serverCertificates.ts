@@ -3,7 +3,7 @@ import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '@node/html';
 import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
-import { shell } from '@node/shell';
+import { mayButNot, shell } from '@node/shell';
 import { errorMessage, field, formatTimestamp } from '@node/ui';
 import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
 
@@ -65,8 +65,7 @@ export const serverCertificatesPage: Page = {
 
                 ${mayManage ? '' : html`
                     <div class="notice">
-                        Signed in as ${auth.user?.roles.join(', ') ?? 'somebody'}, which may look at the
-                        certificates but not make or replace them. That needs the system administrator role.
+                        ${mayButNot('look at the certificates', 'make or replace them')}
                     </div>
                 `}
 
