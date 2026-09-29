@@ -76,12 +76,12 @@ namespace cloud.charging.open.LocalController.Tests
 
             var configuration = await GetJSON(http, "/api/v1/configuration");
 
-            // The node's own sections - http, web, log and time - are asked
-            // of every kind by the conformance suite of WWCP_Node_TestKit.
+            // The node's own sections - http, web, log, time and assemblies -
+            // are asked of every kind by the conformance suite of
+            // WWCP_Node_TestKit.
             Assert.Multiple(() => {
                 Assert.That(configuration["controller"], Is.Not.Null);
                 Assert.That(configuration["ocpp"],       Is.Not.Null);
-                Assert.That(configuration["assemblies"], Is.TypeOf<JArray>());
             });
 
         }
