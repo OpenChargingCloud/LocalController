@@ -38,8 +38,9 @@ export interface Status extends NodeStatus {
 
 /**
  * What the local controller is made of: every node's sections, and its own.
- * Only the shape the Configuration page relies on is named; the rest is
- * rendered from whatever the controller sends.
+ * Only the shape the Configuration page relies on is named; the fields of
+ * each section are rendered from whatever the controller sends, and which
+ * sections there are is the page's to say.
  */
 export interface Configuration extends NodeConfiguration {
     controller:  Record<string, unknown>;
