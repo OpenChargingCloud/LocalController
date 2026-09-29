@@ -32,7 +32,9 @@ const withForms = pages.filter(page => page.source.includes('<form') && !notDraf
 describe('every page with a form', () => {
 
     it('is found at all, so that what follows is not said of nothing', () => {
-        assert.ok(withForms.length >= 7, `only ${withForms.length} page(s) with a form were found`);
+        // The name servers and the time servers are the node's pages now, and
+        // asked the same by its own copy of this test.
+        assert.ok(withForms.length >= 5, `only ${withForms.length} page(s) with a form were found`);
     });
 
     for (const page of withForms) {
