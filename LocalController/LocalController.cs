@@ -97,6 +97,47 @@ namespace cloud.charging.open.LocalController
         public static readonly NodePort  StationServerPort  = new ("The charging station server");
 
         /// <summary>
+        /// What a local controller is to the node below it: what it calls
+        /// itself in everything it says, the tag of its own entries, its
+        /// product, the one organization of its accounts and what its log
+        /// files are called. Known before one is made, for what -h shows.
+        /// </summary>
+        public static readonly NodeKind  LocalControllerKind  = new (
+                                                                    Name:           "local controller",
+                                                                    Tag:            "lc",
+                                                                    Product:        "LocalController",
+
+                                                                    // What the accounts of every local
+                                                                    // controller that has ever run are in:
+                                                                    // written into the accounts file at its
+                                                                    // first start and read back at every
+                                                                    // start since, so it is this and
+                                                                    // nothing else.
+                                                                    Organization:   "LocalController",
+
+                                                                    LogFilePrefix:  "localcontroller"
+                                                                );
+
+        /// <summary>
+        /// The kinds of certificate a local controller's store keeps.
+        /// </summary>
+        /// <remarks>
+        /// TLS's kinds of the node's store, and none of ISO 15118's, which are
+        /// a vehicle's: the roots a server this controller connects to may
+        /// chain to - a time server, a name server, the CSMS - the certificates
+        /// of such servers, kept to hold one to by its fingerprint, and what
+        /// this controller presents in TLS itself. What its station port
+        /// presents and which chains it accepts from charging stations stay in
+        /// the stores of their own they have always had: ocpp-server-keys and
+        /// ocpp-client-trust.
+        /// </remarks>
+        public static readonly IReadOnlyList<CertificateKind>  CertificateKinds  = [
+                                                                                     CertificateKind.TLSRoot,
+                                                                                     CertificateKind.TLSServer,
+                                                                                     CertificateKind.TLSIdentity
+                                                                                 ];
+
+        /// <summary>
         /// What a line the libraries below write has to contain to be tagged,
         /// and with what: the table the debug bridge of a local controller
         /// reads by.
@@ -175,6 +216,7 @@ namespace cloud.charging.open.LocalController
         /// <param name="ConfigFile">Where everything this controller can be told in writing lives: one file, whose sections the node below and the controller each read for themselves; "configuration.json" beside the process by default.</param>
         /// <param name="OCPP">Who this controller says it is in OCPP, unless the configuration file says otherwise.</param>
         /// <param name="Frontend">Where the web interface comes from; the bundle embedded in this assembly by default.</param>
+        /// <param name="CertificatesPath">The directory the certificate store lives in between starts; what the configuration file says, or "certificates" beside it, by default.</param>
         /// <param name="Log">The event log; a new one by default.</param>
         /// <param name="LogToConsole">Whether the event log is also written to the console.</param>
         /// <param name="ConsoleLogLevel">What the console shows of it.</param>
@@ -193,6 +235,7 @@ namespace cloud.charging.open.LocalController
                                WWCPConfigFile?        ConfigFile         = null,
                                OCPPConfiguration?     OCPP               = null,
                                IStaticContentSource?  Frontend           = null,
+                               String?                CertificatesPath   = null,
                                EventLog?              Log                = null,
                                Boolean                LogToConsole       = true,
                                LogLevel               ConsoleLogLevel    = LogLevel.Info,
@@ -200,21 +243,7 @@ namespace cloud.charging.open.LocalController
                                Boolean                BridgeDebugLog     = true,
                                TimeProvider?          TimeProvider       = null)
 
-            : base(Kind:               new NodeKind(
-                                           Name:           "local controller",
-                                           Tag:            "lc",
-                                           Product:        "LocalController",
-
-                                           // What the accounts of every local
-                                           // controller that has ever run are in:
-                                           // written into the accounts file at its
-                                           // first start and read back at every
-                                           // start since, so it is this and
-                                           // nothing else.
-                                           Organization:   "LocalController",
-
-                                           LogFilePrefix:  "localcontroller"
-                                       ),
+            : base(Kind:               LocalControllerKind,
                    Version:            typeof(LocalController).Assembly.GetName().Version?.ToString(3) ?? "0.0.0",
                    HTTPPort:           HTTPPort ?? DefaultHTTPPort,
                    HTTPHostname:       HTTPHostname,
@@ -229,17 +258,8 @@ namespace cloud.charging.open.LocalController
                    DNSClient:          DNSClient,
                    NTSClient:          NTSClient,
                    Frontend:           Frontend ?? new EmbeddedContentSource(HTTPRoot, typeof(LocalController).Assembly),
-
-                   // TLS's kinds of the node's store, and none of ISO 15118's,
-                   // which are a vehicle's: the roots a server this controller
-                   // connects to may chain to - a time server, a name server,
-                   // the CSMS - the certificates of such servers, kept to hold
-                   // one to by its fingerprint, and what this controller
-                   // presents in TLS itself. What its station port presents
-                   // and which chains it accepts from charging stations stay
-                   // in the stores of their own they have always had:
-                   // ocpp-server-keys and ocpp-client-trust.
-                   CertificateKinds:   [ CertificateKind.TLSRoot, CertificateKind.TLSServer, CertificateKind.TLSIdentity ],
+                   CertificatesPath:   CertificatesPath,
+                   CertificateKinds:   CertificateKinds,
 
                    Log:                Log,
                    LogToConsole:       LogToConsole,
