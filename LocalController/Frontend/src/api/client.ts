@@ -44,7 +44,6 @@ export interface Status extends NodeStatus {
 export interface Configuration extends NodeConfiguration {
     controller:  Record<string, unknown>;
     ocpp:        Record<string, unknown>;
-    assemblies:  Record<string, unknown>[];
 }
 
 /**
