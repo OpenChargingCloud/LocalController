@@ -3,7 +3,7 @@ import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '@node/html';
 import type { Page } from '@node/router';
 import { shell } from '@node/shell';
-import { errorMessage, field, formatTimestamp, isChecked } from '@node/ui';
+import { errorMessage, field, formatTimestamp, isChecked, numberField } from '@node/ui';
 import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
 
 /**
@@ -346,9 +346,9 @@ export const csmsPage: Page = {
                 void save({
                     enabled:                isChecked(form, 'enabled'),
                     url:                    field(form, 'url', false),
-                    securityProfile:        Number(field(form, 'securityProfile')),
-                    pingEvery:              Number(field(form, 'pingEvery')),
-                    reconnectInitialDelay:  Number(field(form, 'reconnectInitialDelay')),
+                    securityProfile:        numberField(form, 'securityProfile'),
+                    pingEvery:              numberField(form, 'pingEvery'),
+                    reconnectInitialDelay:  numberField(form, 'reconnectInitialDelay'),
                     // Left out where it was not offered, which leaves it alone;
                     // none is said as null.
                     ...(identity === null ? {} : { clientCertificate: identity.value.length > 0 ? identity.value : null })

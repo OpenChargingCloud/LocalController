@@ -3,7 +3,7 @@ import { auth } from '../auth';
 import { html, must, render, type HTMLFragment } from '@node/html';
 import type { Page } from '@node/router';
 import { shell } from '@node/shell';
-import { errorMessage, field, formatTimestamp, isChecked } from '@node/ui';
+import { errorMessage, field, formatTimestamp, isChecked, numberField } from '@node/ui';
 import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
 
 /**
@@ -448,11 +448,11 @@ export const ocppServerPage: Page = {
 
                 void save({
                     address:           field(form, 'address') || undefined,
-                    port:              Number(field(form, 'port')),
+                    port:              numberField(form, 'port'),
                     subprotocols:      checked(form, 'subprotocol'),
                     minTLSVersion:     field(form, 'minTLSVersion'),
-                    maxConnections:    Number(field(form, 'maxConnections')),
-                    pingEverySeconds:  Number(field(form, 'pingEverySeconds'))
+                    maxConnections:    numberField(form, 'maxConnections'),
+                    pingEverySeconds:  numberField(form, 'pingEverySeconds')
                 }, 'socket');
 
             });
