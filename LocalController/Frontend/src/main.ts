@@ -9,7 +9,6 @@ import { nodeMenu, startNode } from '@node/start';
 
 import { configurationPage }      from './pages/configuration';
 import { csmsPage }               from './pages/csms';
-import { certificateStorePage }   from './pages/certificateStore';
 import { ocppServerPage }         from './pages/ocppServer';
 import { stationLoginsPage }      from './pages/stationLogins';
 import { serverCertificatesPage } from './pages/serverCertificates';
@@ -17,8 +16,9 @@ import { clientTrustPage }        from './pages/clientTrust';
 
 // What a local controller has pages for beside what every node has: the line
 // up to its CSMS, and the server its charging stations connect to. The sign-in,
-// the log, the name servers, the time servers, the frame and following the log
-// while somebody is signed in are every node's - see WWCP_Node's start.ts.
+// the log, the name servers, the time servers, the certificate store, the
+// frame and following the log while somebody is signed in are every node's -
+// see WWCP_Node's start.ts.
 startNode({
 
     name:  'Local Controller',
@@ -38,6 +38,17 @@ startNode({
         nodeMenu.logs
     ],
 
+    // "Certificate store", because there is a page called "Server certificates"
+    // as well - the charging station server's. And the certificate the line up
+    // to the CSMS signs in with, which the controller does not let go of until
+    // another one is chosen on the CSMS page.
+    certificates: {
+        title:   'Certificate store',
+        chosen:  {
+            csmsClientCertificate:  { label: 'signs in to the CSMS', title: 'Chosen on the CSMS page; deleted only once another one is' }
+        }
+    },
+
     // "/" is every node's: the first page of the menu the person signed in may
     // open - the configuration for whoever may read it, and the name servers,
     // say, for a desk that may read only those, where the configuration's own
@@ -47,7 +58,6 @@ startNode({
         '/configuration':                           configurationPage,
 
         '/configuration/csms':                      csmsPage,
-        '/configuration/certificates':              certificateStorePage,
         '/configuration/ocpp-server':               ocppServerPage,
         '/configuration/ocpp-server/logins':        stationLoginsPage,
         '/configuration/ocpp-server/certificates':  serverCertificatesPage,
