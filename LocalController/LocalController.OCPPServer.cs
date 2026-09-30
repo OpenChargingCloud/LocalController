@@ -1101,7 +1101,20 @@ namespace cloud.charging.open.LocalController
         /// </remarks>
         public Boolean TryUpdateOCPPServerConfiguration(JObject                           JSON,
                                                         [NotNullWhen(false)] out String?  Error)
+
+            => TryUpdateOCPPServerConfiguration(JSON, out Error, out _);
+
+        /// <summary>
+        /// Change the charging station server - and say whether a refusal was
+        /// the configuration file's rather than the change's.
+        /// </summary>
+        /// <param name="NotSaved">True where the configuration file could not be read or written: nothing about the change was wrong, and nothing was changed.</param>
+        public Boolean TryUpdateOCPPServerConfiguration(JObject                           JSON,
+                                                        [NotNullWhen(false)] out String?  Error,
+                                                        out Boolean                       NotSaved)
         {
+
+            NotSaved = false;
 
             if (!OCPPServerConfiguration.TryParse(JSON, out var update, out Error))
                 return false;
@@ -1132,8 +1145,12 @@ namespace cloud.charging.open.LocalController
             try
             {
 
+                // Everything this refuses is the file's: read, merged, written.
                 if (!ConfigFile.TryMergeSection(OCPPServerConfiguration.SectionName, update.ToJSON(), out Error))
+                {
+                    NotSaved = true;
                     return false;
+                }
 
                 var before = ocppServerSettings;
 

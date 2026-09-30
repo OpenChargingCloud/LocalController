@@ -216,7 +216,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region TrySetPassword(Username, Password, out Error)
+        #region TrySetPassword(Username, Password, out Error [, out NotSaved])
 
         /// <summary>
         /// What this controller signs in with under security profiles 1 and 2.
@@ -228,9 +228,22 @@ namespace cloud.charging.open.LocalController.OCPP
         public Boolean TrySetPassword(String?                           Username,
                                       String?                           Password,
                                       [NotNullWhen(false)] out String?  Error)
+
+            => TrySetPassword(Username, Password, out Error, out _);
+
+        /// <summary>
+        /// What this controller signs in with under security profiles 1 and 2 -
+        /// and say whether a refusal was the file's rather than the password's.
+        /// </summary>
+        /// <param name="NotSaved">True where the file could not be written: the credentials are what they were.</param>
+        public Boolean TrySetPassword(String?                           Username,
+                                      String?                           Password,
+                                      [NotNullWhen(false)] out String?  Error,
+                                      out Boolean                       NotSaved)
         {
 
-            Error = null;
+            Error     = null;
+            NotSaved  = false;
 
             var name = Username?.Trim() ?? "";
 
@@ -271,6 +284,7 @@ namespace cloud.charging.open.LocalController.OCPP
                 if (!TrySave(out Error))
                 {
                     (username, password) = (wasName, wasSecret);
+                    NotSaved             = true;
                     return false;
                 }
 
@@ -284,7 +298,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region TrySetTOTP(Username, SharedSecret, ValidityTime, Length, Alphabet, HashAlgorithm, out Error)
+        #region TrySetTOTP(Username, SharedSecret, ValidityTime, Length, Alphabet, HashAlgorithm, out Error [, out NotSaved])
 
         /// <summary>
         /// What this controller signs in with when the CSMS expects a one-time
@@ -297,9 +311,27 @@ namespace cloud.charging.open.LocalController.OCPP
                                   String?                           Alphabet,
                                   TOTPHashAlgorithm?                HashAlgorithm,
                                   [NotNullWhen(false)] out String?  Error)
+
+            => TrySetTOTP(Username, SharedSecret, ValidityTime, Length, Alphabet, HashAlgorithm, out Error, out _);
+
+        /// <summary>
+        /// What this controller signs in with when the CSMS expects a one-time
+        /// token - and say whether a refusal was the file's rather than the
+        /// token's.
+        /// </summary>
+        /// <param name="NotSaved">True where the file could not be written: the credentials are what they were.</param>
+        public Boolean TrySetTOTP(String?                           Username,
+                                  String?                           SharedSecret,
+                                  TimeSpan?                         ValidityTime,
+                                  UInt32?                           Length,
+                                  String?                           Alphabet,
+                                  TOTPHashAlgorithm?                HashAlgorithm,
+                                  [NotNullWhen(false)] out String?  Error,
+                                  out Boolean                       NotSaved)
         {
 
-            Error = null;
+            Error     = null;
+            NotSaved  = false;
 
             var name = Username?.Trim() ?? "";
 
@@ -346,6 +378,7 @@ namespace cloud.charging.open.LocalController.OCPP
                 if (!TrySave(out Error))
                 {
                     (username, totp) = (wasName, wasTOTP);
+                    NotSaved         = true;
                     return false;
                 }
 
@@ -359,15 +392,26 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region TryClear(out Error)
+        #region TryClear(out Error [, out NotSaved])
 
         /// <summary>
         /// Forget everything this controller signs in with.
         /// </summary>
         public Boolean TryClear([NotNullWhen(false)] out String? Error)
+
+            => TryClear(out Error, out _);
+
+        /// <summary>
+        /// Forget everything this controller signs in with - and say whether a
+        /// refusal was the file's.
+        /// </summary>
+        /// <param name="NotSaved">True where the file could not be written: the credentials are what they were. Nothing else refuses this.</param>
+        public Boolean TryClear([NotNullWhen(false)] out String?  Error,
+                                out Boolean                       NotSaved)
         {
 
-            Error = null;
+            Error     = null;
+            NotSaved  = false;
 
             lock (updateLock)
             {
@@ -381,6 +425,7 @@ namespace cloud.charging.open.LocalController.OCPP
                 if (!TrySave(out Error))
                 {
                     (username, password, totp) = was;
+                    NotSaved                   = true;
                     return false;
                 }
 

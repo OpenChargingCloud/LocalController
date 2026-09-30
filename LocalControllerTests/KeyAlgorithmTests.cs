@@ -255,6 +255,13 @@ namespace cloud.charging.open.LocalController.Tests
                     Assert.That(entry.Warnings.Any(warning => warning.Contains("cannot")), Is.True,
                                 $"Nothing was said about why it cannot be used: {String.Join(" | ", entry.Warnings)}");
 
+                    // Of this one certificate: "It is kept" followed "...
+                    // certificates cannot be presented", with nothing for "it"
+                    // to be (found by the CSMS).
+                    Assert.That(entry.Warnings.Where(warning => warning.Contains("the handshake fails")),
+                                Has.All.Contains("This one is kept"),
+                                "what is kept is this certificate, said as one");
+
                 });
 
         }

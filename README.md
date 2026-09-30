@@ -164,8 +164,8 @@ does: its CSMS, its station port, its OCPP identity and its section of the
 file, the roles and resources that are its own, and the name its log files
 go by.
 
-Each test gets a controller of its own, on a port from the kit's `TestPorts`
-- one the operating system has just confirmed is free, and that no other test
+Each test gets a controller of its own, on a port from the kit's `TestPorts` -
+one the operating system has just confirmed is free, and that no other test
 of the run has been handed - and with its own directory for the two files a
 controller writes: so they neither fight with each other nor with a
 controller somebody has running on 2350 while they work.
@@ -401,6 +401,16 @@ The private keys are kept unencrypted, as the vehicle's are, and the page says
 so as soon as there is one. The identity the CSMS connection signs in with is
 marked on the page, and is not deleted until another one is chosen - switching
 it off is what taking it out of service usually means.
+
+A change that is fine in itself, and that its file cannot take, is answered
+500 with why: the charging station server and the CSMS connection in the
+configuration file, the credentials of the line up, the logins and groups, the
+port's keys and certificates, and the accepted chains. What is in effect stays
+as it was, and a chain written before what is said of it could not be is taken
+away again, rather than accepted at the next start. These were answered with
+the status of a refusal, and a full disk was a station "not found". What was
+wrong with a change is answered as it was; the node's own routes answer the
+same way.
 
 
 ## Who may open it

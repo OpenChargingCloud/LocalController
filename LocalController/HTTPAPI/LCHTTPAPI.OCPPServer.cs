@@ -125,8 +125,8 @@ namespace cloud.charging.open.LocalController
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
                 return Task.FromResult(errorResponse);
 
-            if (!Controller.TryUpdateOCPPServerConfiguration(json, out var error))
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
+            if (!Controller.TryUpdateOCPPServerConfiguration(json, out var error, out var notSaved))
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, error, notSaved));
 
             Log.Info($"'{user.Id}' changed the charging station server.", "ocpp", "station", "config", "web");
 
@@ -200,9 +200,10 @@ namespace cloud.charging.open.LocalController
                      json.Value<String>("algorithm"),
                      out var id,
                      out var csr,
-                     out var error))
+                     out var error,
+                     out var notSaved))
             {
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, error, notSaved));
             }
 
             Log.Notice($"'{user.Id}' had this local controller generate the key '{id}'.", "ocpp", "tls", "web");
@@ -281,9 +282,10 @@ namespace cloud.charging.open.LocalController
                      Controller.OCPPServerSettings.ReachableAs ?? [],
                      out var actual,
                      out var warnings,
-                     out var error))
+                     out var error,
+                     out var notSaved))
             {
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, error, notSaved));
             }
 
             if (actual != id)
@@ -322,8 +324,8 @@ namespace cloud.charging.open.LocalController
             if (!TryGetId(Request, out var id, out var badRequest))
                 return Task.FromResult(badRequest);
 
-            if (!Controller.ServerCertificates.TryRemove(id, out var error))
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.Conflict, error));
+            if (!Controller.ServerCertificates.TryRemove(id, out var error, out var notSaved))
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.Conflict, error, notSaved));
 
             Log.Notice($"'{user.Id}' removed the key '{id}'.", "ocpp", "tls", "web");
 
@@ -371,8 +373,8 @@ namespace cloud.charging.open.LocalController
             if (pem.Length == 0)
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, "A 'pem' with the certificate authority in it is required."));
 
-            if (!Controller.ClientTrust.TryAdd(pem, json.Value<String>("name"), out var id, out var warnings, out var error))
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
+            if (!Controller.ClientTrust.TryAdd(pem, json.Value<String>("name"), out var id, out var warnings, out var error, out var notSaved))
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, error, notSaved));
 
             Log.Notice($"'{user.Id}' added the accepted chain '{id}'.", "ocpp", "tls", "trust", "web");
 
@@ -406,12 +408,12 @@ namespace cloud.charging.open.LocalController
                 return Task.FromResult(errorResponse);
 
             if (json.Value<String>("name") is { Length: > 0 } name &&
-                !Controller.ClientTrust.TryRename(id, name, out var renameError))
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, renameError));
+                !Controller.ClientTrust.TryRename(id, name, out var renameError, out var renameNotSaved))
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, renameError, renameNotSaved));
 
             if (json.Value<Boolean?>("enabled") is Boolean enabled &&
-                !Controller.ClientTrust.TrySetEnabled(id, enabled, out var enableError))
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, enableError));
+                !Controller.ClientTrust.TrySetEnabled(id, enabled, out var enableError, out var enableNotSaved))
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, enableError, enableNotSaved));
 
             Log.Info($"'{user.Id}' changed the accepted chain '{id}'.", "ocpp", "tls", "trust", "web");
 
@@ -433,8 +435,8 @@ namespace cloud.charging.open.LocalController
             if (!TryGetId(Request, out var id, out var badRequest))
                 return Task.FromResult(badRequest);
 
-            if (!Controller.ClientTrust.TryRemove(id, out var error))
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.NotFound, error));
+            if (!Controller.ClientTrust.TryRemove(id, out var error, out var notSaved))
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.NotFound, error, notSaved));
 
             Log.Notice($"'{user.Id}' removed the accepted chain '{id}'.", "ocpp", "tls", "trust", "web");
 
@@ -682,19 +684,6 @@ namespace cloud.charging.open.LocalController
         private delegate Boolean TryClearDelegate(String                            Id,
                                                   [NotNullWhen(false)] out String?  Error,
                                                   out Boolean                       NotSaved);
-
-        /// <summary>
-        /// The answer to a change of the logins that was not made: the status
-        /// of what was wrong with it - or 500, where nothing was, and the file
-        /// could not be written, the change undone. Both came as the status of
-        /// what was wrong, and a full disk was a station "not found".
-        /// </summary>
-        private static HTTPResponse NotChanged(HTTPRequest     Request,
-                                               HTTPStatusCode  WhatWasWrong,
-                                               String          Error,
-                                               Boolean         NotSaved)
-
-            => ErrorJSON(Request, NotSaved ? HTTPStatusCode.InternalServerError : WhatWasWrong, Error);
 
         /// <summary>
         /// DELETE .../stations/{id}: forget a charging station.

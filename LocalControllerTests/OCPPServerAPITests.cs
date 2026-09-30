@@ -18,6 +18,7 @@
 #region Usings
 
 using System.Net;
+using System.Security.Cryptography;
 
 using Newtonsoft.Json.Linq;
 
@@ -587,6 +588,287 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(tooShort.StatusCode,  Is.EqualTo(HttpStatusCode.BadRequest),  "a password too short");
                 Assert.That(notEmpty.StatusCode,  Is.EqualTo(HttpStatusCode.Conflict),    "a group somebody is in");
                 Assert.That(noToken. StatusCode,  Is.EqualTo(HttpStatusCode.NotFound),    "a token that is not there to take away");
+            });
+
+        }
+
+        #endregion
+
+        #region AChangeOfTheServerItsFilesCannotTakeIsAServerError(Change)
+
+        /// <summary>
+        /// A change of the charging station server, of its keys and
+        /// certificates or of the chains it accepts that is fine in itself, and
+        /// that the files it is kept in cannot be written with, is answered 500
+        /// with why - and changes nothing, now or when the store is read again.
+        /// It was a 400, as if something had been wrong with it.
+        /// </summary>
+        [TestCase("PUT ocpp-server")]
+        [TestCase("POST certificates")]
+        [TestCase("PUT certificates/{id}")]
+        [TestCase("POST trust")]
+        [TestCase("PUT trust/{id}, name")]
+        [TestCase("PUT trust/{id}, enabled")]
+        public async Task AChangeOfTheServerItsFilesCannotTakeIsAServerError(String Change)
+        {
+
+            using var http  = await SignedIn();
+            using var ca    = TestCA.Create("Some Charging Network");
+
+            // What makes each change a fine one: a name this controller is
+            // reached as, and for the changes of something that is there, a
+            // key with its signing request or a chain accepted.
+            var reachable   = await http.PutAsync(Root, JSONBody(new JProperty("reachableAs", new JArray("lc001.example.org"))));
+            Assert.That(reachable.IsSuccessStatusCode, Is.True, await reachable.Content.ReadAsStringAsync());
+
+            var keyId       = "";
+            var signed      = "";
+
+            if (Change == "PUT certificates/{id}")
+            {
+
+                var made    = JObject.Parse(await (await http.PostAsync($"{Root}/certificates",
+                                  JSONBody(new JProperty("algorithm", "ecdsa-p256")))).Content.ReadAsStringAsync());
+
+                keyId       = made.Value<String>("id")!;
+
+                using var certificate = ca.Sign(made.Value<String>("csr")!,
+                                                DateTimeOffset.UtcNow.AddDays(-1),
+                                                DateTimeOffset.UtcNow.AddYears(1));
+
+                signed      = ca.ChainPEM(certificate);
+
+            }
+
+            // The handle the store gives a chain: its anchor's, and so known
+            // before it is there.
+            var chainId     = Convert.ToHexStringLower(SHA256.HashData(ca.Certificate.RawData).AsSpan(0, 8));
+            var chainFile   = Path.Combine(Controller.ClientTrust.Path, $"{chainId}.pem");
+            var chainMeta   = Path.Combine(Controller.ClientTrust.Path, $"{chainId}.json");
+
+            if (Change.StartsWith("PUT trust"))
+            {
+                var added   = await http.PostAsync($"{Root}/trust", JSONBody(new JProperty("pem", TestCA.ToPEM(ca.Certificate)), new JProperty("name", "Some Charging Network")));
+                Assert.That(added.StatusCode, Is.EqualTo(HttpStatusCode.Created), await added.Content.ReadAsStringAsync());
+            }
+
+            var server      = (await GetJSON(http, Root)).ToString();
+
+            #region What cannot be written
+
+            switch (Change)
+            {
+
+                // Where the configuration file's next version is written first
+                // is a directory.
+                case "PUT ocpp-server":
+                    System.IO.Directory.CreateDirectory(Controller.ConfigFile.Path + ".tmp");
+                    break;
+
+                // Where the keys would go is a file.
+                case "POST certificates":
+                    if (System.IO.Directory.Exists(Controller.ServerCertificates.Path))
+                        System.IO.Directory.Delete(Controller.ServerCertificates.Path);
+                    await File.WriteAllTextAsync(Controller.ServerCertificates.Path, "");
+                    break;
+
+                // Where the certificate would go is a directory.
+                case "PUT certificates/{id}":
+                    System.IO.Directory.CreateDirectory(Path.Combine(Controller.ServerCertificates.Path, $"{keyId}.cert.pem"));
+                    break;
+
+                // Where what is said of the chain goes, after the chain, is a
+                // directory - and the chain is written by then.
+                case "POST trust":
+                    System.IO.Directory.CreateDirectory(chainMeta);
+                    break;
+
+                // And so it is, where it was a file: put aside, to be put back.
+                default:
+                    File.Move(chainMeta, chainMeta + ".aside");
+                    System.IO.Directory.CreateDirectory(chainMeta);
+                    break;
+
+            }
+
+            #endregion
+
+            var response = Change switch {
+                "PUT ocpp-server"         => await http.PutAsync ($"{Root}",                    JSONBody(new JProperty("port",       9500))),
+                "POST certificates"       => await http.PostAsync($"{Root}/certificates",       JSONBody(new JProperty("algorithm",  "ecdsa-p256"))),
+                "PUT certificates/{id}"   => await http.PutAsync ($"{Root}/certificates/{keyId}", JSONBody(new JProperty("pem",      signed))),
+                "POST trust"              => await http.PostAsync($"{Root}/trust",              JSONBody(new JProperty("pem",        TestCA.ToPEM(ca.Certificate)), new JProperty("name", "Some Charging Network"))),
+                "PUT trust/{id}, name"    => await http.PutAsync ($"{Root}/trust/{chainId}",    JSONBody(new JProperty("name",       "Another Charging Network"))),
+                "PUT trust/{id}, enabled" => await http.PutAsync ($"{Root}/trust/{chainId}",    JSONBody(new JProperty("enabled",    false))),
+                _                         => throw new ArgumentException($"No change '{Change}' here.", nameof(Change))
+            };
+
+            var body        = await response.Content.ReadAsStringAsync();
+
+            var keys        = Controller.ServerCertificates.Entries.Select(entry => $"{entry.Id} {(entry.Certificate is null ? "without" : "with")} a certificate").ToArray();
+            var chains      = Controller.ClientTrust.Entries.       Select(entry => $"{entry.Id} '{entry.Name}' {(entry.Enabled ? "on" : "off")}").ToArray();
+            var serverNow   = (await GetJSON(http, Root)).ToString();
+
+            // And as at the next start: read again, with nothing in the way.
+            if (File.Exists(Controller.ServerCertificates.Path))
+                File.Delete(Controller.ServerCertificates.Path);
+
+            foreach (var blocked in new[] { Controller.ConfigFile.Path + ".tmp",
+                                            Path.Combine(Controller.ServerCertificates.Path, $"{keyId}.cert.pem"),
+                                            chainMeta })
+                if (System.IO.Directory.Exists(blocked))
+                    System.IO.Directory.Delete(blocked);
+
+            if (File.Exists(chainMeta + ".aside"))
+                File.Move(chainMeta + ".aside", chainMeta);
+
+            Controller.ServerCertificates.Reload();
+            Controller.ClientTrust.       Reload();
+
+            var keysReadAgain    = Controller.ServerCertificates.Entries.Select(entry => $"{entry.Id} {(entry.Certificate is null ? "without" : "with")} a certificate").ToArray();
+            var chainsReadAgain  = Controller.ClientTrust.Entries.       Select(entry => $"{entry.Id} '{entry.Name}' {(entry.Enabled ? "on" : "off")}").ToArray();
+
+            var expected = Change switch {
+                "PUT ocpp-server"        => $"'{Controller.ConfigFile.Path}' could not be written: ",
+                "POST certificates"      => $"The key could not be written to '{Controller.ServerCertificates.Path}': ",
+                "PUT certificates/{id}"  => $"The certificate could not be written to '{Controller.ServerCertificates.Path}': ",
+                "POST trust"             => $"The chain could not be written to '{Controller.ClientTrust.Path}': ",
+                _                        => $"'{chainId}' could not be written to '{Controller.ClientTrust.Path}': "
+            };
+
+            var keysBefore    = Change == "PUT certificates/{id}" ? new[] { $"{keyId} without a certificate" } : [];
+            var chainsBefore  = Change.StartsWith("PUT trust")     ? new[] { $"{chainId} 'Some Charging Network' on" } : [];
+
+            Assert.Multiple(() => {
+
+                Assert.That(response.StatusCode,                        Is.EqualTo(HttpStatusCode.InternalServerError), body);
+                Assert.That(JObject.Parse(body).Value<String>("error"), Does.StartWith(expected));
+
+                Assert.That(serverNow,        Is.EqualTo(server),        "what the server says of itself");
+                Assert.That(keys,             Is.EqualTo(keysBefore),    "the keys, and whether each has its certificate");
+                Assert.That(chains,           Is.EqualTo(chainsBefore),  "the chains accepted");
+
+                Assert.That(keysReadAgain,    Is.EqualTo(keysBefore),    "the keys, read again");
+                Assert.That(chainsReadAgain,  Is.EqualTo(chainsBefore),  "the chains accepted, read again: one whose file was left behind is accepted");
+
+                if (Change == "POST trust")
+                    Assert.That(File.Exists(chainFile), Is.False, "the chain written before what is said of it could not be");
+
+            });
+
+        }
+
+        #endregion
+
+        #region ADeletionAFileDoesNotLetHappenIsAServerError(Change)
+
+        /// <summary>
+        /// A key or a chain whose file cannot be deleted stays, and the request
+        /// is answered 500 with why. It was a 409 and a 404, as if the key were
+        /// being presented or the chain were not there.
+        /// </summary>
+        [TestCase("DELETE certificates/{id}")]
+        [TestCase("DELETE trust/{id}")]
+        [Platform("Win", Reason = "A file somebody holds open is deleted all the same on Linux, and a test run as root there deletes what it likes: nothing but Windows keeps a file from being deleted.")]
+        public async Task ADeletionAFileDoesNotLetHappenIsAServerError(String Change)
+        {
+
+            using var http  = await SignedIn();
+            using var ca    = TestCA.Create("Some Charging Network");
+
+            String id;
+            String file;
+
+            if (Change == "DELETE certificates/{id}")
+            {
+
+                await http.PutAsync(Root, JSONBody(new JProperty("reachableAs", new JArray("lc001.example.org"))));
+
+                id    = JObject.Parse(await (await http.PostAsync($"{Root}/certificates",
+                            JSONBody(new JProperty("algorithm", "ecdsa-p256")))).Content.ReadAsStringAsync()).Value<String>("id")!;
+
+                file  = Path.Combine(Controller.ServerCertificates.Path, $"{id}.key.pem");
+
+            }
+            else
+            {
+
+                id    = JObject.Parse(await (await http.PostAsync($"{Root}/trust",
+                            JSONBody(new JProperty("pem", TestCA.ToPEM(ca.Certificate))))).Content.ReadAsStringAsync()).Value<String>("id")!;
+
+                file  = Path.Combine(Controller.ClientTrust.Path, $"{id}.pem");
+
+            }
+
+            HttpResponseMessage response;
+
+            using (new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read))
+                response = Change == "DELETE certificates/{id}"
+                               ? await http.DeleteAsync($"{Root}/certificates/{id}")
+                               : await http.DeleteAsync($"{Root}/trust/{id}");
+
+            var body = await response.Content.ReadAsStringAsync();
+
+            Assert.Multiple(() => {
+                Assert.That(response.StatusCode,                         Is.EqualTo(HttpStatusCode.InternalServerError), body);
+                Assert.That(JObject.Parse(body).Value<String>("error"),  Does.StartWith($"'{id}' could not be removed from "));
+                Assert.That(Controller.ServerCertificates.Entries.Select(entry => entry.Id).
+                                Concat(Controller.ClientTrust.Entries.Select(entry => entry.Id)),
+                            Does.Contain(id), "it is still there");
+            });
+
+        }
+
+        #endregion
+
+        #region ARefusalOfTheServerIsWhatItWasWhileItsFilesCannotBeWritten()
+
+        /// <summary>
+        /// What was wrong with a change of the server, its keys or its chains
+        /// is answered as it was while their files cannot be written: a 500 is
+        /// the files', and only where it was the files that refused.
+        /// </summary>
+        [Test]
+        public async Task ARefusalOfTheServerIsWhatItWasWhileItsFilesCannotBeWritten()
+        {
+
+            using var http  = await SignedIn();
+            using var ca    = TestCA.Create("Some Charging Network");
+
+            var reachable   = await http.PutAsync(Root, JSONBody(new JProperty("reachableAs", new JArray("lc001.example.org"))));
+            Assert.That(reachable.IsSuccessStatusCode, Is.True, await reachable.Content.ReadAsStringAsync());
+
+            var made        = await http.PostAsync($"{Root}/trust", JSONBody(new JProperty("pem", TestCA.ToPEM(ca.Certificate))));
+            Assert.That(made.StatusCode, Is.EqualTo(HttpStatusCode.Created), await made.Content.ReadAsStringAsync());
+
+            var chainId     = JObject.Parse(await made.Content.ReadAsStringAsync()).Value<String>("id")!;
+            var chainMeta   = Path.Combine(Controller.ClientTrust.Path, $"{chainId}.json");
+
+            // Not one of the files behind these routes can be written.
+            System.IO.Directory.CreateDirectory(Controller.ConfigFile.Path + ".tmp");
+
+            if (System.IO.Directory.Exists(Controller.ServerCertificates.Path))
+                System.IO.Directory.Delete(Controller.ServerCertificates.Path);
+
+            await File.WriteAllTextAsync(Controller.ServerCertificates.Path, "");
+
+            File.Delete(chainMeta);
+            System.IO.Directory.CreateDirectory(chainMeta);
+
+            var profile     = await http.PutAsync   (Root,                                JSONBody(new JProperty("securityProfiles", new JArray(4))));
+            var noAlgorithm = await http.PostAsync  ($"{Root}/certificates",              JSONBody(new JProperty("algorithm", "rot13")));
+            var noKey       = await http.DeleteAsync($"{Root}/certificates/0123456789abcdef");
+            var noChain     = await http.PostAsync  ($"{Root}/trust",                     JSONBody(new JProperty("pem", "trust us, we are a charging network")));
+            var noName      = await http.PutAsync   ($"{Root}/trust/{chainId}",           JSONBody(new JProperty("name", new String('x', ClientTrustStore.MaxNameLength + 1))));
+            var noSuchChain = await http.DeleteAsync($"{Root}/trust/0123456789abcdef");
+
+            Assert.Multiple(() => {
+                Assert.That(profile.    StatusCode,  Is.EqualTo(HttpStatusCode.BadRequest),  "a security profile there is none of");
+                Assert.That(noAlgorithm.StatusCode,  Is.EqualTo(HttpStatusCode.BadRequest),  "a key algorithm there is none of");
+                Assert.That(noKey.      StatusCode,  Is.EqualTo(HttpStatusCode.Conflict),    "a key this controller does not have");
+                Assert.That(noChain.    StatusCode,  Is.EqualTo(HttpStatusCode.BadRequest),  "something that is not a certificate authority");
+                Assert.That(noName.     StatusCode,  Is.EqualTo(HttpStatusCode.BadRequest),  "a name too long");
+                Assert.That(noSuchChain.StatusCode,  Is.EqualTo(HttpStatusCode.NotFound),    "a chain this controller does not accept");
             });
 
         }

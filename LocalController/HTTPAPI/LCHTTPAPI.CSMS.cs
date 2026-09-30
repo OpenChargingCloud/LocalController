@@ -93,8 +93,8 @@ namespace cloud.charging.open.LocalController
             if (!TryParseJSONObject(Request, out var json, out var errorResponse))
                 return Task.FromResult(errorResponse);
 
-            if (!Controller.TryUpdateCSMSConfiguration(json, out var error))
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
+            if (!Controller.TryUpdateCSMSConfiguration(json, out var error, out var notSaved))
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, error, notSaved));
 
             Log.Info($"'{user.Id}' changed the CSMS connection.", "ocpp", "csms", "config", "web");
 
@@ -168,9 +168,10 @@ namespace cloud.charging.open.LocalController
                          json.Value<UInt32?>("length"),
                          json.Value<String>("alphabet"),
                          hash,
-                         out var totpError))
+                         out var totpError,
+                         out var totpNotSaved))
                 {
-                    return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, totpError));
+                    return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, totpError, totpNotSaved));
                 }
 
             }
@@ -180,9 +181,9 @@ namespace cloud.charging.open.LocalController
             #region A password
 
             if (password is not null &&
-                !Controller.CSMSLogin.TrySetPassword(username, password, out var passwordError))
+                !Controller.CSMSLogin.TrySetPassword(username, password, out var passwordError, out var passwordNotSaved))
             {
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, passwordError));
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, passwordError, passwordNotSaved));
             }
 
             #endregion
@@ -205,8 +206,8 @@ namespace cloud.charging.open.LocalController
             if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.CSMS), true, out var user, out var refused))
                 return Task.FromResult(refused);
 
-            if (!Controller.CSMSLogin.TryClear(out var error))
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
+            if (!Controller.CSMSLogin.TryClear(out var error, out var notSaved))
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, error, notSaved));
 
             Log.Notice($"'{user.Id}' removed the credentials this local controller signs in to the CSMS with.",
                        "ocpp", "csms", "auth", "web");

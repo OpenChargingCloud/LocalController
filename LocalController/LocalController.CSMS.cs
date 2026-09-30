@@ -747,22 +747,39 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
-        #region TryUpdateCSMSConfiguration(JSON, out Error)
+        #region TryUpdateCSMSConfiguration(JSON, out Error [, out NotSaved])
 
         /// <summary>
         /// Change the CSMS connection, and write it to the configuration file.
         /// </summary>
         public Boolean TryUpdateCSMSConfiguration(JObject                           JSON,
                                                   [NotNullWhen(false)] out String?  Error)
+
+            => TryUpdateCSMSConfiguration(JSON, out Error, out _);
+
+        /// <summary>
+        /// Change the CSMS connection - and say whether a refusal was the
+        /// configuration file's rather than the change's.
+        /// </summary>
+        /// <param name="NotSaved">True where the configuration file could not be read or written: nothing about the change was wrong, and nothing was changed.</param>
+        public Boolean TryUpdateCSMSConfiguration(JObject                           JSON,
+                                                  [NotNullWhen(false)] out String?  Error,
+                                                  out Boolean                       NotSaved)
         {
+
+            NotSaved = false;
 
             if (!CSMSConfiguration.TryParse(JSON, out var changes, out Error))
                 return false;
 
             var wanted = csmsSettings.Merge(changes).Effective();
 
+            // Everything this refuses is the file's: read, merged, written.
             if (!ConfigFile.TryMergeSection(CSMSConfiguration.SectionName, changes.ToJSON(), out Error))
+            {
+                NotSaved = true;
                 return false;
+            }
 
             csmsSettings = wanted;
 

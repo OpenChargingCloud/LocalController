@@ -47,7 +47,8 @@ namespace cloud.charging.open.LocalController.Tests
         public void NoTextOfThisLocalControllerPutsAnArticleBeforeAName()
         {
 
-            var repository = SourceRules.RepositoryAbove(AppContext.BaseDirectory, "LocalController", "LocalControllerTests");
+            var repository = SourceRules.RepositoryAbove(AppContext.BaseDirectory, "LocalController/LocalController.csproj",
+                                                                                   "LocalControllerTests/LocalControllerTests.csproj");
 
             Assert.That(SourceRules.ArticlesBeforeANameIn(Path.Combine(repository, "LocalController")), Is.Empty);
 

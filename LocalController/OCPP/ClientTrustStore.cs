@@ -219,11 +219,26 @@ namespace cloud.charging.open.LocalController.OCPP
                               [NotNullWhen(true)]  out String?  Id,
                               out IReadOnlyList<String>         Warnings,
                               [NotNullWhen(false)] out String?  Error)
+
+            => TryAdd(PEM, Name, out Id, out Warnings, out Error, out _);
+
+        /// <summary>
+        /// Accept certificates that lead to the certificate in this file - and
+        /// say whether a refusal was the files' rather than the chain's.
+        /// </summary>
+        /// <param name="NotSaved">True where the chain or what is said of it could not be written: what was written of them is taken away again, and nothing is accepted.</param>
+        public Boolean TryAdd(String                            PEM,
+                              String?                           Name,
+                              [NotNullWhen(true)]  out String?  Id,
+                              out IReadOnlyList<String>         Warnings,
+                              [NotNullWhen(false)] out String?  Error,
+                              out Boolean                       NotSaved)
         {
 
             Id        = null;
             Warnings  = [];
             Error     = null;
+            NotSaved  = false;
 
             #region What was uploaded
 
@@ -326,8 +341,17 @@ namespace cloud.charging.open.LocalController.OCPP
                 }
                 catch (Exception e)
                 {
-                    Error = $"The chain could not be written to '{Path}': {e.Message}";
+
+                    Error     = $"The chain could not be written to '{Path}': {e.Message}";
+                    NotSaved  = true;
+
+                    // Not left behind half made: a chain without what is said
+                    // of it was accepted at the next start, switched on and
+                    // named by its subject.
+                    Forget(id, "pem", "json");
+
                     return false;
+
                 }
 
                 #endregion
@@ -357,7 +381,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region TrySetEnabled(Id, Enabled, out Error) / TryRename(Id, Name, out Error)
+        #region TrySetEnabled(Id, Enabled, out Error [, out NotSaved]) / TryRename(Id, Name, out Error [, out NotSaved])
 
         /// <summary>
         /// Switch a chain on or off without throwing it away.
@@ -365,9 +389,22 @@ namespace cloud.charging.open.LocalController.OCPP
         public Boolean TrySetEnabled(String                            Id,
                                      Boolean                           Enabled,
                                      [NotNullWhen(false)] out String?  Error)
+
+            => TrySetEnabled(Id, Enabled, out Error, out _);
+
+        /// <summary>
+        /// Switch a chain on or off - and say whether a refusal was the file's
+        /// rather than the change's.
+        /// </summary>
+        /// <param name="NotSaved">True where what is said of the chain could not be written: it is on or off as it was.</param>
+        public Boolean TrySetEnabled(String                            Id,
+                                     Boolean                           Enabled,
+                                     [NotNullWhen(false)] out String?  Error,
+                                     out Boolean                       NotSaved)
         {
 
-            Error = null;
+            Error     = null;
+            NotSaved  = false;
 
             lock (updateLock)
             {
@@ -385,7 +422,8 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 if (!TrySaveMeta(entry, out Error))
                 {
-                    entry.Enabled = !Enabled;
+                    entry.Enabled  = !Enabled;
+                    NotSaved       = true;
                     return false;
                 }
 
@@ -408,9 +446,22 @@ namespace cloud.charging.open.LocalController.OCPP
         public Boolean TryRename(String                            Id,
                                  String                            Name,
                                  [NotNullWhen(false)] out String?  Error)
+
+            => TryRename(Id, Name, out Error, out _);
+
+        /// <summary>
+        /// Give a chain another name - and say whether a refusal was the file's
+        /// rather than the name's.
+        /// </summary>
+        /// <param name="NotSaved">True where what is said of the chain could not be written: it keeps the name it had.</param>
+        public Boolean TryRename(String                            Id,
+                                 String                            Name,
+                                 [NotNullWhen(false)] out String?  Error,
+                                 out Boolean                       NotSaved)
         {
 
-            Error = null;
+            Error     = null;
+            NotSaved  = false;
 
             var name = Name?.Trim() ?? "";
 
@@ -440,7 +491,8 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 if (!TrySaveMeta(entry, out Error))
                 {
-                    entry.Name = previous;
+                    entry.Name  = previous;
+                    NotSaved    = true;
                     return false;
                 }
 
@@ -452,7 +504,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region TryRemove(Id, out Error)
+        #region TryRemove(Id, out Error [, out NotSaved])
 
         /// <summary>
         /// Stop accepting certificates that lead to this anchor, and throw it
@@ -460,9 +512,22 @@ namespace cloud.charging.open.LocalController.OCPP
         /// </summary>
         public Boolean TryRemove(String                            Id,
                                  [NotNullWhen(false)] out String?  Error)
+
+            => TryRemove(Id, out Error, out _);
+
+        /// <summary>
+        /// Stop accepting certificates that lead to this anchor, and throw it
+        /// away - and say whether a refusal was the files' rather than the
+        /// request's.
+        /// </summary>
+        /// <param name="NotSaved">True where a file could not be deleted: the chain is still accepted.</param>
+        public Boolean TryRemove(String                            Id,
+                                 [NotNullWhen(false)] out String?  Error,
+                                 out Boolean                       NotSaved)
         {
 
-            Error = null;
+            Error     = null;
+            NotSaved  = false;
 
             lock (updateLock)
             {
@@ -484,7 +549,8 @@ namespace cloud.charging.open.LocalController.OCPP
                 }
                 catch (Exception e)
                 {
-                    Error = $"'{Id}' could not be removed from '{Path}': {e.Message}";
+                    Error     = $"'{Id}' could not be removed from '{Path}': {e.Message}";
+                    NotSaved  = true;
                     return false;
                 }
 
@@ -844,6 +910,32 @@ namespace cloud.charging.open.LocalController.OCPP
             // certificate is a public document - so the ordinary mode.
             Directory.CreateDirectory(Path);
 
+        }
+
+        #endregion
+
+        #region (private) Forget(Id, params Extensions)
+
+        /// <summary>
+        /// Take the files of one chain that were written for something that
+        /// did not go in away again - as far as that goes: one that cannot be
+        /// taken away either is left where it is.
+        /// </summary>
+        private void Forget(String Id, params String[] Extensions)
+        {
+            foreach (var extension in Extensions)
+            {
+                try
+                {
+                    var file = System.IO.Path.Combine(Path, $"{Id}.{extension}");
+                    if (File.Exists(file))
+                        File.Delete(file);
+                }
+                catch (Exception)
+                {
+                    // Left where it is, see above.
+                }
+            }
         }
 
         #endregion

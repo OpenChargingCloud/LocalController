@@ -306,11 +306,27 @@ namespace cloud.charging.open.LocalController.OCPP
                                     [NotNullWhen(true)]  out String?  Id,
                                     [NotNullWhen(true)]  out String?  CSR,
                                     [NotNullWhen(false)] out String?  Error)
+
+            => TryCreateKey(Subject, ReachableAs, Algorithm, out Id, out CSR, out Error, out _);
+
+        /// <summary>
+        /// Generate a key pair and the signing request that goes with it - and
+        /// say whether a refusal was the files' rather than the request's.
+        /// </summary>
+        /// <param name="NotSaved">True where the key, its request or what is said of it could not be written: nothing about the request was wrong, and no key was made.</param>
+        public Boolean TryCreateKey(String                            Subject,
+                                    IEnumerable<String>               ReachableAs,
+                                    String?                           Algorithm,
+                                    [NotNullWhen(true)]  out String?  Id,
+                                    [NotNullWhen(true)]  out String?  CSR,
+                                    [NotNullWhen(false)] out String?  Error,
+                                    out Boolean                       NotSaved)
         {
 
-            Id     = null;
-            CSR    = null;
-            Error  = null;
+            Id        = null;
+            CSR       = null;
+            Error     = null;
+            NotSaved  = false;
 
             #region What was asked for
 
@@ -461,7 +477,8 @@ namespace cloud.charging.open.LocalController.OCPP
                 }
                 catch (Exception e)
                 {
-                    Error = $"The key could not be written to '{Path}': {e.Message}";
+                    Error     = $"The key could not be written to '{Path}': {e.Message}";
+                    NotSaved  = true;
                     return false;
                 }
 
@@ -555,11 +572,27 @@ namespace cloud.charging.open.LocalController.OCPP
                                          [NotNullWhen(true)]  out String?    Id,
                                          out IReadOnlyList<String>           Warnings,
                                          [NotNullWhen(false)] out String?    Error)
+
+            => TryAddCertificate(PEM, ReachableAs, out Id, out Warnings, out Error, out _);
+
+        /// <summary>
+        /// Take in the certificate that answers one of this controller's
+        /// signing requests - and say whether a refusal was the file's rather
+        /// than the certificate's.
+        /// </summary>
+        /// <param name="NotSaved">True where the certificate could not be written: nothing about it was wrong, and it was not taken in.</param>
+        public Boolean TryAddCertificate(String                              PEM,
+                                         IEnumerable<String>                 ReachableAs,
+                                         [NotNullWhen(true)]  out String?    Id,
+                                         out IReadOnlyList<String>           Warnings,
+                                         [NotNullWhen(false)] out String?    Error,
+                                         out Boolean                         NotSaved)
         {
 
             Id        = null;
             Warnings  = [];
             Error     = null;
+            NotSaved  = false;
 
             #region What was uploaded
 
@@ -663,7 +696,8 @@ namespace cloud.charging.open.LocalController.OCPP
                 }
                 catch (Exception e)
                 {
-                    Error = $"The certificate could not be written to '{Path}': {e.Message}";
+                    Error     = $"The certificate could not be written to '{Path}': {e.Message}";
+                    NotSaved  = true;
                     return false;
                 }
 
@@ -718,9 +752,21 @@ namespace cloud.charging.open.LocalController.OCPP
         /// </remarks>
         public Boolean TryRemove(String                            Id,
                                  [NotNullWhen(false)] out String?  Error)
+
+            => TryRemove(Id, out Error, out _);
+
+        /// <summary>
+        /// Throw a key, its request and its certificate away - and say whether
+        /// a refusal was the files' rather than the request's.
+        /// </summary>
+        /// <param name="NotSaved">True where a file could not be deleted: the key stays here, with what of it was not deleted yet.</param>
+        public Boolean TryRemove(String                            Id,
+                                 [NotNullWhen(false)] out String?  Error,
+                                 out Boolean                       NotSaved)
         {
 
-            Error = null;
+            Error     = null;
+            NotSaved  = false;
 
             lock (updateLock)
             {
@@ -749,7 +795,8 @@ namespace cloud.charging.open.LocalController.OCPP
                 }
                 catch (Exception e)
                 {
-                    Error = $"'{Id}' could not be removed from '{Path}': {e.Message}";
+                    Error     = $"'{Id}' could not be removed from '{Path}': {e.Message}";
+                    NotSaved  = true;
                     return false;
                 }
 
@@ -1124,8 +1171,10 @@ namespace cloud.charging.open.LocalController.OCPP
                 {
 
                     entry.CanBePresented      = false;
+                    // "It is kept" followed "... certificates cannot be
+                    // presented", with nothing for "it" to be (found by the CSMS).
                     entry.PresentationProblem = $"{kind.Name} certificates cannot be presented over TLS by this machine - the handshake fails. " +
-                                                 "It is kept, and will be used the day the platform underneath can serve it.";
+                                                 "This one is kept, and will be used the day the platform underneath can serve it.";
 
                 }
 
