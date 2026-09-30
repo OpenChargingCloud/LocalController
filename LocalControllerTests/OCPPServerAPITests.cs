@@ -560,15 +560,18 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region ARefusalIsWhatItWasWhileTheFileCannotBeWritten()
+        #region ARefusalIsWhatItWasWhileTheStationsFileCannotBeWritten()
 
         /// <summary>
-        /// What was wrong with a change is answered as it was while the file
-        /// cannot be written: a 500 is the file's, and only where it was the
-        /// file that refused.
+        /// What was wrong with a change is answered as it was while the stations
+        /// file cannot be written: a 500 is the file's, and only where it was the
+        /// file that refused. Named after the file, for the kit's test of the
+        /// configuration file had the same name, and the two could not be told
+        /// apart in a TRX, which names a test by its method alone (found by the
+        /// CSMS).
         /// </summary>
         [Test]
-        public async Task ARefusalIsWhatItWasWhileTheFileCannotBeWritten()
+        public async Task ARefusalIsWhatItWasWhileTheStationsFileCannotBeWritten()
         {
 
             using var http = await SignedIn();
@@ -815,6 +818,79 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(Controller.ServerCertificates.Entries.Select(entry => entry.Id).
                                 Concat(Controller.ClientTrust.Entries.Select(entry => entry.Id)),
                             Does.Contain(id), "it is still there");
+            });
+
+        }
+
+        #endregion
+
+        #region ADeletionItsLastFileDoesNotLetHappenLeavesEveryFile(Change)
+
+        /// <summary>
+        /// A key or a chain whose last file cannot be deleted keeps all of its
+        /// files, and is there when it is read again. Deleted one after the
+        /// other, the files before it were gone: the key's own and its request,
+        /// the chain's certificates - and the key or the chain, listed until the
+        /// next start, was gone after it (found by the charging station).
+        /// </summary>
+        [TestCase("DELETE certificates/{id}")]
+        [TestCase("DELETE trust/{id}")]
+        [Platform("Win", Reason = "A file somebody holds open is deleted all the same on Linux, and a test run as root there deletes what it likes: nothing but Windows keeps a file from being deleted.")]
+        public async Task ADeletionItsLastFileDoesNotLetHappenLeavesEveryFile(String Change)
+        {
+
+            using var http  = await SignedIn();
+            using var ca    = TestCA.Create("Some Charging Network");
+
+            String id;
+            String directory;
+
+            if (Change == "DELETE certificates/{id}")
+            {
+
+                await http.PutAsync(Root, JSONBody(new JProperty("reachableAs", new JArray("lc001.example.org"))));
+
+                id         = JObject.Parse(await (await http.PostAsync($"{Root}/certificates",
+                                 JSONBody(new JProperty("algorithm", "ecdsa-p256")))).Content.ReadAsStringAsync()).Value<String>("id")!;
+
+                directory  = Controller.ServerCertificates.Path;
+
+            }
+            else
+            {
+
+                id         = JObject.Parse(await (await http.PostAsync($"{Root}/trust",
+                                 JSONBody(new JProperty("pem", TestCA.ToPEM(ca.Certificate))))).Content.ReadAsStringAsync()).Value<String>("id")!;
+
+                directory  = Controller.ClientTrust.Path;
+
+            }
+
+            String[] FilesOf() => System.IO.Directory.GetFiles(directory, $"{id}.*").Order(StringComparer.Ordinal).Select(file => Path.GetFileName(file)).ToArray();
+
+            var before = FilesOf();
+
+            HttpResponseMessage response;
+
+            // The description is the last of either's files to be taken away.
+            using (new FileStream(Path.Combine(directory, $"{id}.json"), FileMode.Open, FileAccess.Read, FileShare.Read))
+                response = Change == "DELETE certificates/{id}"
+                               ? await http.DeleteAsync($"{Root}/certificates/{id}")
+                               : await http.DeleteAsync($"{Root}/trust/{id}");
+
+            var body   = await response.Content.ReadAsStringAsync();
+            var after  = FilesOf();
+
+            Controller.ServerCertificates.Reload();
+            Controller.ClientTrust.Reload();
+
+            Assert.Multiple(() => {
+                Assert.That(response.StatusCode,  Is.EqualTo(HttpStatusCode.InternalServerError), body);
+                Assert.That(before,               Has.Length.GreaterThan(1),  "a key or a chain of one file");
+                Assert.That(after,                Is.EqualTo(before),         "its files");
+                Assert.That(Controller.ServerCertificates.Entries.Select(entry => entry.Id).
+                                Concat(Controller.ClientTrust.Entries.Select(entry => entry.Id)),
+                            Does.Contain(id), "read again");
             });
 
         }

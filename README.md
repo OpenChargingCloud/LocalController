@@ -420,6 +420,15 @@ it is renamed or switched on or off: a renewal or a change the disk runs out
 in leaves what was there whole. Written in its place, it cut that off, and at
 the next start the key or the chain was not read at all.
 
+A key or a chain is taken away whole or not at all: its files are set aside,
+as `*.removed`, before any of them is deleted, and put back where one of them
+cannot be - held open by somebody, as Windows keeps a file then. Deleted one
+after the other, the files before that one were gone, and the key or the
+chain was listed until the next start and gone after it (found by the
+charging station). A file that cannot be put back, or deleted once all are
+aside, is left over under its `*.removed` name, which the next start does not
+read, and said in the log.
+
 
 ## Who may open it
 

@@ -135,6 +135,18 @@ namespace cloud.charging.open.LocalController.OCPP
         /// </remarks>
         internal Action<String>? BeforeWriting { get; set; }
 
+        /// <summary>
+        /// Called with the full path of every file this store moves aside,
+        /// moves back or deletes when it takes a chain away, just before it
+        /// does.
+        /// </summary>
+        /// <remarks>
+        /// For the tests, and for nothing else: they make one of them fail
+        /// there, as a file somebody holds open does on Windows - on every
+        /// system, and at the step they choose.
+        /// </remarks>
+        internal Action<String>? BeforeRemoving { get; set; }
+
         #endregion
 
         #region Events
@@ -532,7 +544,7 @@ namespace cloud.charging.open.LocalController.OCPP
         /// away - and say whether a refusal was the files' rather than the
         /// request's.
         /// </summary>
-        /// <param name="NotSaved">True where a file could not be deleted: the chain is still accepted.</param>
+        /// <param name="NotSaved">True where a file could not be taken away: the chain stays, whole, and is still accepted.</param>
         public Boolean TryRemove(String                            Id,
                                  [NotNullWhen(false)] out String?  Error,
                                  out Boolean                       NotSaved)
@@ -540,6 +552,8 @@ namespace cloud.charging.open.LocalController.OCPP
 
             Error     = null;
             NotSaved  = false;
+
+            var leftOver = new List<String>();
 
             lock (updateLock)
             {
@@ -550,28 +564,31 @@ namespace cloud.charging.open.LocalController.OCPP
                     return false;
                 }
 
-                try
+                if (!TrySetAside(Id, [ "pem", "json" ], leftOver, out var setAside, out var problem))
                 {
-                    foreach (var extension in new[] { "pem", "json" })
-                    {
-                        var path = System.IO.Path.Combine(Path, $"{Id}.{extension}");
-                        if (File.Exists(path))
-                            File.Delete(path);
-                    }
-                }
-                catch (Exception e)
-                {
-                    Error     = $"'{Id}' could not be removed from '{Path}': {e.Message}";
+                    Error     = $"'{Id}' could not be removed from '{Path}': {problem}";
                     NotSaved  = true;
-                    return false;
                 }
 
-                OnNotice?.Invoke(LogLevel.Notice, $"'{entry.Name}' is no longer accepted; charging stations whose certificate leads to it will be turned away.");
+                else
+                {
 
-                entry.Dispose();
-                entries.Remove(Id);
+                    OnNotice?.Invoke(LogLevel.Notice, $"'{entry.Name}' is no longer accepted; charging stations whose certificate leads to it will be turned away.");
+
+                    entry.Dispose();
+                    entries.Remove(Id);
+
+                    Delete(setAside, leftOver);
+
+                }
 
             }
+
+            foreach (var file in leftOver)
+                OnNotice?.Invoke(LogLevel.Warning, $"'{file}' could not be {(Error is null ? "deleted" : "put back")}, and is left over.");
+
+            if (Error is not null)
+                return false;
 
             return true;
 
@@ -973,6 +990,97 @@ namespace cloud.charging.open.LocalController.OCPP
                 catch (Exception)
                 {
                     // Left where it is, see above.
+                }
+            }
+        }
+
+        #endregion
+
+        #region (private) TrySetAside(Id, Extensions, LeftOver, out SetAside, out Problem) / Delete(SetAside, LeftOver)
+
+        /// <summary>
+        /// The files of one chain moved aside, as "*.removed", all of them or
+        /// none: where one cannot be, those moved already are moved back.
+        /// </summary>
+        /// <remarks>
+        /// So that a chain is taken away whole or not at all. Deleted one after
+        /// the other, a description somebody held open left its certificates
+        /// gone: the chain was accepted until the next start and gone after it
+        /// (found by the charging station). What cannot be moved back is left
+        /// over under its "*.removed" name, which the next start does not read,
+        /// and said in the log.
+        /// </remarks>
+        private Boolean TrySetAside(String                            Id,
+                                    String[]                          Extensions,
+                                    List<String>                      LeftOver,
+                                    out List<String>                  SetAside,
+                                    [NotNullWhen(false)] out String?  Problem)
+        {
+
+            SetAside  = [];
+            Problem   = null;
+
+            foreach (var extension in Extensions)
+            {
+
+                var file = System.IO.Path.Combine(Path, $"{Id}.{extension}");
+
+                if (!File.Exists(file))
+                    continue;
+
+                try
+                {
+                    BeforeRemoving?.Invoke(file);
+                    File.Move(file, file + ".removed", overwrite: true);
+                    SetAside.Add(file);
+                }
+                catch (Exception e)
+                {
+
+                    Problem = e.Message;
+
+                    foreach (var moved in SetAside)
+                    {
+                        try
+                        {
+                            BeforeRemoving?.Invoke(moved + ".removed");
+                            File.Move(moved + ".removed", moved);
+                        }
+                        catch (Exception)
+                        {
+                            LeftOver.Add(moved + ".removed");
+                        }
+                    }
+
+                    SetAside.Clear();
+
+                    return false;
+
+                }
+
+            }
+
+            return true;
+
+        }
+
+        /// <summary>
+        /// The files moved aside deleted; what cannot be is left over under its
+        /// "*.removed" name, which the next start does not read.
+        /// </summary>
+        private void Delete(List<String>  SetAside,
+                            List<String>  LeftOver)
+        {
+            foreach (var file in SetAside)
+            {
+                try
+                {
+                    BeforeRemoving?.Invoke(file + ".removed");
+                    File.Delete(file + ".removed");
+                }
+                catch (Exception)
+                {
+                    LeftOver.Add(file + ".removed");
                 }
             }
         }

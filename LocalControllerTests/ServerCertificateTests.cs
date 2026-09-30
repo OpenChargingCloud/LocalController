@@ -634,6 +634,147 @@ namespace cloud.charging.open.LocalController.Tests
                     Assert.That(File.Exists(Path.Combine(directory, $"{id}.{extension}")), Is.False,
                                 $"'{id}.{extension}' was left behind.");
 
+                Assert.That(Directory.GetFiles(directory, $"{id}.*"), Is.Empty, "what was left behind, set aside or not");
+
+            });
+
+        }
+
+        #endregion
+
+        #region AKeyOneOfWhoseFilesCannotBeTakenAwayStaysWhole(Extension)
+
+        /// <summary>
+        /// A key one of whose files cannot be taken away - held open by
+        /// somebody, as Windows keeps a file then - stays, whole, now and when
+        /// the store is read again: its files are set aside before any of them
+        /// is deleted, and put back where one cannot be. Deleted one after the
+        /// other, a file held open left the ones before it gone, and the key
+        /// listed until the next start and gone after it (found by the charging
+        /// station).
+        /// </summary>
+        [TestCase("key.pem")]
+        [TestCase("csr.pem")]
+        [TestCase("json")]
+        public void AKeyOneOfWhoseFilesCannotBeTakenAwayStaysWhole(String Extension)
+        {
+
+            var (id, _)   = NewKey();
+            var before    = FilesOf(id);
+
+            store.BeforeRemoving = path => {
+                if (path.EndsWith($".{Extension}", StringComparison.Ordinal))
+                    throw new IOException("The process cannot access the file because it is being used by another process.");
+            };
+
+            var removed   = store.TryRemove(id, out var error, out var notSaved);
+
+            store.BeforeRemoving = null;
+
+            var after     = FilesOf(id);
+
+            store.Reload();
+
+            Assert.Multiple(() => {
+
+                Assert.That(removed,   Is.False);
+                Assert.That(notSaved,  Is.True);
+                Assert.That(error,     Does.StartWith($"'{id}' could not be removed from '{store.Path}': "));
+
+                Assert.That(after,     Is.EqualTo(before),  "its files");
+                Assert.That(store.Entries.Select(entry => entry.Id), Does.Contain(id), "the key, read again");
+
+            });
+
+        }
+
+        /// <summary>
+        /// The files of a key, by name, with what is in them.
+        /// </summary>
+        private (String Name, String Content)[] FilesOf(String Id)
+
+            => Directory.GetFiles(directory, $"{Id}.*").
+                         Order(StringComparer.Ordinal).
+                         Select(file => (Path.GetFileName(file), File.ReadAllText(file))).
+                         ToArray();
+
+        #endregion
+
+        #region AFileOfAKeyThatCannotBePutBackIsSaidAndLeftOver()
+
+        /// <summary>
+        /// A file of a key that cannot be moved back, once another could not be
+        /// set aside, is said in the log and left over under its "*.removed"
+        /// name, which the next start does not read; the key is refused all the
+        /// same, and the files that could be moved back are.
+        /// </summary>
+        [Test]
+        public void AFileOfAKeyThatCannotBePutBackIsSaidAndLeftOver()
+        {
+
+            var (id, _)   = NewKey();
+            var said      = new List<String>();
+
+            store.OnNotice += (level, message) => said.Add($"{level}: {message}");
+
+            store.BeforeRemoving = path => {
+                if (path.EndsWith(".json", StringComparison.Ordinal) || path.EndsWith(".key.pem.removed", StringComparison.Ordinal))
+                    throw new IOException("The process cannot access the file because it is being used by another process.");
+            };
+
+            var removed   = store.TryRemove(id, out var error, out var notSaved);
+
+            store.BeforeRemoving = null;
+
+            var leftOver  = Path.Combine(directory, $"{id}.key.pem.removed");
+
+            Assert.Multiple(() => {
+                Assert.That(removed,   Is.False);
+                Assert.That(notSaved,  Is.True);
+                Assert.That(said,      Has.One.EqualTo($"Warning: '{leftOver}' could not be put back, and is left over."));
+                Assert.That(FilesOf(id).Select(file => file.Name),
+                            Is.EqualTo(new[] { $"{id}.csr.pem", $"{id}.json", $"{id}.key.pem.removed" }),
+                            "the request put back, the description never moved, the key left over");
+            });
+
+        }
+
+        #endregion
+
+        #region AFileOfAKeyThatCannotBeDeletedOnceAsideIsSaidAndLeftOver()
+
+        /// <summary>
+        /// A file of a key that cannot be deleted once all of them are set aside
+        /// is said in the log and left over under its "*.removed" name, which
+        /// the next start does not read: the key is gone, now and then.
+        /// </summary>
+        [Test]
+        public void AFileOfAKeyThatCannotBeDeletedOnceAsideIsSaidAndLeftOver()
+        {
+
+            var (id, _)   = NewKey();
+            var said      = new List<String>();
+
+            store.OnNotice += (level, message) => said.Add($"{level}: {message}");
+
+            store.BeforeRemoving = path => {
+                if (path.EndsWith(".csr.pem.removed", StringComparison.Ordinal))
+                    throw new IOException("The process cannot access the file because it is being used by another process.");
+            };
+
+            var removed   = store.TryRemove(id, out var error, out _);
+
+            store.BeforeRemoving = null;
+
+            var leftOver  = Path.Combine(directory, $"{id}.csr.pem.removed");
+
+            store.Reload();
+
+            Assert.Multiple(() => {
+                Assert.That(removed,   Is.True, error);
+                Assert.That(said,      Has.One.EqualTo($"Warning: '{leftOver}' could not be deleted, and is left over."));
+                Assert.That(FilesOf(id).Select(file => file.Name), Is.EqualTo(new[] { $"{id}.csr.pem.removed" }), "what is left over");
+                Assert.That(store.Entries.Select(entry => entry.Id), Does.Not.Contain(id), "the key, read again");
             });
 
         }

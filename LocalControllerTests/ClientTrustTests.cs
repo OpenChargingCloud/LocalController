@@ -648,6 +648,151 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(store.Entries,                                 Is.Empty);
                 Assert.That(File.Exists(Path.Combine(directory, $"{id}.pem")),  Is.False);
                 Assert.That(File.Exists(Path.Combine(directory, $"{id}.json")), Is.False);
+                Assert.That(Directory.GetFiles(directory, $"{id}.*"),     Is.Empty, "what was left behind, set aside or not");
+            });
+
+        }
+
+        #endregion
+
+        #region AChainOneOfWhoseFilesCannotBeTakenAwayStaysWhole(Extension)
+
+        /// <summary>
+        /// A chain one of whose files cannot be taken away - held open by
+        /// somebody, as Windows keeps a file then - stays, whole and accepted,
+        /// now and when the store is read again: its files are set aside before
+        /// either is deleted, and put back where one cannot be. Deleted one
+        /// after the other, a description held open left its certificates gone,
+        /// and the chain accepted until the next start and gone after it (found
+        /// by the charging station).
+        /// </summary>
+        [TestCase("pem")]
+        [TestCase("json")]
+        public void AChainOneOfWhoseFilesCannotBeTakenAwayStaysWhole(String Extension)
+        {
+
+            using var ca  = TestCA.Create("Some Charging Network");
+            var id        = Accept(ca, "network");
+            var before    = FilesOf(id);
+
+            store.BeforeRemoving = path => {
+                if (path.EndsWith($".{Extension}", StringComparison.Ordinal))
+                    throw new IOException("The process cannot access the file because it is being used by another process.");
+            };
+
+            var removed   = store.TryRemove(id, out var error, out var notSaved);
+
+            store.BeforeRemoving = null;
+
+            var after     = FilesOf(id);
+
+            store.Reload();
+
+            using var station = ca.SignFor("cs001", clock.Now.AddDays(-1), clock.Now.AddYears(1));
+
+            Assert.Multiple(() => {
+
+                Assert.That(removed,   Is.False);
+                Assert.That(notSaved,  Is.True);
+                Assert.That(error,     Does.StartWith($"'{id}' could not be removed from '{store.Path}': "));
+
+                Assert.That(after,     Is.EqualTo(before),  "its files");
+                Assert.That(store.Entries.Select(entry => entry.Id),       Does.Contain(id),  "the chain, read again");
+                Assert.That(store.Validate(station, null, false).Accepted, Is.True,           "a station of it, read again");
+
+            });
+
+        }
+
+        /// <summary>
+        /// The files of a chain, by name, with what is in them.
+        /// </summary>
+        private (String Name, String Content)[] FilesOf(String Id)
+
+            => Directory.GetFiles(directory, $"{Id}.*").
+                         Order(StringComparer.Ordinal).
+                         Select(file => (Path.GetFileName(file), File.ReadAllText(file))).
+                         ToArray();
+
+        #endregion
+
+        #region AFileOfAChainThatCannotBePutBackIsSaidAndLeftOver()
+
+        /// <summary>
+        /// A file of a chain that cannot be moved back, once the other could not
+        /// be set aside, is said in the log and left over under its "*.removed"
+        /// name, which the next start does not read; the chain is refused all
+        /// the same.
+        /// </summary>
+        [Test]
+        public void AFileOfAChainThatCannotBePutBackIsSaidAndLeftOver()
+        {
+
+            using var ca  = TestCA.Create("Some Charging Network");
+            var id        = Accept(ca, "network");
+            var said      = new List<String>();
+
+            store.OnNotice += (level, message) => said.Add($"{level}: {message}");
+
+            store.BeforeRemoving = path => {
+                if (path.EndsWith(".json", StringComparison.Ordinal) || path.EndsWith(".pem.removed", StringComparison.Ordinal))
+                    throw new IOException("The process cannot access the file because it is being used by another process.");
+            };
+
+            var removed   = store.TryRemove(id, out var error, out var notSaved);
+
+            store.BeforeRemoving = null;
+
+            var leftOver  = Path.Combine(directory, $"{id}.pem.removed");
+
+            Assert.Multiple(() => {
+                Assert.That(removed,   Is.False);
+                Assert.That(notSaved,  Is.True);
+                Assert.That(said,      Has.One.EqualTo($"Warning: '{leftOver}' could not be put back, and is left over."));
+                Assert.That(FilesOf(id).Select(file => file.Name),
+                            Is.EqualTo(new[] { $"{id}.json", $"{id}.pem.removed" }),
+                            "the description never moved, the certificates left over");
+            });
+
+        }
+
+        #endregion
+
+        #region AFileOfAChainThatCannotBeDeletedOnceAsideIsSaidAndLeftOver()
+
+        /// <summary>
+        /// A file of a chain that cannot be deleted once both are set aside is
+        /// said in the log and left over under its "*.removed" name, which the
+        /// next start does not read: the chain is gone, now and then.
+        /// </summary>
+        [Test]
+        public void AFileOfAChainThatCannotBeDeletedOnceAsideIsSaidAndLeftOver()
+        {
+
+            using var ca  = TestCA.Create("Some Charging Network");
+            var id        = Accept(ca, "network");
+            var said      = new List<String>();
+
+            store.OnNotice += (level, message) => said.Add($"{level}: {message}");
+
+            store.BeforeRemoving = path => {
+                if (path.EndsWith(".json.removed", StringComparison.Ordinal))
+                    throw new IOException("The process cannot access the file because it is being used by another process.");
+            };
+
+            var removed   = store.TryRemove(id, out var error, out _);
+
+            store.BeforeRemoving = null;
+
+            var leftOver  = Path.Combine(directory, $"{id}.json.removed");
+
+            store.Reload();
+
+            Assert.Multiple(() => {
+                Assert.That(removed,   Is.True, error);
+                Assert.That(said,      Has.One.EqualTo($"Warning: '{leftOver}' could not be deleted, and is left over."));
+                Assert.That(FilesOf(id).Select(file => file.Name), Is.EqualTo(new[] { $"{id}.json.removed" }), "what is left over");
+                Assert.That(store.Entries.Select(entry => entry.Id), Does.Not.Contain(id), "the chain, read again");
             });
 
         }
