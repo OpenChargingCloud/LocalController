@@ -62,7 +62,7 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region (private) Accept(CA, Name)
+        #region (private) Accept(CA, Name) / CutOff(Name, Beginning) / Chains()
 
         private String Accept(TestCA CA, String Name)
         {
@@ -73,6 +73,32 @@ namespace cloud.charging.open.LocalController.Tests
             return id!;
 
         }
+
+        /// <summary>
+        /// The store's writes of a file with this in its name fail partway
+        /// through, as on a full disk: the file is there, with the beginning
+        /// of what was to go into it, and the write throws.
+        /// </summary>
+        private void CutOff(String Name, String Beginning)
+        {
+            store.BeforeWriting = path => {
+
+                if (!Path.GetFileName(path).Contains(Name, StringComparison.Ordinal))
+                    return;
+
+                File.WriteAllText(path, Beginning);
+
+                throw new IOException("There is not enough space on the disk.");
+
+            };
+        }
+
+        /// <summary>
+        /// The chains accepted, with their names and whether they are on.
+        /// </summary>
+        private String[] Chains()
+
+            => [.. store.Entries.Select(entry => $"{entry.Id} '{entry.Name}' {(entry.Enabled ? "on" : "off")}")];
 
         #endregion
 
@@ -425,6 +451,91 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(restarted.Entries.Single().Enabled, Is.False,
                             "A chain that was switched off came back switched on.");
                 Assert.That(restarted.Entries.Single().Name,    Is.EqualTo("network"));
+            });
+
+        }
+
+        #endregion
+
+        #region AChangeOfAChainTakesThePlaceOfWhatWasSaidBefore()
+
+        /// <summary>
+        /// A chain renamed and switched off is so, now and when the store is
+        /// read again, and nothing of how that was written is left beside it.
+        /// </summary>
+        [Test]
+        public void AChangeOfAChainTakesThePlaceOfWhatWasSaidBefore()
+        {
+
+            using var ca  = TestCA.Create("Some Charging Network");
+            var id        = Accept(ca, "network");
+
+            Assert.That(store.TryRename    (id, "another network", out var renameError), Is.True, renameError);
+            Assert.That(store.TrySetEnabled(id, false,             out var switchError), Is.True, switchError);
+
+            var files     = Directory.GetFiles(directory).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray();
+
+            store.Reload();
+
+            Assert.Multiple(() => {
+                Assert.That(files,     Is.EqualTo(new[] { $"{id}.json", $"{id}.pem" }),        "the files of the chain");
+                Assert.That(Chains(),  Is.EqualTo(new[] { $"{id} 'another network' off" }),  "the chain, read again");
+            });
+
+        }
+
+        #endregion
+
+        #region AChangeOfAChainThatCannotBeWrittenLeavesItAsItWas(Change)
+
+        /// <summary>
+        /// What is said of a chain - its name, and whether it is on - is a file
+        /// of its own, and a change the disk ran out in halfway through cut it
+        /// off. The chain went on as it was until the next start, and was not
+        /// read at all then: its charging stations were turned away. It stays
+        /// as it was, now and when the store is read again, and nothing of the
+        /// change is left beside it.
+        /// </summary>
+        [TestCase("rename")]
+        [TestCase("switch off")]
+        public void AChangeOfAChainThatCannotBeWrittenLeavesItAsItWas(String Change)
+        {
+
+            using var ca    = TestCA.Create("Some Charging Network");
+            var id          = Accept(ca, "network");
+
+            // Its file, under whatever name it is written first.
+            CutOff($"{id}.json", "{" + Environment.NewLine + "  \"id\": ");
+
+            String?  error;
+            Boolean  notSaved;
+
+            var changed     = Change == "rename"
+                                  ? store.TryRename    (id, "another network", out error, out notSaved)
+                                  : store.TrySetEnabled(id, false,             out error, out notSaved);
+
+            store.BeforeWriting = null;
+
+            var inEffect    = Chains();
+            var files       = Directory.GetFiles(directory).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray();
+
+            var said        = new List<String>();
+            store.OnNotice += (level, message) => said.Add($"{level}: {message}");
+
+            store.Reload();
+
+            Assert.Multiple(() => {
+
+                Assert.That(changed,   Is.False);
+                Assert.That(notSaved,  Is.True);
+                Assert.That(error,     Does.StartWith($"'{id}' could not be written to '{store.Path}': "));
+
+                Assert.That(inEffect,  Is.EqualTo(new[] { $"{id} 'network' on" }),  "the chain");
+                Assert.That(files,     Is.EqualTo(new[] { $"{id}.json", $"{id}.pem" }),  "the files of the chain");
+
+                Assert.That(Chains(),  Is.EqualTo(new[] { $"{id} 'network' on" }),
+                                       $"the chain, read again: {String.Join(" | ", said)}");
+
             });
 
         }

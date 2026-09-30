@@ -415,9 +415,10 @@ same way.
 A key whose files could not all be written - itself, its signing request and
 its description - is taken away again as well, rather than read at the next
 start as a key nobody asked for. A certificate is written beside the one it
-replaces and moved over it, so that a renewal the disk runs out in leaves the
-one before it whole: written in its place, it cut that one off, and at the next
-start the key was not read at all.
+replaces and moved over it, and so is what is said of an accepted chain when
+it is renamed or switched on or off: a renewal or a change the disk runs out
+in leaves what was there whole. Written in its place, it cut that off, and at
+the next start the key or the chain was not read at all.
 
 
 ## Who may open it

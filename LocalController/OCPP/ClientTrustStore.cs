@@ -123,6 +123,18 @@ namespace cloud.charging.open.LocalController.OCPP
             }
         }
 
+        /// <summary>
+        /// Called with the full path of every file this store writes, just
+        /// before it is written.
+        /// </summary>
+        /// <remarks>
+        /// For the tests, and for nothing else: they make a write fail there,
+        /// or fail partway through as on a full disk. Something put in the way
+        /// of a file refuses its write before it begins; nothing on the outside
+        /// of this store can make one stop halfway.
+        /// </remarks>
+        internal Action<String>? BeforeWriting { get; set; }
+
         #endregion
 
         #region Events
@@ -320,7 +332,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
                     var ordered = new[] { anchor }.Concat(pool.Where(certificate => !ReferenceEquals(certificate, anchor)));
 
-                    File.WriteAllText(
+                    WriteFile(
                         System.IO.Path.Combine(Path, $"{id}.pem"),
                         String.Join(
                             Environment.NewLine,
@@ -328,7 +340,7 @@ namespace cloud.charging.open.LocalController.OCPP
                         ) + Environment.NewLine
                     );
 
-                    File.WriteAllText(
+                    WriteFile(
                         System.IO.Path.Combine(Path, $"{id}.json"),
                         new JObject(
                             new JProperty("id",       id),
@@ -396,7 +408,7 @@ namespace cloud.charging.open.LocalController.OCPP
         /// Switch a chain on or off - and say whether a refusal was the file's
         /// rather than the change's.
         /// </summary>
-        /// <param name="NotSaved">True where what is said of the chain could not be written: it is on or off as it was.</param>
+        /// <param name="NotSaved">True where what is said of the chain could not be written: it is on or off as it was, now and at the next start.</param>
         public Boolean TrySetEnabled(String                            Id,
                                      Boolean                           Enabled,
                                      [NotNullWhen(false)] out String?  Error,
@@ -453,7 +465,7 @@ namespace cloud.charging.open.LocalController.OCPP
         /// Give a chain another name - and say whether a refusal was the file's
         /// rather than the name's.
         /// </summary>
-        /// <param name="NotSaved">True where what is said of the chain could not be written: it keeps the name it had.</param>
+        /// <param name="NotSaved">True where what is said of the chain could not be written: it keeps the name it had, now and at the next start.</param>
         public Boolean TryRename(String                            Id,
                                  String                            Name,
                                  [NotNullWhen(false)] out String?  Error,
@@ -872,11 +884,17 @@ namespace cloud.charging.open.LocalController.OCPP
 
             Error = null;
 
+            var file = System.IO.Path.Combine(Path, $"{Entry.Id}.json");
+
             try
             {
 
-                File.WriteAllText(
-                    System.IO.Path.Combine(Path, $"{Entry.Id}.json"),
+                // Beside what it replaces, and moved over it in one step:
+                // written in its place, a change the disk ran out in cut what
+                // was said of the chain off, and at the next start the chain
+                // was not read at all - its charging stations turned away.
+                WriteFile(
+                    file + ".tmp",
                     new JObject(
                         new JProperty("id",       Entry.Id),
                         new JProperty("name",     Entry.Name),
@@ -885,20 +903,28 @@ namespace cloud.charging.open.LocalController.OCPP
                     ).ToString(Formatting.Indented) + Environment.NewLine
                 );
 
+                File.Move(file + ".tmp", file, overwrite: true);
+
                 return true;
 
             }
             catch (Exception e)
             {
+
                 Error = $"'{Entry.Id}' could not be written to '{Path}': {e.Message}";
+
+                // What was written of it, beside what it was to replace.
+                Forget(Entry.Id, "json.tmp");
+
                 return false;
+
             }
 
         }
 
         #endregion
 
-        #region (private) CreateDirectory()
+        #region (private) CreateDirectory() / WriteFile(Target, Content)
 
         private void CreateDirectory()
         {
@@ -909,6 +935,19 @@ namespace cloud.charging.open.LocalController.OCPP
             // Nothing in here is secret - these are certificates, and a
             // certificate is a public document - so the ordinary mode.
             Directory.CreateDirectory(Path);
+
+        }
+
+        /// <summary>
+        /// One file of this store written - past <see cref="BeforeWriting"/>
+        /// first.
+        /// </summary>
+        private void WriteFile(String Target, String Content)
+        {
+
+            BeforeWriting?.Invoke(Target);
+
+            File.WriteAllText(Target, Content);
 
         }
 

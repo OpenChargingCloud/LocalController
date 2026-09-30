@@ -19,9 +19,10 @@
     <ProjectReference Include="..\..\WWCP_OCPP\WWCP_OCPP_Common\WWCP_OCPP_Common.csproj" />
   </ItemGroup>
 
-  <!-- For the tests: a write of the server's keys and certificates that fails
-       where they say, which nothing on the outside can bring about - see
-       ServerCertificateStore.BeforeWriting. -->
+  <!-- For the tests: a write of the server's keys and certificates, or of the
+       chains it accepts, that fails where they say, which nothing on the
+       outside can bring about - see BeforeWriting in ServerCertificateStore
+       and ClientTrustStore. -->
   <ItemGroup>
     <InternalsVisibleTo Include="LocalControllerTests" />
   </ItemGroup>
