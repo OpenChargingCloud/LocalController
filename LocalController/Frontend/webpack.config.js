@@ -86,13 +86,16 @@ module.exports = (env, argv) => {
             new MiniCssExtractPlugin({
                 filename: 'assets/[name].[contenthash].css'
             }),
+            // The page every kind of node serves, from WWCP_Node, which fills
+            // in its {{...}} as it serves it; this kind names itself into it.
             new HtmlWebpackPlugin({
-                template:  './src/index.html',
-                filename:  'index.html',
-                chunks:    ['main'],
-                favicon:   './src/favicon.svg',
-                title:     'Local Controller',
-                version:   appVersion
+                template:     path.resolve(__dirname, '../../../WWCP_Node/Frontend/src/index.html'),
+                filename:     'index.html',
+                chunks:       ['main'],
+                favicon:      './src/favicon.svg',
+                title:        'Local Controller',
+                description:  'The web interface of an OpenChargingCloud local controller, served by the Hermod HTTP/1.1 server',
+                version:      appVersion
             })
         ],
 
