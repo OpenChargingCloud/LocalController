@@ -561,7 +561,7 @@ namespace cloud.charging.open.LocalController
             if (entry.Kind != CertificateKind.TLSIdentity)
             {
                 Problem = $"'{entry.Label}' ({entry.Id}), chosen for the CSMS connection, is not a TLS identity " +
-                          $"this local controller could sign in with, but a {entry.Kind.Describe()}.";
+                          $"this local controller could sign in with, but {entry.Kind.WithArticle()}.";
                 return false;
             }
 

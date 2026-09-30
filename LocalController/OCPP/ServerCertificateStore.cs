@@ -384,7 +384,7 @@ namespace cloud.charging.open.LocalController.OCPP
             }
             catch (Exception e)
             {
-                Error = $"A {algorithm.Name} key could not be generated: {e.Message}";
+                Error = $"No {algorithm.Name} key could be generated: {e.Message}";
                 return false;
             }
 
@@ -1110,7 +1110,7 @@ namespace cloud.charging.open.LocalController.OCPP
                     // chooses what to present - because the day this runs
                     // somewhere else, or on a newer runtime, it may work.
                     entry.CanBePresented      = false;
-                    entry.PresentationProblem = $"This machine cannot make a usable TLS certificate out of a {kind.Name} key: {e.Message} " +
+                    entry.PresentationProblem = $"This machine cannot make a usable TLS certificate out of its {kind.Name} key: {e.Message} " +
                                                  "The certificate is kept, but it cannot be presented to a charging station from here.";
 
                 }
@@ -1124,7 +1124,7 @@ namespace cloud.charging.open.LocalController.OCPP
                 {
 
                     entry.CanBePresented      = false;
-                    entry.PresentationProblem = $"A {kind.Name} certificate cannot be presented over TLS by this machine - the handshake fails. " +
+                    entry.PresentationProblem = $"{kind.Name} certificates cannot be presented over TLS by this machine - the handshake fails. " +
                                                  "It is kept, and will be used the day the platform underneath can serve it.";
 
                 }

@@ -490,9 +490,10 @@ namespace cloud.charging.open.LocalController
                      json.Value<String>("group"),
                      json.Value<String>("note"),
                      out var generated,
-                     out var error))
+                     out var error,
+                     out var notSaved))
             {
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, error, notSaved));
             }
 
             Log.Notice($"'{user.Id}' set the password of the charging station '{id}'.", "ocpp", "station", "auth", "web");
@@ -533,15 +534,15 @@ namespace cloud.charging.open.LocalController
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, "An 'enabled' of true or false, or a 'group', is required."));
 
             if (group is not null &&
-                !Controller.StationLogins.TrySetGroup(id, group, out var groupError))
+                !Controller.StationLogins.TrySetGroup(id, group, out var groupError, out var groupNotSaved))
             {
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.NotFound, groupError));
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.NotFound, groupError, groupNotSaved));
             }
 
             if (enabled is Boolean wanted &&
-                !Controller.StationLogins.TrySetEnabled(id, wanted, out var error))
+                !Controller.StationLogins.TrySetEnabled(id, wanted, out var error, out var notSaved))
             {
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.NotFound, error));
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.NotFound, error, notSaved));
             }
 
             if (group is not null)
@@ -610,9 +611,10 @@ namespace cloud.charging.open.LocalController
                      json.Value<String>("group"),
                      json.Value<String>("note"),
                      out var generated,
-                     out var error))
+                     out var error,
+                     out var notSaved))
             {
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, error, notSaved));
             }
 
             Log.Notice($"'{user.Id}' set the TOTP configuration of the charging station '{id}'.", "ocpp", "station", "auth", "web");
@@ -636,7 +638,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> DeleteStationTOTP(HTTPRequest Request)
 
             => Task.FromResult(TakeCredentialAway(Request,
-                                                  (String id, out String? error) => Controller.StationLogins.TryClearTOTP(id, out error),
+                                                  Controller.StationLogins.TryClearTOTP,
                                                   "TOTP configuration"));
 
         /// <summary>
@@ -646,7 +648,7 @@ namespace cloud.charging.open.LocalController
         private Task<HTTPResponse> DeleteStationPassword(HTTPRequest Request)
 
             => Task.FromResult(TakeCredentialAway(Request,
-                                                  (String id, out String? error) => Controller.StationLogins.TryClearPassword(id, out error),
+                                                  Controller.StationLogins.TryClearPassword,
                                                   "password"));
 
         /// <summary>
@@ -663,8 +665,8 @@ namespace cloud.charging.open.LocalController
             if (!TryGetId(Request, out var id, out var badRequest))
                 return badRequest;
 
-            if (!Clear(id, out var error))
-                return ErrorJSON(Request, HTTPStatusCode.NotFound, error);
+            if (!Clear(id, out var error, out var notSaved))
+                return NotChanged(Request, HTTPStatusCode.NotFound, error, notSaved);
 
             Log.Notice($"'{user.Id}' took the {What} of the charging station '{id}' away.", "ocpp", "station", "auth", "web");
 
@@ -673,9 +675,26 @@ namespace cloud.charging.open.LocalController
         }
 
         /// <summary>
-        /// One of the store's "take this credential away" methods.
+        /// One of the store's "take this credential away" methods, with what
+        /// they promise: the error where they refuse. Without it, the compiler
+        /// could not tell that the error handed on above is never null.
         /// </summary>
-        private delegate Boolean TryClearDelegate(String Id, out String? Error);
+        private delegate Boolean TryClearDelegate(String                            Id,
+                                                  [NotNullWhen(false)] out String?  Error,
+                                                  out Boolean                       NotSaved);
+
+        /// <summary>
+        /// The answer to a change of the logins that was not made: the status
+        /// of what was wrong with it - or 500, where nothing was, and the file
+        /// could not be written, the change undone. Both came as the status of
+        /// what was wrong, and a full disk was a station "not found".
+        /// </summary>
+        private static HTTPResponse NotChanged(HTTPRequest     Request,
+                                               HTTPStatusCode  WhatWasWrong,
+                                               String          Error,
+                                               Boolean         NotSaved)
+
+            => ErrorJSON(Request, NotSaved ? HTTPStatusCode.InternalServerError : WhatWasWrong, Error);
 
         /// <summary>
         /// DELETE .../stations/{id}: forget a charging station.
@@ -689,8 +708,8 @@ namespace cloud.charging.open.LocalController
             if (!TryGetId(Request, out var id, out var badRequest))
                 return Task.FromResult(badRequest);
 
-            if (!Controller.StationLogins.TryRemove(id, out var error))
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.NotFound, error));
+            if (!Controller.StationLogins.TryRemove(id, out var error, out var notSaved))
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.NotFound, error, notSaved));
 
             Log.Notice($"'{user.Id}' removed the charging station '{id}'.", "ocpp", "station", "auth", "web");
 
@@ -806,9 +825,10 @@ namespace cloud.charging.open.LocalController
                      methods,
                      profiles,
                      JSON.Value<String>("note"),
-                     out var error))
+                     out var error,
+                     out var notSaved))
             {
-                return ErrorJSON(Request, HTTPStatusCode.BadRequest, error);
+                return NotChanged(Request, HTTPStatusCode.BadRequest, error, notSaved);
             }
 
             Log.Notice($"'{user.Id}' wrote the login group '{Id}'.", "ocpp", "station", "auth", "web");
@@ -829,8 +849,8 @@ namespace cloud.charging.open.LocalController
             if (!TryGetId(Request, out var id, out var badRequest))
                 return Task.FromResult(badRequest);
 
-            if (!Controller.StationLogins.TryRemoveGroup(id, out var error))
-                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.Conflict, error));
+            if (!Controller.StationLogins.TryRemoveGroup(id, out var error, out var notSaved))
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.Conflict, error, notSaved));
 
             Log.Notice($"'{user.Id}' removed the login group '{id}'.", "ocpp", "station", "auth", "web");
 

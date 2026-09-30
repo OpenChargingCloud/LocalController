@@ -424,9 +424,14 @@ namespace cloud.charging.open.LocalController.Tests
 
             var controller = await AControllerThatDials(Identity: false, Chosen: root);
 
+            // What it is said to be instead is its kind with its article: it
+            // was the whole of Describe() after an "a" - "but a TLS root -
+            // what a server this node connects to may chain to: a time
+            // server, a backend."
             Assert.Multiple(() => {
                 Assert.That(controller.CSMSConnected,      Is.False);
-                Assert.That(controller.CSMSLastProblem,    Does.Contain("is not a TLS identity"));
+                Assert.That(controller.CSMSLastProblem,    Does.Contain("is not a TLS identity").And.
+                                                           EndWith("is not a TLS identity this local controller could sign in with, but a TLS root."));
             });
 
         }

@@ -498,6 +498,101 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region AChangeTheStationsFileCannotTakeIsAServerError(Change)
+
+        /// <summary>
+        /// A change of the logins that is fine in itself, and that the stations
+        /// file cannot be written with, is answered 500 with why - the change
+        /// undone - rather than with the 400, 404 or 409 of what was wrong with
+        /// it: nothing was. Every route that writes the file. It was the status
+        /// of the refusals, and a full disk was a station "not found".
+        /// </summary>
+        [TestCase("POST groups")]
+        [TestCase("PUT groups/{id}")]
+        [TestCase("DELETE groups/{id}")]
+        [TestCase("POST stations")]
+        [TestCase("PUT stations/{id}, enabled")]
+        [TestCase("PUT stations/{id}, group")]
+        [TestCase("PUT stations/{id}/totp")]
+        [TestCase("DELETE stations/{id}/totp")]
+        [TestCase("DELETE stations/{id}/password")]
+        [TestCase("DELETE stations/{id}")]
+        public async Task AChangeTheStationsFileCannotTakeIsAServerError(String Change)
+        {
+
+            using var http = await SignedIn();
+
+            // What makes each change a fine one: a station with a password and
+            // a token, in the default group, and a group of its own, empty.
+            foreach (var made in new[] {
+                                     await http.PostAsync($"{Root}/stations",           JSONBody(new JProperty("id", "cs001"))),
+                                     await http.PutAsync ($"{Root}/stations/cs001/totp", JSONBody()),
+                                     await http.PostAsync($"{Root}/groups",             JSONBody(new JProperty("id", "field-test")))
+                                 })
+                Assert.That(made.IsSuccessStatusCode, Is.True, await made.Content.ReadAsStringAsync());
+
+            // Where the file's next version is written first is a directory.
+            System.IO.Directory.CreateDirectory(Controller.StationLogins.Path + ".tmp");
+
+            var response = Change switch {
+                "POST groups"                    => await http.PostAsync  ($"{Root}/groups",                 JSONBody(new JProperty("id",      "another"))),
+                "PUT groups/{id}"                => await http.PutAsync   ($"{Root}/groups/field-test",      JSONBody(new JProperty("enabled", false))),
+                "DELETE groups/{id}"             => await http.DeleteAsync($"{Root}/groups/field-test"),
+                "POST stations"                  => await http.PostAsync  ($"{Root}/stations",               JSONBody(new JProperty("id",      "cs002"))),
+                "PUT stations/{id}, enabled"     => await http.PutAsync   ($"{Root}/stations/cs001",         JSONBody(new JProperty("enabled", false))),
+                "PUT stations/{id}, group"       => await http.PutAsync   ($"{Root}/stations/cs001",         JSONBody(new JProperty("group",   "field-test"))),
+                "PUT stations/{id}/totp"         => await http.PutAsync   ($"{Root}/stations/cs001/totp",    JSONBody()),
+                "DELETE stations/{id}/totp"      => await http.DeleteAsync($"{Root}/stations/cs001/totp"),
+                "DELETE stations/{id}/password"  => await http.DeleteAsync($"{Root}/stations/cs001/password"),
+                "DELETE stations/{id}"           => await http.DeleteAsync($"{Root}/stations/cs001"),
+                _                                => throw new ArgumentException($"No change '{Change}' here.", nameof(Change))
+            };
+
+            var body = await response.Content.ReadAsStringAsync();
+
+            Assert.Multiple(() => {
+                Assert.That(response.StatusCode,                         Is.EqualTo(HttpStatusCode.InternalServerError), body);
+                Assert.That(JObject.Parse(body).Value<String>("error"),  Does.StartWith($"'{Controller.StationLogins.Path}' could not be written: "));
+            });
+
+        }
+
+        #endregion
+
+        #region ARefusalIsWhatItWasWhileTheFileCannotBeWritten()
+
+        /// <summary>
+        /// What was wrong with a change is answered as it was while the file
+        /// cannot be written: a 500 is the file's, and only where it was the
+        /// file that refused.
+        /// </summary>
+        [Test]
+        public async Task ARefusalIsWhatItWasWhileTheFileCannotBeWritten()
+        {
+
+            using var http = await SignedIn();
+
+            var added = await http.PostAsync($"{Root}/stations", JSONBody(new JProperty("id", "cs001"), new JProperty("group", "default")));
+            Assert.That(added.IsSuccessStatusCode, Is.True, await added.Content.ReadAsStringAsync());
+
+            System.IO.Directory.CreateDirectory(Controller.StationLogins.Path + ".tmp");
+
+            var unknown   = await http.DeleteAsync($"{Root}/stations/cs404");
+            var tooShort  = await http.PostAsync  ($"{Root}/stations",               JSONBody(new JProperty("id", "cs002"), new JProperty("password", "short")));
+            var notEmpty  = await http.DeleteAsync($"{Root}/groups/default");
+            var noToken   = await http.DeleteAsync($"{Root}/stations/cs001/totp");
+
+            Assert.Multiple(() => {
+                Assert.That(unknown. StatusCode,  Is.EqualTo(HttpStatusCode.NotFound),    "a station this controller never heard of");
+                Assert.That(tooShort.StatusCode,  Is.EqualTo(HttpStatusCode.BadRequest),  "a password too short");
+                Assert.That(notEmpty.StatusCode,  Is.EqualTo(HttpStatusCode.Conflict),    "a group somebody is in");
+                Assert.That(noToken. StatusCode,  Is.EqualTo(HttpStatusCode.NotFound),    "a token that is not there to take away");
+            });
+
+        }
+
+        #endregion
+
         #region NobodySignedInChangesNoLoginsAndNoGroups()
 
         /// <summary>

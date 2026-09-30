@@ -343,7 +343,7 @@ namespace cloud.charging.open.LocalController.OCPP
         #endregion
 
 
-        #region TryAddOrUpdateGroup(Id, Name, Enabled, AuthMethods, SecurityProfiles, Note, out Error)
+        #region TryAddOrUpdateGroup(Id, Name, Enabled, AuthMethods, SecurityProfiles, Note, out Error [, out NotSaved])
 
         /// <summary>
         /// Make a group, or change what one allows.
@@ -355,7 +355,25 @@ namespace cloud.charging.open.LocalController.OCPP
                                            IEnumerable<Byte>?                SecurityProfiles,
                                            String?                           Note,
                                            [NotNullWhen(false)] out String?  Error)
+
+            => TryAddOrUpdateGroup(Id, Name, Enabled, AuthMethods, SecurityProfiles, Note, out Error, out _);
+
+        /// <summary>
+        /// Make a group, or change what one allows - and say whether a refusal
+        /// was the file's rather than the change's.
+        /// </summary>
+        /// <param name="NotSaved">True where the file could not be written: see <see cref="TryRemove(String, out String?, out Boolean)"/>.</param>
+        public Boolean TryAddOrUpdateGroup(String?                           Id,
+                                           String?                           Name,
+                                           Boolean                           Enabled,
+                                           IEnumerable<AuthMethod>?          AuthMethods,
+                                           IEnumerable<Byte>?                SecurityProfiles,
+                                           String?                           Note,
+                                           [NotNullWhen(false)] out String?  Error,
+                                           out Boolean                       NotSaved)
         {
+
+            NotSaved = false;
 
             lock (updateLock)
             {
@@ -389,6 +407,8 @@ namespace cloud.charging.open.LocalController.OCPP
                 if (!TrySave(out Error))
                 {
 
+                    NotSaved = true;
+
                     if (existing is not null)
                         groups[group.Id] = existing;
                     else
@@ -415,7 +435,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region TryRemoveGroup(Id, out Error)
+        #region TryRemoveGroup(Id, out Error [, out NotSaved])
 
         /// <summary>
         /// Forget a group nobody is in.
@@ -428,9 +448,21 @@ namespace cloud.charging.open.LocalController.OCPP
         /// </remarks>
         public Boolean TryRemoveGroup(String                            Id,
                                       [NotNullWhen(false)] out String?  Error)
+
+            => TryRemoveGroup(Id, out Error, out _);
+
+        /// <summary>
+        /// Forget a group nobody is in - and say whether a refusal was the
+        /// file's rather than the change's.
+        /// </summary>
+        /// <param name="NotSaved">True where the file could not be written: see <see cref="TryRemove(String, out String?, out Boolean)"/>.</param>
+        public Boolean TryRemoveGroup(String                            Id,
+                                      [NotNullWhen(false)] out String?  Error,
+                                      out Boolean                       NotSaved)
         {
 
-            Error = null;
+            Error     = null;
+            NotSaved  = false;
 
             var id = Id?.Trim().ToLowerInvariant() ?? "";
 
@@ -461,7 +493,8 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 if (!TrySave(out Error))
                 {
-                    groups[id] = group;
+                    NotSaved    = true;
+                    groups[id]  = group;
                     return false;
                 }
 
@@ -477,7 +510,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region TrySetGroup(Id, GroupId, out Error)
+        #region TrySetGroup(Id, GroupId, out Error [, out NotSaved])
 
         /// <summary>
         /// Move a charging station into another group.
@@ -485,9 +518,22 @@ namespace cloud.charging.open.LocalController.OCPP
         public Boolean TrySetGroup(String                            Id,
                                    String?                           GroupId,
                                    [NotNullWhen(false)] out String?  Error)
+
+            => TrySetGroup(Id, GroupId, out Error, out _);
+
+        /// <summary>
+        /// Move a charging station into another group - and say whether a
+        /// refusal was the file's rather than the change's.
+        /// </summary>
+        /// <param name="NotSaved">True where the file could not be written: see <see cref="TryRemove(String, out String?, out Boolean)"/>.</param>
+        public Boolean TrySetGroup(String                            Id,
+                                   String?                           GroupId,
+                                   [NotNullWhen(false)] out String?  Error,
+                                   out Boolean                       NotSaved)
         {
 
-            Error = null;
+            Error     = null;
+            NotSaved  = false;
 
             var groupId = GroupId?.Trim().ToLowerInvariant() ?? "";
 
@@ -516,7 +562,8 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 if (!TrySave(out Error))
                 {
-                    logins[Id] = login;
+                    NotSaved    = true;
+                    logins[Id]  = login;
                     return false;
                 }
 
@@ -533,7 +580,7 @@ namespace cloud.charging.open.LocalController.OCPP
         #endregion
 
 
-        #region TrySetPassword(Id, Password, GroupId, Note, out Generated, out Error)
+        #region TrySetPassword(Id, Password, GroupId, Note, out Generated, out Error [, out NotSaved])
 
         /// <summary>
         /// Add a charging station, or give one that is already here a new
@@ -556,10 +603,27 @@ namespace cloud.charging.open.LocalController.OCPP
                                       String?                           Note,
                                       out String?                       Generated,
                                       [NotNullWhen(false)] out String?  Error)
+
+            => TrySetPassword(Id, Password, GroupId, Note, out Generated, out Error, out _);
+
+        /// <summary>
+        /// Add a charging station, or give one that is already here a new
+        /// password - and say whether a refusal was the file's rather than the
+        /// change's.
+        /// </summary>
+        /// <param name="NotSaved">True where the file could not be written: see <see cref="TryRemove(String, out String?, out Boolean)"/>.</param>
+        public Boolean TrySetPassword(String                            Id,
+                                      String?                           Password,
+                                      String?                           GroupId,
+                                      String?                           Note,
+                                      out String?                       Generated,
+                                      [NotNullWhen(false)] out String?  Error,
+                                      out Boolean                       NotSaved)
         {
 
             Generated  = null;
             Error      = null;
+            NotSaved   = false;
 
             if (!TryCheckIdAndNote(Id, Note, out var id, out var note, out Error))
                 return false;
@@ -597,7 +661,8 @@ namespace cloud.charging.open.LocalController.OCPP
                            existed => existed
                                           ? $"The password of the charging station '{id}' was changed."
                                           : $"The charging station '{id}' may now sign in to this local controller.",
-                           out Error))
+                           out Error,
+                           out NotSaved))
             {
                 Generated = null;
                 return false;
@@ -609,7 +674,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region TrySetTOTP(Id, SharedSecret, ValidityTime, Length, Alphabet, HashAlgorithm, GroupId, Note, out Generated, out Error)
+        #region TrySetTOTP(Id, SharedSecret, ValidityTime, Length, Alphabet, HashAlgorithm, GroupId, Note, out Generated, out Error [, out NotSaved])
 
         /// <summary>
         /// Add a charging station, or give one that is already here what it
@@ -634,10 +699,31 @@ namespace cloud.charging.open.LocalController.OCPP
                                   String?                           Note,
                                   out String?                       Generated,
                                   [NotNullWhen(false)] out String?  Error)
+
+            => TrySetTOTP(Id, SharedSecret, ValidityTime, Length, Alphabet, HashAlgorithm, GroupId, Note, out Generated, out Error, out _);
+
+        /// <summary>
+        /// Add a charging station, or give one that is already here what it
+        /// needs to be let in with a one-time token - and say whether a refusal
+        /// was the file's rather than the change's.
+        /// </summary>
+        /// <param name="NotSaved">True where the file could not be written: see <see cref="TryRemove(String, out String?, out Boolean)"/>.</param>
+        public Boolean TrySetTOTP(String                            Id,
+                                  String?                           SharedSecret,
+                                  TimeSpan?                         ValidityTime,
+                                  UInt32?                           Length,
+                                  String?                           Alphabet,
+                                  TOTPHashAlgorithm?                HashAlgorithm,
+                                  String?                           GroupId,
+                                  String?                           Note,
+                                  out String?                       Generated,
+                                  [NotNullWhen(false)] out String?  Error,
+                                  out Boolean                       NotSaved)
         {
 
             Generated  = null;
             Error      = null;
+            NotSaved   = false;
 
             if (!TryCheckIdAndNote(Id, Note, out var id, out var note, out Error))
                 return false;
@@ -661,7 +747,8 @@ namespace cloud.charging.open.LocalController.OCPP
                            existed => existed
                                           ? $"The TOTP configuration of the charging station '{id}' was changed: {settings}."
                                           : $"The charging station '{id}' may now sign in to this local controller with a one-time token.",
-                           out Error))
+                           out Error,
+                           out NotSaved))
             {
                 return false;
             }
@@ -674,7 +761,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region TryClearPassword(Id, out Error) / TryClearTOTP(Id, out Error)
+        #region TryClearPassword(Id, out Error [, out NotSaved]) / TryClearTOTP(Id, out Error [, out NotSaved])
 
         /// <summary>
         /// Take the password away from a charging station, leaving everything
@@ -683,12 +770,24 @@ namespace cloud.charging.open.LocalController.OCPP
         public Boolean TryClearPassword(String                            Id,
                                         [NotNullWhen(false)] out String?  Error)
 
+            => TryClearPassword(Id, out Error, out _);
+
+        /// <summary>
+        /// Take the password away from a charging station - and say whether a
+        /// refusal was the file's rather than the change's.
+        /// </summary>
+        /// <param name="NotSaved">True where the file could not be written: see <see cref="TryRemove(String, out String?, out Boolean)"/>.</param>
+        public Boolean TryClearPassword(String                            Id,
+                                        [NotNullWhen(false)] out String?  Error,
+                                        out Boolean                       NotSaved)
+
             => TryClear(Id,
                         login => login.HasPassword,
                         login => login with { Password = null },
                         $"The charging station '{Id}' can no longer sign in with a password.",
                         $"The charging station '{Id}' has no password to take away.",
-                        out Error);
+                        out Error,
+                        out NotSaved);
 
         /// <summary>
         /// Take the one-time token away from a charging station, leaving
@@ -697,16 +796,28 @@ namespace cloud.charging.open.LocalController.OCPP
         public Boolean TryClearTOTP(String                            Id,
                                     [NotNullWhen(false)] out String?  Error)
 
+            => TryClearTOTP(Id, out Error, out _);
+
+        /// <summary>
+        /// Take the one-time token away from a charging station - and say
+        /// whether a refusal was the file's rather than the change's.
+        /// </summary>
+        /// <param name="NotSaved">True where the file could not be written: see <see cref="TryRemove(String, out String?, out Boolean)"/>.</param>
+        public Boolean TryClearTOTP(String                            Id,
+                                    [NotNullWhen(false)] out String?  Error,
+                                    out Boolean                       NotSaved)
+
             => TryClear(Id,
                         login => login.HasTOTP,
                         login => login with { TOTP = null },
                         $"The charging station '{Id}' can no longer sign in with a one-time token.",
                         $"The charging station '{Id}' has no TOTP configuration to take away.",
-                        out Error);
+                        out Error,
+                        out NotSaved);
 
         #endregion
 
-        #region TrySetEnabled(Id, Enabled, out Error)
+        #region TrySetEnabled(Id, Enabled, out Error [, out NotSaved])
 
         /// <summary>
         /// Let a charging station in, or stop letting it in, without throwing
@@ -715,9 +826,22 @@ namespace cloud.charging.open.LocalController.OCPP
         public Boolean TrySetEnabled(String                            Id,
                                      Boolean                           Enabled,
                                      [NotNullWhen(false)] out String?  Error)
+
+            => TrySetEnabled(Id, Enabled, out Error, out _);
+
+        /// <summary>
+        /// Let a charging station in, or stop letting it in - and say whether
+        /// a refusal was the file's rather than the change's.
+        /// </summary>
+        /// <param name="NotSaved">True where the file could not be written: see <see cref="TryRemove(String, out String?, out Boolean)"/>.</param>
+        public Boolean TrySetEnabled(String                            Id,
+                                     Boolean                           Enabled,
+                                     [NotNullWhen(false)] out String?  Error,
+                                     out Boolean                       NotSaved)
         {
 
-            Error = null;
+            Error     = null;
+            NotSaved  = false;
 
             lock (updateLock)
             {
@@ -735,7 +859,8 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 if (!TrySave(out Error))
                 {
-                    logins[Id] = login;
+                    NotSaved    = true;
+                    logins[Id]  = login;
                     return false;
                 }
 
@@ -756,16 +881,36 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region TryRemove(Id, out Error)
+        #region TryRemove(Id, out Error [, out NotSaved])
 
         /// <summary>
         /// Forget a charging station entirely.
         /// </summary>
         public Boolean TryRemove(String                            Id,
                                  [NotNullWhen(false)] out String?  Error)
+
+            => TryRemove(Id, out Error, out _);
+
+        /// <summary>
+        /// Forget a charging station entirely - and say whether a refusal was
+        /// the file's rather than the change's.
+        /// </summary>
+        /// <remarks>
+        /// Every change here says so, where it may be refused for two reasons
+        /// that are answered differently: something about it was wrong - no
+        /// such station, a password too short - or it was fine and the file
+        /// could not be written, the change put back as it was. The web
+        /// interface answered both with the 404 or 400 of the first, and a
+        /// disk that was full was a station "not found".
+        /// </remarks>
+        /// <param name="NotSaved">True where the file could not be written, and the change was undone.</param>
+        public Boolean TryRemove(String                            Id,
+                                 [NotNullWhen(false)] out String?  Error,
+                                 out Boolean                       NotSaved)
         {
 
-            Error = null;
+            Error     = null;
+            NotSaved  = false;
 
             lock (updateLock)
             {
@@ -780,7 +925,8 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 if (!TrySave(out Error))
                 {
-                    logins[Id] = login;
+                    NotSaved    = true;
+                    logins[Id]  = login;
                     return false;
                 }
 
@@ -1034,10 +1180,12 @@ namespace cloud.charging.open.LocalController.OCPP
                                   String?                                             GroupId,
                                   Func<ChargingStationLogin, ChargingStationLogin>    Change,
                                   Func<Boolean, String>                               Notice,
-                                  [NotNullWhen(false)] out String?                    Error)
+                                  [NotNullWhen(false)] out String?                    Error,
+                                  out Boolean                                         NotSaved)
         {
 
-            Error = null;
+            Error     = null;
+            NotSaved  = false;
 
             lock (updateLock)
             {
@@ -1079,6 +1227,8 @@ namespace cloud.charging.open.LocalController.OCPP
                 if (!TrySave(out Error))
                 {
 
+                    NotSaved = true;
+
                     if (existing is not null)
                         logins[Id] = existing;
                     else
@@ -1106,10 +1256,12 @@ namespace cloud.charging.open.LocalController.OCPP
                                  Func<ChargingStationLogin, ChargingStationLogin>  Change,
                                  String                                            Notice,
                                  String                                            NothingThere,
-                                 [NotNullWhen(false)] out String?                  Error)
+                                 [NotNullWhen(false)] out String?                  Error,
+                                 out Boolean                                       NotSaved)
         {
 
-            Error = null;
+            Error     = null;
+            NotSaved  = false;
 
             lock (updateLock)
             {
@@ -1130,7 +1282,8 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 if (!TrySave(out Error))
                 {
-                    logins[Id] = login;
+                    NotSaved    = true;
+                    logins[Id]  = login;
                     return false;
                 }
 
