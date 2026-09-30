@@ -73,7 +73,7 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region (private) NewKey(...) / Issue(...)
+        #region (private) NewKey(...) / Issue(...) / CutOff(...)
 
         /// <summary>
         /// A key and its signing request.
@@ -107,6 +107,25 @@ namespace cloud.charging.open.LocalController.Tests
 
             return id;
 
+        }
+
+        /// <summary>
+        /// The store's writes of a file with this in its name fail partway
+        /// through, as on a full disk: the file is there, with the beginning
+        /// of what was to go into it, and the write throws.
+        /// </summary>
+        private void CutOff(String Name, String Beginning)
+        {
+            store.BeforeWriting = path => {
+
+                if (!Path.GetFileName(path).Contains(Name, StringComparison.Ordinal))
+                    return;
+
+                File.WriteAllText(path, Beginning);
+
+                throw new IOException("There is not enough space on the disk.");
+
+            };
         }
 
         #endregion
@@ -621,6 +640,55 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region AKeyWhoseFilesCannotBeWrittenLeavesNothingBehind(Extension, Beginning)
+
+        /// <summary>
+        /// A key is three files - itself, its signing request and what is said
+        /// of it - and one that could not be written in full was left behind.
+        /// At the next start it was a key nobody had asked for, made "now", of
+        /// the default algorithm and for no subject, or one that could not be
+        /// read and said so at every start. Whichever of the three the disk
+        /// runs out in, nothing of the key stays, now or when the store is read
+        /// again.
+        /// </summary>
+        [TestCase("key.pem",  "-----BEGIN PRIVATE KEY-----")]
+        [TestCase("csr.pem",  "-----BEGIN CERTIFICATE REQUEST-----")]
+        [TestCase("json",     "{")]
+        public void AKeyWhoseFilesCannotBeWrittenLeavesNothingBehind(String Extension, String Beginning)
+        {
+
+            CutOff($".{Extension}", Beginning);
+
+            var made        = store.TryCreateKey("lc001.example.org", ReachableAs, null, out _, out _, out var error, out var notSaved);
+
+            store.BeforeWriting = null;
+
+            var keys        = store.Entries.Select(entry => entry.Id).ToArray();
+            var left        = Directory.GetFiles(directory).Select(Path.GetFileName).ToArray();
+
+            var said        = new List<String>();
+            store.OnNotice += (level, message) => said.Add($"{level}: {message}");
+
+            store.Reload();
+
+            Assert.Multiple(() => {
+
+                Assert.That(made,      Is.False);
+                Assert.That(notSaved,  Is.True);
+                Assert.That(error,     Does.StartWith($"The key could not be written to '{store.Path}': "));
+
+                Assert.That(keys,      Is.Empty,  "the keys");
+                Assert.That(left,      Is.Empty,  "what was left behind");
+
+                Assert.That(store.Entries.Select(entry => entry.Id), Is.Empty, "the keys, read again");
+                Assert.That(said,      Is.Empty,  "what reading them again said");
+
+            });
+
+        }
+
+        #endregion
+
         #region EverythingIsStillThereAfterARestart()
 
         /// <summary>
@@ -646,6 +714,107 @@ namespace cloud.charging.open.LocalController.Tests
                             "The certificate came back without the private key, so it cannot be used for TLS.");
                 Assert.That(entry.Intermediates.Count,    Is.EqualTo(1));
                 Assert.That(entry.CreatedAt,              Is.EqualTo(clock.Now));
+            });
+
+        }
+
+        #endregion
+
+        #region ARenewalTakesThePlaceOfTheCertificateBeforeIt()
+
+        /// <summary>
+        /// A certificate for a key that has one already - its renewal - takes
+        /// the place of the one before it, now and when the store is read
+        /// again, and nothing of how it was written is left beside it.
+        /// </summary>
+        [Test]
+        public void ARenewalTakesThePlaceOfTheCertificateBeforeIt()
+        {
+
+            using var ca       = TestCA.Create("Test CA");
+
+            var id             = Issue(ca, clock.Now.AddYears(-1), clock.Now.AddYears(1));
+
+            Assert.That(store.TryReadCSR(id, out var csr, out var csrError), Is.True, csrError);
+
+            using var renewal  = ca.Sign(csr!, clock.Now, clock.Now.AddYears(2));
+
+            Assert.That(store.TryAddCertificate(ca.ChainPEM(renewal), ReachableAs, out var taken, out _, out var error),
+                        Is.True, error);
+
+            var inEffect       = store.Entries.Single().Certificate?.Thumbprint;
+            var files          = Directory.GetFiles(directory).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray();
+
+            store.Reload();
+
+            Assert.Multiple(() => {
+
+                Assert.That(taken,     Is.EqualTo(id));
+                Assert.That(inEffect,  Is.EqualTo(renewal.Thumbprint),  "the certificate in effect");
+                Assert.That(files,     Is.EqualTo(new[] { $"{id}.cert.pem", $"{id}.csr.pem", $"{id}.json", $"{id}.key.pem" }),
+                                       "the files of the key");
+
+                Assert.That(store.Entries.SingleOrDefault(entry => entry.Id == id)?.Certificate?.Thumbprint,
+                            Is.EqualTo(renewal.Thumbprint),
+                            "the certificate, read again");
+
+            });
+
+        }
+
+        #endregion
+
+        #region ARenewalThatCannotBeWrittenKeepsTheCertificateBeforeIt()
+
+        /// <summary>
+        /// A renewal the disk runs out in halfway through is not taken in, and
+        /// the certificate before it is still the key's, now and when the store
+        /// is read again. It was cut off: the key went on presenting it until
+        /// the next start, and was not read at all then.
+        /// </summary>
+        [Test]
+        public void ARenewalThatCannotBeWrittenKeepsTheCertificateBeforeIt()
+        {
+
+            using var ca       = TestCA.Create("Test CA");
+
+            var id             = Issue(ca, clock.Now.AddYears(-1), clock.Now.AddYears(1));
+            var before         = store.Entries.Single().Certificate!.Thumbprint;
+
+            Assert.That(store.TryReadCSR(id, out var csr, out var csrError), Is.True, csrError);
+
+            using var renewal  = ca.Sign(csr!, clock.Now, clock.Now.AddYears(2));
+            var pem            = ca.ChainPEM(renewal);
+
+            // Its file, under whatever name it is written first.
+            CutOff($"{id}.cert.pem", pem[..(pem.Length / 2)]);
+
+            var taken          = store.TryAddCertificate(pem, ReachableAs, out _, out _, out var error, out var notSaved);
+
+            store.BeforeWriting = null;
+
+            var inEffect       = store.Entries.Single().Certificate?.Thumbprint;
+            var files          = Directory.GetFiles(directory).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray();
+
+            var said           = new List<String>();
+            store.OnNotice    += (level, message) => said.Add($"{level}: {message}");
+
+            store.Reload();
+
+            Assert.Multiple(() => {
+
+                Assert.That(taken,     Is.False);
+                Assert.That(notSaved,  Is.True);
+                Assert.That(error,     Does.StartWith($"The certificate could not be written to '{store.Path}': "));
+
+                Assert.That(inEffect,  Is.EqualTo(before),  "the certificate in effect");
+                Assert.That(files,     Is.EqualTo(new[] { $"{id}.cert.pem", $"{id}.csr.pem", $"{id}.json", $"{id}.key.pem" }),
+                                       "the files of the key");
+
+                Assert.That(store.Entries.SingleOrDefault(entry => entry.Id == id)?.Certificate?.Thumbprint,
+                            Is.EqualTo(before),
+                            $"the certificate, read again: {String.Join(" | ", said)}");
+
             });
 
         }

@@ -186,6 +186,19 @@ namespace cloud.charging.open.LocalController.OCPP
             }
         }
 
+        /// <summary>
+        /// Called with the full path of every file this store writes, just
+        /// before it is written.
+        /// </summary>
+        /// <remarks>
+        /// For the tests, and for nothing else: they make a write fail there,
+        /// or fail partway through as on a full disk. Nothing on the outside of
+        /// this store can: a key is named after its public key, so no test can
+        /// put something in the way of its files beforehand, and no test can
+        /// make a write stop halfway.
+        /// </remarks>
+        internal Action<String>? BeforeWriting { get; set; }
+
         #endregion
 
         #region Events
@@ -453,17 +466,18 @@ namespace cloud.charging.open.LocalController.OCPP
 
                     CreateDirectory();
 
-                    OwnerOnlyFile.Write(
+                    WriteFile(
                         FilePath(id, "key.pem"),
                         PemEncoding.WriteString(
                             "PRIVATE KEY",
                             PrivateKeyInfoFactory.CreatePrivateKeyInfo(pair.Private).GetDerEncoded()
-                        ) + Environment.NewLine
+                        ) + Environment.NewLine,
+                        OwnerOnly: true
                     );
 
-                    File.WriteAllText(FilePath(id, "csr.pem"), csr);
+                    WriteFile(FilePath(id, "csr.pem"), csr);
 
-                    File.WriteAllText(
+                    WriteFile(
                         FilePath(id, "json"),
                         new JObject(
                             new JProperty("id",         id),
@@ -477,9 +491,19 @@ namespace cloud.charging.open.LocalController.OCPP
                 }
                 catch (Exception e)
                 {
+
                     Error     = $"The key could not be written to '{Path}': {e.Message}";
                     NotSaved  = true;
+
+                    // Not left behind half made: a key whose request or whose
+                    // description was not written in full was read at the next
+                    // start as a key nobody had asked for - made "now", of the
+                    // default algorithm and for no subject - or could not be
+                    // read, and said so at every start.
+                    Forget(id, "key.pem", "csr.pem", "json");
+
                     return false;
+
                 }
 
                 #endregion
@@ -580,7 +604,7 @@ namespace cloud.charging.open.LocalController.OCPP
         /// signing requests - and say whether a refusal was the file's rather
         /// than the certificate's.
         /// </summary>
-        /// <param name="NotSaved">True where the certificate could not be written: nothing about it was wrong, and it was not taken in.</param>
+        /// <param name="NotSaved">True where the certificate could not be written: nothing about it was wrong, it was not taken in, and one it was to replace is still the key's, now and at the next start.</param>
         public Boolean TryAddCertificate(String                              PEM,
                                          IEnumerable<String>                 ReachableAs,
                                          [NotNullWhen(true)]  out String?    Id,
@@ -691,14 +715,26 @@ namespace cloud.charging.open.LocalController.OCPP
                                       Select(certificate => PemEncoding.WriteString("CERTIFICATE", certificate.RawData))
                               ) + Environment.NewLine;
 
-                    File.WriteAllText(FilePath(leafId, "cert.pem"), pem);
+                    // Beside the certificate it replaces, and moved over it in
+                    // one step: written in its place, a renewal the disk ran
+                    // out in cut the one before it off, and at the next start
+                    // the key was not read at all.
+                    WriteFile(FilePath(leafId, "cert.pem.tmp"), pem);
+
+                    File.Move(FilePath(leafId, "cert.pem.tmp"), FilePath(leafId, "cert.pem"), overwrite: true);
 
                 }
                 catch (Exception e)
                 {
+
                     Error     = $"The certificate could not be written to '{Path}': {e.Message}";
                     NotSaved  = true;
+
+                    // What was written of it, beside the one it was to replace.
+                    Forget(leafId, "cert.pem.tmp");
+
                     return false;
+
                 }
 
                 #endregion
@@ -1441,7 +1477,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region (private) FilePath / Known / CreateDirectory
+        #region (private) FilePath / Known / CreateDirectory / WriteFile
 
         private String FilePath(String Id, String Extension)
             => System.IO.Path.Combine(Path, $"{Id}.{Extension}");
@@ -1470,6 +1506,51 @@ namespace cloud.charging.open.LocalController.OCPP
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
                 );
 
+        }
+
+        /// <summary>
+        /// One file of this store written, readable by its owner alone where
+        /// that is asked for - past <see cref="BeforeWriting"/> first.
+        /// </summary>
+        private void WriteFile(String   Target,
+                               String   Content,
+                               Boolean  OwnerOnly = false)
+        {
+
+            BeforeWriting?.Invoke(Target);
+
+            if (OwnerOnly)
+                OwnerOnlyFile.Write(Target, Content);
+
+            else
+                File.WriteAllText(Target, Content);
+
+        }
+
+        #endregion
+
+        #region (private) Forget(Id, params Extensions)
+
+        /// <summary>
+        /// Take the files of one key that were written for something that did
+        /// not go in away again - as far as that goes: one that cannot be
+        /// taken away either is left where it is.
+        /// </summary>
+        private void Forget(String Id, params String[] Extensions)
+        {
+            foreach (var extension in Extensions)
+            {
+                try
+                {
+                    var file = FilePath(Id, extension);
+                    if (File.Exists(file))
+                        File.Delete(file);
+                }
+                catch (Exception)
+                {
+                    // Left where it is, see above.
+                }
+            }
         }
 
         #endregion

@@ -412,6 +412,13 @@ the status of a refusal, and a full disk was a station "not found". What was
 wrong with a change is answered as it was; the node's own routes answer the
 same way.
 
+A key whose files could not all be written - itself, its signing request and
+its description - is taken away again as well, rather than read at the next
+start as a key nobody asked for. A certificate is written beside the one it
+replaces and moved over it, so that a renewal the disk runs out in leaves the
+one before it whole: written in its place, it cut that one off, and at the next
+start the key was not read at all.
+
 
 ## Who may open it
 
