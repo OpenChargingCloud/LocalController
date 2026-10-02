@@ -513,17 +513,36 @@ namespace cloud.charging.open.LocalController
         /// Stop listening, let go of what is this controller's own, and then
         /// of the rest.
         /// </summary>
+        /// <remarks>
+        /// Let go of even where stopping fails, which is thrown on afterwards:
+        /// a controller whose stop threw used to keep its certificate stores,
+        /// and everything of the node below, its log file among it.
+        /// </remarks>
         public override async ValueTask DisposeAsync()
         {
 
-            // Stopped here as well as below: the stores may not go before the
-            // station server that reads them has.
-            await Stop();
+            try
+            {
 
-            ServerCertificates?.Dispose();
-            ClientTrust?       .Dispose();
+                // Stopped here as well as below: the stores may not go before
+                // the station server that reads them has.
+                await Stop();
 
-            await base.DisposeAsync();
+            }
+            finally
+            {
+
+                try
+                {
+                    ServerCertificates?.Dispose();
+                    ClientTrust?       .Dispose();
+                }
+                finally
+                {
+                    await base.DisposeAsync();
+                }
+
+            }
 
         }
 
