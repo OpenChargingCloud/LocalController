@@ -17,6 +17,7 @@
 
 #region Usings
 
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
@@ -55,9 +56,11 @@ namespace cloud.charging.open.LocalController.Tests
     /// that has run out. None of that can be tested against a real authority,
     /// which will only ever issue certificates valid from today.
     ///
-    /// Everything here is thrown away with the test. Nothing is written
-    /// anywhere a real certificate would be looked for, and none of these keys
-    /// leaves the process.
+    /// Everything here is thrown away with the test, and none of these keys
+    /// leaves the process. Nothing here writes anywhere a real certificate
+    /// would be looked for - but .NET itself does, on Windows, as soon as a
+    /// TLS context is built from one of these chains; so disposing an
+    /// authority also takes it out of the Windows certificate stores again.
     /// </remarks>
     internal sealed class TestCA : IDisposable
     {
@@ -123,11 +126,18 @@ namespace cloud.charging.open.LocalController.Tests
                        AsymmetricKeyParameter  IssuerKey,
                        KeyAlgorithm            Algorithm)
         {
+
             this.Certificate   = Certificate;
             this.Intermediate  = Intermediate;
             this.issuer        = Issuer;
             this.issuerKey     = IssuerKey;
             this.algorithm     = Algorithm;
+
+            madeInThisRun.TryAdd(Certificate.Thumbprint, 0);
+
+            if (Intermediate is not null)
+                madeInThisRun.TryAdd(Intermediate.Thumbprint, 0);
+
         }
 
         #endregion
@@ -372,12 +382,96 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region (static) RemoveFromWindowsStore(Thumbprints) / RemoveAllFromWindowsStore()
+
+        /// <summary>
+        /// The thumbprints of every authority made in this run, for the sweep
+        /// at its end.
+        /// </summary>
+        private static readonly ConcurrentDictionary<String, Byte> madeInThisRun = new();
+
+        /// <summary>
+        /// Take these certificates out of the Windows stores of intermediate
+        /// authorities, where .NET may have put them on its own.
+        /// </summary>
+        /// <remarks>
+        /// <b>.NET writes test authorities into the user's certificate store,
+        /// and never takes them out.</b> On Windows, building a TLS context
+        /// (SslStreamCertificateContext) for a chain the OS cannot complete
+        /// adds the chain's intermediates to LocalMachine\CA, or to
+        /// CurrentUser\CA where that is not writable - and the last
+        /// certificate as well, a root included, if the chain is still
+        /// incomplete afterwards. Every test that serves or presents a
+        /// certificate of a new authority leaves one or two behind, and with a
+        /// name of their own per run they never replace each other: the store
+        /// had grown to almost 4,000 certificates. Each load of it costs about
+        /// 0.14 ms CPU per certificate, and every TLS handshake on the machine
+        /// loads it at least once, so they had come to take seconds.
+        ///
+        /// Both stores, each on its own: which one .NET chose depends on
+        /// whether the run has administrator rights, which a build server's
+        /// usually does. A store that cannot be opened for writing holds
+        /// nothing of ours. Removing a certificate that is not there is
+        /// nothing at all.
+        /// </remarks>
+        private static void RemoveFromWindowsStore(IEnumerable<String> Thumbprints)
+        {
+
+            if (!OperatingSystem.IsWindows())
+                return;
+
+            var thumbprints = Thumbprints.ToArray();
+
+            if (thumbprints.Length == 0)
+                return;
+
+            foreach (var location in new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine })
+            {
+                try
+                {
+
+                    using var store = new X509Store(StoreName.CertificateAuthority, location);
+                    store.Open(OpenFlags.ReadWrite | OpenFlags.OpenExistingOnly);
+
+                    foreach (var thumbprint in thumbprints)
+                        foreach (var found in store.Certificates.Find(X509FindType.FindByThumbprint, thumbprint, validOnly: false))
+                        {
+                            store.Remove(found);
+                            found.Dispose();
+                        }
+
+                }
+                catch (CryptographicException)
+                { }
+            }
+
+        }
+
+        /// <summary>
+        /// Take every authority of this run out of the Windows stores again,
+        /// including those of a test whose teardown never ran.
+        /// </summary>
+        /// <remarks>
+        /// NUnit skips a teardown when its setup has thrown, and a setup that
+        /// started a controller may have had a TLS context built by then.
+        /// </remarks>
+        public static void RemoveAllFromWindowsStore()
+            => RemoveFromWindowsStore(madeInThisRun.Keys);
+
+        #endregion
+
         #region Dispose()
 
         public void Dispose()
         {
+
+            RemoveFromWindowsStore(Intermediate is null
+                                       ? [ Certificate.Thumbprint ]
+                                       : [ Certificate.Thumbprint, Intermediate.Thumbprint ]);
+
             Certificate .Dispose();
             Intermediate?.Dispose();
+
         }
 
         #endregion
