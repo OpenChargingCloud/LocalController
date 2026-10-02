@@ -81,10 +81,10 @@ namespace cloud.charging.open.LocalController.Tests
             upstreamDirectory  = TestControllers.TemporaryDirectory("csms-upstream");
             Directory.CreateDirectory(upstreamDirectory);
 
-            csmsPort           = TestPorts.Free();
-            upstream           = ACSMS(upstreamDirectory, csmsPort);
-
-            await upstream.Start();
+            // On fresh ports, both of them, wherever one was taken before it
+            // could be bound - as it was once, by another test run on the same
+            // machine, for the web interface of the controller below.
+            upstream           = await TestPorts.StartedOnFreshPorts(() => ACSMS(upstreamDirectory, csmsPort = TestPorts.Free()));
 
             downstreamDirectory = TestControllers.TemporaryDirectory("csms-downstream");
             Directory.CreateDirectory(downstreamDirectory);
@@ -295,9 +295,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task TheControllerSignsInToTheCSMS()
         {
 
-            downstream = AControllerThatDials();
-
-            await downstream.Start();
+            downstream = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials());
 
             Assert.Multiple(() => {
                 Assert.That(downstream.CSMSEnabled,         Is.True);
@@ -320,9 +318,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task TheCSMSSeesItArrive()
         {
 
-            downstream = AControllerThatDials();
-
-            await downstream.Start();
+            downstream = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials());
 
             Assert.That(downstream.CSMSConnected, Is.True, downstream.CSMSLastProblem);
 
@@ -339,9 +335,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AWrongPasswordIsRefusedAndSaidSo()
         {
 
-            downstream = AControllerThatDials(Password: "not-the-password-at-all");
-
-            await downstream.Start();
+            downstream = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(Password: "not-the-password-at-all"));
 
             Assert.Multiple(() => {
 
@@ -372,9 +366,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task WithoutCredentialsItDoesNotEvenDial()
         {
 
-            downstream = AControllerThatDials(Username: null, Password: null);
-
-            await downstream.Start();
+            downstream = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(Username: null, Password: null));
 
             Assert.Multiple(() => {
                 Assert.That(downstream.CSMSConnected,    Is.False);
@@ -391,9 +383,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task SwitchedOffItDialsNothing()
         {
 
-            downstream = AControllerThatDials(Enabled: false);
-
-            await downstream.Start();
+            downstream = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(Enabled: false));
 
             Assert.Multiple(() => {
                 Assert.That(downstream.CSMSEnabled,      Is.False);
@@ -419,10 +409,8 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ProfileThreeSaysWhatIsMissingRatherThanFailingAtTheOtherEnd()
         {
 
-            downstream = AControllerThatDials(SecurityProfile:  3,
-                                              URL:              $"wss://127.0.0.1:{csmsPort}");
-
-            await downstream.Start();
+            downstream = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(SecurityProfile:  3,
+                                                                                        URL:              $"wss://127.0.0.1:{csmsPort}"));
 
             Assert.Multiple(() => {
                 Assert.That(downstream.CSMSConnected,    Is.False);
@@ -444,9 +432,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task WhatThePageIsShownCarriesNoPassword()
         {
 
-            downstream = AControllerThatDials();
-
-            await downstream.Start();
+            downstream = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials());
 
             var shown = downstream.CSMSConfigurationJSON();
 
@@ -489,11 +475,9 @@ namespace cloud.charging.open.LocalController.Tests
             using var reservation  = APortWhereNothingAnswers(out var laterPort);
             var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
 
-            downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
-                                                       DialsAgainQuickly:  true);
-
             var took            = System.Diagnostics.Stopwatch.StartNew();
-            await downstream.Start();
+            downstream          = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
+                                                                                                 DialsAgainQuickly:  true));
             took.Stop();
 
             Assert.Multiple(() => {
@@ -522,15 +506,16 @@ namespace cloud.charging.open.LocalController.Tests
                             "A line that was never up is said to have been lost.");
             });
 
-            var later           = ACSMS(laterDirectory, laterPort);
-
             try
             {
 
-                // Let go at the last moment, so that the CSMS has the port.
+                // Let go at the last moment, so that the CSMS has the port. Its
+                // web interface goes on a fresh port should the one it is handed
+                // be taken: the port dialled is the station port, which stays.
                 reservation.Dispose();
 
-                await later.Start();
+                await using var later = await TestPorts.StartedOnFreshPorts(() => ACSMS(laterDirectory, laterPort));
+
                 await UntilItIsBack(later);
 
                 Assert.That(later.StationServer?.WebSocketConnections.Count(),  Is.GreaterThan(0),
@@ -546,7 +531,6 @@ namespace cloud.charging.open.LocalController.Tests
             }
             finally
             {
-                await later.DisposeAsync();
                 TestControllers.Remove(laterDirectory);
             }
 
@@ -570,9 +554,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ACSMSThatRestartsIsReachedAgain()
         {
 
-            downstream    = AControllerThatDials(DialsAgainQuickly: true);
-
-            await downstream.Start();
+            downstream    = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(DialsAgainQuickly: true));
 
             Assert.That(downstream.CSMSConnected, Is.True, downstream.CSMSLastProblem);
 
@@ -581,10 +563,9 @@ namespace cloud.charging.open.LocalController.Tests
             await upstream.DisposeAsync();
 
             // The same CSMS again, from the same directory and on the same port:
-            // what a restart is.
-            upstream      = ACSMS(upstreamDirectory, csmsPort);
-
-            await upstream.Start();
+            // what a restart is. Its web interface on a fresh port, should the
+            // one it is handed be taken.
+            upstream      = await TestPorts.StartedOnFreshPorts(() => ACSMS(upstreamDirectory, csmsPort));
             await UntilItIsBack(upstream);
 
             Assert.That(upstream.StationServer?.WebSocketConnections.Count(),  Is.GreaterThan(0),
@@ -621,25 +602,22 @@ namespace cloud.charging.open.LocalController.Tests
             using var reservation  = APortWhereNothingAnswers(out var laterPort);
             var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
 
-            downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
-                                                       DialsAgainQuickly:  true);
-
-            await downstream.Start();
+            downstream          = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
+                                                                                                 DialsAgainQuickly:  true));
 
             Assert.That(downstream.CSMSLastProblem, Does.Contain("dialled again by itself"),
                         "The controller does not go on dialling, so this test tests nothing.");
 
             await downstream.Stop();
 
-            var later           = ACSMS(laterDirectory, laterPort);
-
             try
             {
 
-                // Let go at the last moment, so that the CSMS has the port.
+                // Let go at the last moment, so that the CSMS has the port - and
+                // its web interface on a fresh one, should that be taken.
                 reservation.Dispose();
 
-                await later.Start();
+                await using var later = await TestPorts.StartedOnFreshPorts(() => ACSMS(laterDirectory, laterPort));
 
                 // More than twice the longest wait between two attempts.
                 await Task.Delay(TimeSpan.FromSeconds(5));
@@ -650,7 +628,6 @@ namespace cloud.charging.open.LocalController.Tests
             }
             finally
             {
-                await later.DisposeAsync();
                 TestControllers.Remove(laterDirectory);
             }
 
@@ -674,9 +651,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ACSMSThatRestartsAndRefusesIsNotSaidToBeTriedAgain()
         {
 
-            downstream  = AControllerThatDials(DialsAgainQuickly: true);
-
-            await downstream.Start();
+            downstream  = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(DialsAgainQuickly: true));
 
             Assert.That(downstream.CSMSConnected, Is.True, downstream.CSMSLastProblem);
 
@@ -685,9 +660,7 @@ namespace cloud.charging.open.LocalController.Tests
             await upstream.DisposeAsync();
 
             // The same CSMS again, with another password for this controller.
-            upstream    = ACSMS(upstreamDirectory, csmsPort, AnotherPassword);
-
-            await upstream.Start();
+            upstream    = await TestPorts.StartedOnFreshPorts(() => ACSMS(upstreamDirectory, csmsPort, AnotherPassword));
             await UntilItHasGivenUp(client);
 
             Assert.Multiple(() => {
@@ -716,24 +689,23 @@ namespace cloud.charging.open.LocalController.Tests
             using var reservation  = APortWhereNothingAnswers(out var laterPort);
             var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
 
-            downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
-                                                       DialsAgainQuickly:  true);
-
-            await downstream.Start();
+            downstream          = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
+                                                                                                 DialsAgainQuickly:  true));
 
             Assert.That(downstream.CSMSLastProblem, Does.Contain("dialled again by itself"),
                         "The controller does not go on dialling, so this test tests nothing.");
 
             var client          = TheClientOf(downstream);
-            var later           = ACSMS(laterDirectory, laterPort, AnotherPassword);
 
             try
             {
 
-                // Let go at the last moment, so that the CSMS has the port.
+                // Let go at the last moment, so that the CSMS has the port - and
+                // its web interface on a fresh one, should that be taken.
                 reservation.Dispose();
 
-                await later.Start();
+                await using var later = await TestPorts.StartedOnFreshPorts(() => ACSMS(laterDirectory, laterPort, AnotherPassword));
+
                 await UntilItHasGivenUp(client);
 
                 Assert.Multiple(() => {
@@ -747,7 +719,6 @@ namespace cloud.charging.open.LocalController.Tests
             }
             finally
             {
-                await later.DisposeAsync();
                 TestControllers.Remove(laterDirectory);
             }
 
@@ -772,15 +743,18 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ACSMSStillStartingIsNotSaidToHaveRefused()
         {
 
-            var laterPort       = TestPorts.Free();
             var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
             var answered        = 0;
 
             // Something on the port that answers every upgrade with 503, as a
-            // reverse proxy does while the CSMS behind it is still starting.
-            var proxy           = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, laterPort);
+            // reverse proxy does while the CSMS behind it is still starting -
+            // on a port the system chooses as it binds it, so that nobody can
+            // have taken it first.
+            var proxy           = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
 
             proxy.Start();
+
+            var laterPort       = (UInt16) ((System.Net.IPEndPoint) proxy.LocalEndpoint).Port;
 
             var answering       = Task.Run(async () => {
 
@@ -825,13 +799,11 @@ namespace cloud.charging.open.LocalController.Tests
 
                                   });
 
-            downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
-                                                       DialsAgainQuickly:  true);
-
             try
             {
 
-                await downstream.Start();
+                downstream      = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
+                                                                                                 DialsAgainQuickly:  true));
 
                 var client      = TheClientOf(downstream);
                 var giveUp      = DateTimeOffset.UtcNow + BackWithin;
@@ -855,13 +827,13 @@ namespace cloud.charging.open.LocalController.Tests
                 await answering;
             }
 
-            // And once the CSMS itself is there, on the same port.
-            var later           = ACSMS(laterDirectory, laterPort);
-
+            // And once the CSMS itself is there, on the same port - its web
+            // interface on a fresh one, should the one it is handed be taken.
             try
             {
 
-                await later.Start();
+                await using var later = await TestPorts.StartedOnFreshPorts(() => ACSMS(laterDirectory, laterPort));
+
                 await UntilItIsBack(later);
 
                 Assert.Multiple(() => {
@@ -873,7 +845,6 @@ namespace cloud.charging.open.LocalController.Tests
             }
             finally
             {
-                await later.DisposeAsync();
                 TestControllers.Remove(laterDirectory);
             }
 
@@ -898,10 +869,8 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var reservation  = APortWhereNothingAnswers(out var laterPort);
 
-            downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
-                                                       DialsAgainQuickly:  true);
-
-            await downstream.Start();
+            downstream          = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
+                                                                                                 DialsAgainQuickly:  true));
 
             Assert.That(downstream.CSMSLastProblem, Does.Contain("dialled again by itself"),
                         "The controller does not go on dialling, so this test tests nothing.");
@@ -1022,16 +991,18 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ACSMSThatNeverAnswersIsDialledAgain()
         {
 
-            var laterPort       = TestPorts.Free();
             var laterDirectory  = TestControllers.TemporaryDirectory("csms-later");
 
             // Something on the port that takes the connection and the upgrade,
-            // and never says a word.
+            // and never says a word - on a port the system chooses as it binds
+            // it, so that nobody can have taken it first.
             var accepted        = 0;
             var held            = new List<System.Net.Sockets.TcpClient>();
-            var silent          = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, laterPort);
+            var silent          = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
 
             silent.Start();
+
+            var laterPort       = (UInt16) ((System.Net.IPEndPoint) silent.LocalEndpoint).Port;
 
             var listening       = Task.Run(async () => {
 
@@ -1058,14 +1029,12 @@ namespace cloud.charging.open.LocalController.Tests
 
                                   });
 
-            downstream          = AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
-                                                       DialsAgainQuickly:  true);
-
             try
             {
 
                 var took        = System.Diagnostics.Stopwatch.StartNew();
-                await downstream.Start();
+                downstream      = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
+                                                                                                 DialsAgainQuickly:  true));
                 took.Stop();
 
                 // Long enough for the first attempt to be given up and another
@@ -1096,13 +1065,13 @@ namespace cloud.charging.open.LocalController.Tests
 
             }
 
-            // And once something on the port answers.
-            var later           = ACSMS(laterDirectory, laterPort);
-
+            // And once something on the port answers - a CSMS, its web
+            // interface on a fresh port should the one it is handed be taken.
             try
             {
 
-                await later.Start();
+                await using var later = await TestPorts.StartedOnFreshPorts(() => ACSMS(laterDirectory, laterPort));
+
                 await UntilItIsBack(later);
 
                 Assert.Multiple(() => {
@@ -1114,7 +1083,6 @@ namespace cloud.charging.open.LocalController.Tests
             }
             finally
             {
-                await later.DisposeAsync();
                 TestControllers.Remove(laterDirectory);
             }
 
