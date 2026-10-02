@@ -33,6 +33,7 @@ using cloud.charging.open.protocols.WWCP.Node;
 using cloud.charging.open.protocols.WWCP.Node.Logging;
 using cloud.charging.open.protocols.WWCP.Node.Certificates;
 using cloud.charging.open.protocols.WWCP.Node.Configuration;
+using cloud.charging.open.protocols.WWCP.Node.SecureShell;
 
 using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.LocalController.Web;
@@ -223,6 +224,7 @@ namespace cloud.charging.open.LocalController
         /// <param name="LogPath">The directory the log files are written to, or null to write none.</param>
         /// <param name="BridgeDebugLog">Whether what the libraries below write with DebugX ends up in the log.</param>
         /// <param name="TimeProvider">Where this controller reads the time; the system clock by default.</param>
+        /// <param name="SSH">What the program says about serving the command line over SSH; nothing by default - see SSHSettings.</param>
         public LocalController(DNSClient?             DNSClient          = null,
                                NTSClient?             NTSClient          = null,
                                HTTPServer?            HTTPServer         = null,
@@ -241,7 +243,8 @@ namespace cloud.charging.open.LocalController
                                LogLevel               ConsoleLogLevel    = LogLevel.Info,
                                String?                LogPath            = null,
                                Boolean                BridgeDebugLog     = true,
-                               TimeProvider?          TimeProvider       = null)
+                               TimeProvider?          TimeProvider       = null,
+                               SSHSettings?           SSH                = null)
 
             : base(Kind:               LocalControllerKind,
                    Version:            typeof(LocalController).Assembly.GetName().Version?.ToString(3) ?? "0.0.0",
@@ -267,7 +270,8 @@ namespace cloud.charging.open.LocalController
                    LogPath:            LogPath,
                    BridgeDebugLog:     BridgeDebugLog,
                    TraceTags:          TraceTags,
-                   TimeProvider:       TimeProvider)
+                   TimeProvider:       TimeProvider,
+                   SSH:                SSH)
 
         {
 
