@@ -583,7 +583,13 @@ namespace cloud.charging.open.LocalController.Tests
 
             Issue(ca, clock.Now.AddYears(-1), clock.Now.AddYears(1));
 
-            Assert.That(store.Select(), Is.SameAs(store.Select()));
+            var first   = store.Select();
+            var second  = store.Select();
+
+            Assert.Multiple(() => {
+                Assert.That(first,   Is.Not.Null);
+                Assert.That(second,  Is.SameAs(first));
+            });
 
         }
 

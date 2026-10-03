@@ -154,6 +154,8 @@ namespace cloud.charging.open.LocalController.Tests
 
             controller = null;
 
+            console.Dispose();
+
             TestControllers.Remove(directory);
 
         }
