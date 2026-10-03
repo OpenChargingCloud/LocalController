@@ -102,7 +102,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                  )
                                              );
 
-                var problem = Assert.ThrowsAsync<PortUnavailableException>(controller.Start);
+                var problem = await Assert.ThrowsAsync<PortUnavailableException>(controller.Start);
 
                 Assert.Multiple(() => {
 
