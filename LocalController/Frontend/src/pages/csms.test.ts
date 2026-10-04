@@ -5,7 +5,7 @@
  * and one refused keeps what is typed and says why.
  */
 
-import { asked, field, open, refused, settled, submit, until, type Asked } from '../../test/controller.ts';
+import { asked, field, open, refused, said, settled, submit, type, until, type Asked } from '../../test/controller.ts';
 
 import { strict as assert }  from 'node:assert';
 import { describe, it }      from 'node:test';
@@ -134,6 +134,32 @@ describe('the CSMS page', () => {
         assert.equal(field(root, '#credentials-form', 'password').value,          '', 'the secret saved is still in the form');
         assert.equal(field(root, '#credentials-form', 'username').value,          'lc001');
         assert.equal(field(root, '#credentials-form', 'username').defaultValue,   'lc001');
+
+    });
+
+});
+
+
+describe('the Reload of the CSMS page', () => {
+
+    // Whether it asks where nothing is typed is not asked here: happy-dom
+    // takes the security profile's choice for one somebody made, as it keeps
+    // no defaultSelected. In Chrome it asks nothing then.
+    it('asks before it throws away what is typed, and then asks the controller again', async () => {
+
+        const root = await opened();
+
+        type(field(root, '#credentials-form', 'username'), 'lc001');
+
+        const before = asked.length;
+
+        root.querySelector<HTMLButtonElement>('.page-actions #reload')!.click();
+
+        await until(() => asked.slice(before).some(one => one.method === 'GET' && one.path === '/configuration/csms'),
+                    'the controller was not asked again');
+
+        assert.equal(said.length, 1, `asked ${said.length} times before the typed username was thrown away`);
+        assert.match(said[0]!, /not been told about/);
 
     });
 
