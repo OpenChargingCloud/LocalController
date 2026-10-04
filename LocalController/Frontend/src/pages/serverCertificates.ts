@@ -1,12 +1,12 @@
 import { api, type OCPPServerConfiguration, type ServerCertificate, type ServerCertificates } from '../api/client';
 import { auth } from '../auth';
-import { html, must, render, type HTMLFragment } from '@node/html';
-import { keepDrafts } from '@node/drafts';
+import { html as stringHTML, must } from '@node/html';
 import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
 import { mayButNot, shell } from '@node/shell';
 import { errorMessage, field, formatTimestamp } from '@node/ui';
 import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
+import { html, nothing, render, repeat, type TemplateResult } from '@node/view';
 
 /**
  * The certificates this local controller presents to the charging stations.
@@ -20,6 +20,9 @@ import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
  * There is no way to upload a private key, and saying so on the page is
  * deliberate: the key is made here and never leaves, and somebody looking for
  * the button should find the reason instead.
+ *
+ * Drawn by view.ts: a draw changes only what differs, so that a certificate
+ * pasted under one key outlives another key being made or removed.
  */
 export const serverCertificatesPage: Page = {
 
@@ -31,7 +34,7 @@ export const serverCertificatesPage: Page = {
             active:    '/configuration/ocpp-server/certificates',
             title:     'Server certificates',
             subtitle:  'What this local controller presents to the charging stations, and what takes over when it runs out.',
-            actions:   html`<button type="button" id="reload" class="btn small">Reload</button>`
+            actions:   stringHTML`<button type="button" id="reload" class="btn small">Reload</button>`
         });
 
         render(content, html`<div class="loading">Loading ...</div>`);
@@ -53,24 +56,31 @@ export const serverCertificatesPage: Page = {
         /** The request that was just made, offered for download straight away. */
         let justMade: { id: string; csr: string } | null = null;
 
+        /**
+         * The kind of key chosen, whose remark the form shows - or undefined
+         * while it is the one drawn as chosen.
+         */
+        let algorithmChosen: string | undefined;
+
 
         function draw(): void {
 
             if (store === null || server === null)
                 return;
 
-            const certificates = store;
-            const configuration = server;
+            const certificates   = store;
+            const configuration  = server;
+            const kindOfKey      = algorithmChosen ?? 'ecdsa-p256';
 
             render(content, html`
 
-                ${mayManage ? '' : html`
+                ${mayManage ? nothing : html`
                     <div class="notice">
                         ${mayButNot('look at the certificates', 'make or replace them')}
                     </div>
                 `}
 
-                ${configuration.reachableAs.length > 0 ? '' : html`
+                ${configuration.reachableAs.length > 0 ? nothing : html`
                     <div class="notice warn">
                         This local controller has not been told what it is
                         <a href="${toURL('/configuration/ocpp-server')}">reachable as</a>. A signing request without those names
@@ -84,20 +94,21 @@ export const serverCertificatesPage: Page = {
 
                         <h2><i class="fa-solid fa-key"></i> Make a signing request</h2>
 
-                        <form id="create-form" class="form-stack">
+                        <form id="create-form" class="form-stack" @submit=${create}>
 
                             <label>Subject
                                 <input type="text" name="subject" maxlength="200"
                                        value="${configuration.reachableAs[0] ?? ''}"
                                        placeholder="lc001.example.org"
-                                       ${mayManage ? '' : html`disabled`} />
+                                       ?disabled=${!mayManage} />
                             </label>
 
                             <label>Key
-                                <select name="algorithm" id="algorithm" ${mayManage ? '' : html`disabled`}>
+                                <select name="algorithm" id="algorithm" ?disabled=${!mayManage}
+                                        @change=${(event: Event) => { algorithmChosen = (event.target as HTMLSelectElement).value; draw(); }}>
                                     ${certificates.algorithms.map(algorithm => html`
                                         <option value="${algorithm.id}"
-                                                ${algorithm.id === 'ecdsa-p256' ? html`selected` : ''}>
+                                                ?selected=${algorithm.id === 'ecdsa-p256'}>
                                             ${algorithm.name}${algorithm.presentable === false ? ' - not servable here' : ''}
                                         </option>
                                     `)}
@@ -105,7 +116,7 @@ export const serverCertificatesPage: Page = {
                             </label>
 
                             <span class="hint" id="algorithm-remark">
-                                ${certificates.algorithms.find(algorithm => algorithm.id === 'ecdsa-p256')?.remark ?? ''}
+                                ${certificates.algorithms.find(one => one.id === kindOfKey)?.remark ?? ''}
                             </span>
 
                             <div class="notice">
@@ -126,7 +137,7 @@ export const serverCertificatesPage: Page = {
 
                             <div class="form-actions">
                                 <button type="submit" class="btn primary"
-                                        ${mayManage && configuration.reachableAs.length > 0 ? '' : html`disabled`}>
+                                        ?disabled=${!mayManage || configuration.reachableAs.length === 0}>
                                     Generate a key and a request
                                 </button>
                                 <span id="create-error" class="form-error" role="alert"></span>
@@ -140,7 +151,7 @@ export const serverCertificatesPage: Page = {
 
                         </form>
 
-                        ${justMade === null ? '' : html`
+                        ${justMade === null ? nothing : html`
                             <div class="notice ok">
                                 <strong>The request for '${justMade.id}' is ready.</strong>
                                 <a class="btn small" href="${api.ocppServer.certificates.csrURL(justMade.id)}" download>
@@ -164,19 +175,17 @@ export const serverCertificatesPage: Page = {
 
                         ${certificates.entries.length === 0
                               ? html`<p class="muted">No key has been made yet.</p>`
-                              : certificates.entries.map(entry => entryCard(entry))}
+                              : repeat(certificates.entries, entry => entry.id, entry => entryCard(entry))}
 
                     </section>
 
                 </div>
             `);
 
-            wire();
-
         }
 
 
-        function entryCard(entry: ServerCertificate): HTMLFragment {
+        function entryCard(entry: ServerCertificate): TemplateResult {
 
             const certificate = entry.certificate;
 
@@ -187,17 +196,17 @@ export const serverCertificatesPage: Page = {
                         <div>
                             <code>${entry.id}</code>
                             <span class="badge">${entry.algorithm}</span>
-                            ${entry.inUse ? html`<span class="badge ok">being presented</span>` : ''}
-                            ${certificate ? html`<span class="badge ${stateClass(certificate.state)}">${certificate.state}</span>` : ''}
-                            ${certificate ? '' : html`<span class="badge warn">waiting for a certificate</span>`}
-                            ${entry.canBePresented ? '' : html`<span class="badge warn">not servable here</span>`}
+                            ${entry.inUse ? html`<span class="badge ok">being presented</span>` : nothing}
+                            ${certificate ? html`<span class="badge ${stateClass(certificate.state)}">${certificate.state}</span>` : nothing}
+                            ${certificate ? nothing : html`<span class="badge warn">waiting for a certificate</span>`}
+                            ${entry.canBePresented ? nothing : html`<span class="badge warn">not servable here</span>`}
                         </div>
                         <div class="entry-actions">
                             <a class="btn small" href="${api.ocppServer.certificates.csrURL(entry.id)}" download>
                                 Signing request
                             </a>
                             <button type="button" class="btn small danger remove" data-id="${entry.id}"
-                                    ${mayManage ? '' : html`disabled`}>
+                                    ?disabled=${!mayManage} @click=${() => void remove(entry.id)}>
                                 Remove
                             </button>
                         </div>
@@ -236,20 +245,20 @@ export const serverCertificatesPage: Page = {
 
                             <dt>Thumbprint</dt>
                             <dd><code class="small">${certificate.thumbprint}</code></dd>
-                        ` : ''}
+                        ` : nothing}
                     </dl>
 
-                    ${entry.warnings.length === 0 ? '' : html`
+                    ${entry.warnings.length === 0 ? nothing : html`
                         <div class="notice warn">
                             <ul>${entry.warnings.map(warning => html`<li>${warning}</li>`)}</ul>
                         </div>
                     `}
 
-                    <form class="form-stack upload-form" data-id="${entry.id}">
+                    <form class="form-stack upload-form" data-id="${entry.id}" @submit=${(event: SubmitEvent) => void upload(entry.id, event)}>
 
                         <label>${certificate ? 'Replace this certificate' : 'The certificate that answers this request'}
                             <textarea name="pem" rows="5" placeholder="-----BEGIN CERTIFICATE-----&#10;..."
-                                      ${mayManage ? '' : html`disabled`}></textarea>
+                                      ?disabled=${!mayManage}></textarea>
                         </label>
 
                         <span class="hint">
@@ -260,7 +269,7 @@ export const serverCertificatesPage: Page = {
                         </span>
 
                         <div class="form-actions">
-                            <button type="submit" class="btn primary" ${mayManage ? '' : html`disabled`}>Take it in</button>
+                            <button type="submit" class="btn primary" ?disabled=${!mayManage}>Take it in</button>
                             <span class="form-error upload-error" role="alert"></span>
                         </div>
 
@@ -272,54 +281,18 @@ export const serverCertificatesPage: Page = {
         }
 
 
-        /**
-         * The remark on the kind of key chosen - after a drawing anew as well,
-         * which may have put back another choice than the one it drew the
-         * remark for.
-         */
-        function showRemark(): void {
+        function create(event: SubmitEvent): void {
 
-            const chooser = content.querySelector<HTMLSelectElement>('#algorithm');
-            const remark  = content.querySelector<HTMLElement>('#algorithm-remark');
+            event.preventDefault();
 
-            if (chooser && remark)
-                remark.textContent = store?.algorithms.find(algorithm => algorithm.id === chooser.value)?.remark ?? '';
+            const form = event.currentTarget as HTMLFormElement;
+
+            void makeKey(form, field(form, 'subject'), field(form, 'algorithm'));
 
         }
 
 
-        function wire(): void {
-
-            if (!mayManage)
-                return;
-
-            content.querySelector<HTMLSelectElement>('#algorithm')?.addEventListener('change', showRemark);
-
-            must<HTMLFormElement>(content, '#create-form').addEventListener('submit', event => {
-
-                event.preventDefault();
-
-                const form = event.target as HTMLFormElement;
-
-                void create(field(form, 'subject'), field(form, 'algorithm'));
-
-            });
-
-            content.querySelectorAll<HTMLFormElement>('.upload-form').forEach(form => {
-                form.addEventListener('submit', event => {
-                    event.preventDefault();
-                    void upload(form.dataset.id ?? '', field(form, 'pem', false), form);
-                });
-            });
-
-            content.querySelectorAll<HTMLButtonElement>('.remove').forEach(button => {
-                button.addEventListener('click', () => void remove(button.dataset.id ?? ''));
-            });
-
-        }
-
-
-        async function create(subject: string, algorithm: string): Promise<void> {
+        async function makeKey(form: HTMLFormElement, subject: string, algorithm: string): Promise<void> {
 
             const error = must<HTMLElement>(content, '#create-error');
             error.textContent = '';
@@ -332,10 +305,15 @@ export const serverCertificatesPage: Page = {
                 if (cancelled)
                     return;
 
-                justMade = made;
-                store    = await api.ocppServer.certificates.get();
+                justMade         = made;
+                store            = await api.ocppServer.certificates.get();
+                algorithmChosen  = undefined;
 
-                keepDrafts(content, 'create-form', draw);
+                draw();
+
+                // A draw leaves a form as it is typed into; this one was made
+                // into a request, so it goes back to what it starts with.
+                form.reset();
 
             }
             catch (problem)
@@ -347,9 +325,13 @@ export const serverCertificatesPage: Page = {
         }
 
 
-        async function upload(id: string, pem: string, form: HTMLFormElement): Promise<void> {
+        async function upload(id: string, event: SubmitEvent): Promise<void> {
 
-            const error = form.querySelector<HTMLElement>('.upload-error');
+            event.preventDefault();
+
+            const form   = event.currentTarget as HTMLFormElement;
+            const pem    = field(form, 'pem', false);
+            const error  = form.querySelector<HTMLElement>('.upload-error');
 
             if (error)
                 error.textContent = '';
@@ -366,8 +348,11 @@ export const serverCertificatesPage: Page = {
                 store    = await api.ocppServer.certificates.get();
                 server   = await api.ocppServer.get();
 
-                keepDrafts(content, id, draw);
-                showRemark();
+                draw();
+
+                // Taken in: this key's form is emptied, and every other one
+                // keeps what is pasted into it.
+                form.reset();
 
                 if (answer.warnings.length > 0)
                     window.alert(`The certificate was taken in, with something to say about it:\n\n${answer.warnings.join('\n\n')}`);
@@ -398,8 +383,7 @@ export const serverCertificatesPage: Page = {
                 justMade = null;
                 server   = await api.ocppServer.get();
 
-                keepDrafts(content, null, draw);
-                showRemark();
+                draw();
 
             }
             catch (problem)
@@ -426,8 +410,9 @@ export const serverCertificatesPage: Page = {
                 if (cancelled)
                     return;
 
-                store  = certificates;
-                server = configuration;
+                store            = certificates;
+                server           = configuration;
+                algorithmChosen  = undefined;
 
                 draw();
 

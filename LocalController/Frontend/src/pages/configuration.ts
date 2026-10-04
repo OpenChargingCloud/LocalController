@@ -1,9 +1,10 @@
 import { api } from '../api/client';
 import { card, librariesCard } from '@node/cards';
-import { html, must, render } from '@node/html';
+import { html as stringHTML, must } from '@node/html';
 import type { Page } from '@node/router';
 import { shell } from '@node/shell';
 import { errorMessage, formatSince, formatValue } from '@node/ui';
+import { html, render } from '@node/view';
 
 /**
  * What this local controller is made of - read-only: it answers "what am I
@@ -26,7 +27,7 @@ export const configurationPage: Page = {
             active:    '/configuration',
             title:     'Configuration',
             subtitle:  'What this local controller is made of.',
-            actions:   html`<button type="button" id="reload" class="btn small">Reload</button>`
+            actions:   stringHTML`<button type="button" id="reload" class="btn small">Reload</button>`
         });
 
         render(content, html`<div class="loading">Loading ...</div>`);
@@ -53,7 +54,7 @@ export const configurationPage: Page = {
 
                     <div class="cards">
 
-                        ${card('Local controller', 'fa-sitemap', configuration.controller, html`
+                        ${card('Local controller', 'fa-sitemap', configuration.controller, stringHTML`
                             <div class="kv">
                                 <span class="k">Uptime</span>
                                 <span class="v">${status.uptime} <span class="muted">(started ${formatSince(status.startedAt)})</span></span>

@@ -1,12 +1,12 @@
 import { api, type AuthMethod, type LoginGroup, type StationLogin, type StationLogins } from '../api/client';
 import { auth } from '../auth';
-import { html, must, render, type HTMLFragment } from '@node/html';
-import { keepDrafts } from '@node/drafts';
+import { html as stringHTML, must } from '@node/html';
 import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
 import { mayButNot, shell } from '@node/shell';
 import { errorMessage, field, formatTimestamp } from '@node/ui';
 import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
+import { html, keyed, live, nothing, render, repeat, type TemplateResult } from '@node/view';
 
 /**
  * Who may sign in to the charging station server, with what, and under which
@@ -18,6 +18,10 @@ import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
  * from, but it is still never put into the list this page reads. So both are
  * handed out at the moment they are set and never again, and the page says so
  * where somebody would otherwise go looking for them.
+ *
+ * Drawn by view.ts: a draw changes only what differs, so that a station half
+ * typed into the form below the list outlives a group being saved, or a
+ * station switched off, moved or removed - and so does its focus.
  */
 export const stationLoginsPage: Page = {
 
@@ -29,7 +33,7 @@ export const stationLoginsPage: Page = {
             active:    '/configuration/ocpp-server/logins',
             title:     'Logins and groups',
             subtitle:  'Which charging stations may sign in, with what, and what their group allows them.',
-            actions:   html`<button type="button" id="reload" class="btn small">Reload</button>`
+            actions:   stringHTML`<button type="button" id="reload" class="btn small">Reload</button>`
         });
 
         render(content, html`<div class="loading">Loading ...</div>`);
@@ -39,7 +43,7 @@ export const stationLoginsPage: Page = {
         // asks first.
         must<HTMLButtonElement>(root, '#reload').addEventListener('click', () => {
             if (unsaved.mayBeLost())
-                void load();
+                void reload();
         });
 
         const mayChange = auth.can('stations', 'edit');
@@ -63,13 +67,13 @@ export const stationLoginsPage: Page = {
 
             render(content, html`
 
-                ${mayChange ? '' : html`
+                ${mayChange ? nothing : html`
                     <div class="notice">
                         ${mayButNot('look at the logins', 'change them')}
                     </div>
                 `}
 
-                ${justMade === null ? '' : html`
+                ${justMade === null ? nothing : html`
                     <div class="notice ok">
                         <strong>The ${justMade.what} of '${justMade.id}' is</strong>
                         <code class="password">${justMade.secret}</code><br />
@@ -84,13 +88,11 @@ export const stationLoginsPage: Page = {
                 </div>
             `);
 
-            wire();
-
         }
 
 
         // What a group allows its members, said once for a whole site.
-        function groupsCard(logins: StationLogins): HTMLFragment {
+        function groupsCard(logins: StationLogins): TemplateResult {
 
             return html`
                 <section class="card wide">
@@ -117,17 +119,19 @@ export const stationLoginsPage: Page = {
                                 </tr>
                             </thead>
                             <tbody>
-                                ${logins.groups.map(group => groupRow(group))}
+                                ${repeat(logins.groups, group => group.id, group => groupRow(group))}
                             </tbody>
                         </table>
                     </div>
 
-                    ${editing === null ? '' : groupForm(logins.groups.find(group => group.id === editing) ?? null)}
+                    ${editing === null
+                          ? nothing
+                          : keyed(editing, groupForm(logins.groups.find(group => group.id === editing) ?? null))}
 
-                    ${editing !== null || !mayChange ? '' : html`
+                    ${editing !== null || !mayChange ? nothing : html`
                         <div class="form-actions">
                             <button type="button" id="group-new" class="btn"
-                                    ${logins.groups.length >= logins.maxGroups ? html`disabled` : ''}>
+                                    ?disabled=${logins.groups.length >= logins.maxGroups} @click=${() => openGroup('')}>
                                 Make a group
                             </button>
                         </div>
@@ -139,14 +143,14 @@ export const stationLoginsPage: Page = {
         }
 
 
-        function groupRow(group: LoginGroup): HTMLFragment {
+        function groupRow(group: LoginGroup): TemplateResult {
 
             return html`
                 <tr class="${group.enabled ? '' : 'dimmed'}">
 
                     <td>
                         <code>${group.id}</code>
-                        ${group.builtIn ? html`<span class="badge">built in</span>` : ''}
+                        ${group.builtIn ? html`<span class="badge">built in</span>` : nothing}
                         <div class="small muted">${group.name}${group.note ? ` - ${group.note}` : ''}</div>
                     </td>
 
@@ -168,11 +172,12 @@ export const stationLoginsPage: Page = {
 
                     <td class="right">
                         <button type="button" class="btn small group-edit" data-id="${group.id}"
-                                ${mayChange ? '' : html`disabled`}>
+                                ?disabled=${!mayChange} @click=${() => openGroup(group.id)}>
                             Settings
                         </button>
                         <button type="button" class="btn small danger group-remove" data-id="${group.id}"
-                                ${mayChange && !group.builtIn && group.members === 0 ? '' : html`disabled`}>
+                                ?disabled=${!mayChange || group.builtIn || group.members !== 0}
+                                @click=${() => void removeGroup(group.id)}>
                             Remove
                         </button>
                     </td>
@@ -185,20 +190,20 @@ export const stationLoginsPage: Page = {
 
         // Making a group and changing one are the same form; a new one simply
         // starts empty and lets the identification be typed.
-        function groupForm(group: LoginGroup | null): HTMLFragment {
+        function groupForm(group: LoginGroup | null): TemplateResult {
 
             const ticked = (method: AuthMethod) => group?.authMethods.includes(method) ?? true;
             const onProfile = (profile: number) => group?.securityProfiles.includes(profile) ?? true;
 
             return html`
-                <form id="group-form" class="form-stack" data-id="${group?.id ?? ''}">
+                <form id="group-form" class="form-stack" data-id="${group?.id ?? ''}" @submit=${saveGroup}>
 
                     <h3>${group === null ? 'A new group' : `The group '${group.id}'`}</h3>
 
-                    ${group !== null ? '' : html`
+                    ${group !== null ? nothing : html`
                         <label>Identification
                             <input type="text" name="id" placeholder="field-test" maxlength="32" required
-                                   pattern="[a-z0-9-]+" />
+                                   pattern="[a-z0-9\\-]+" />
                             <span class="hint">Lower-case letters, digits and hyphens.</span>
                         </label>
                     `}
@@ -215,15 +220,15 @@ export const stationLoginsPage: Page = {
                     <fieldset>
                         <legend>Ways in it accepts</legend>
                         <label class="check">
-                            <input type="checkbox" name="basic" ${ticked('basic') ? html`checked` : ''} />
+                            <input type="checkbox" name="basic" ?checked=${ticked('basic')} />
                             <span>A password (HTTP Basic Authentication)</span>
                         </label>
                         <label class="check">
-                            <input type="checkbox" name="totp" ${ticked('totp') ? html`checked` : ''} />
+                            <input type="checkbox" name="totp" ?checked=${ticked('totp')} />
                             <span>A one-time token (HTTP TOTP Authentication)</span>
                         </label>
                         <label class="check">
-                            <input type="checkbox" name="certificate" ${ticked('certificate') ? html`checked` : ''} />
+                            <input type="checkbox" name="certificate" ?checked=${ticked('certificate')} />
                             <span>A TLS client certificate</span>
                         </label>
                     </fieldset>
@@ -231,27 +236,27 @@ export const stationLoginsPage: Page = {
                     <fieldset>
                         <legend>OCPP security profiles it accepts</legend>
                         <label class="check">
-                            <input type="checkbox" name="profile1" ${onProfile(1) ? html`checked` : ''} />
+                            <input type="checkbox" name="profile1" ?checked=${onProfile(1)} />
                             <span>1 - a password on an unencrypted port</span>
                         </label>
                         <label class="check">
-                            <input type="checkbox" name="profile2" ${onProfile(2) ? html`checked` : ''} />
+                            <input type="checkbox" name="profile2" ?checked=${onProfile(2)} />
                             <span>2 - a password over TLS</span>
                         </label>
                         <label class="check">
-                            <input type="checkbox" name="profile3" ${onProfile(3) ? html`checked` : ''} />
+                            <input type="checkbox" name="profile3" ?checked=${onProfile(3)} />
                             <span>3 - a TLS client certificate</span>
                         </label>
                     </fieldset>
 
                     <label class="switch">
-                        <input type="checkbox" name="enabled" ${group?.enabled ?? true ? html`checked` : ''} />
+                        <input type="checkbox" name="enabled" ?checked=${group?.enabled ?? true} />
                         <span>Its members may sign in</span>
                     </label>
 
                     <div class="form-actions">
                         <button type="submit" class="btn primary">Save the group</button>
-                        <button type="button" id="group-cancel" class="btn">Cancel</button>
+                        <button type="button" id="group-cancel" class="btn" @click=${() => { editing = null; draw(); }}>Cancel</button>
                         <span id="group-error" class="form-error" role="alert"></span>
                     </div>
 
@@ -262,7 +267,7 @@ export const stationLoginsPage: Page = {
 
 
         // Who may sign in, and with what.
-        function loginsCard(logins: StationLogins): HTMLFragment {
+        function loginsCard(logins: StationLogins): TemplateResult {
 
             return html`
                 <section class="card wide">
@@ -293,29 +298,29 @@ export const stationLoginsPage: Page = {
                                           </tr>
                                       </thead>
                                       <tbody>
-                                          ${logins.stations.map(station => loginRow(station, logins))}
+                                          ${repeat(logins.stations, station => station.id, station => loginRow(station, logins))}
                                       </tbody>
                                   </table>
                               </div>
                           `}
 
-                    <form id="station-form" class="form-row">
+                    <form id="station-form" class="form-row" @submit=${addStation}>
 
                         <label>Identification
                             <input type="text" name="id" placeholder="cs001" maxlength="48"
-                                   ${mayChange ? '' : html`disabled`} required />
+                                   ?disabled=${!mayChange} required />
                         </label>
 
                         <label>What it is
                             <input type="text" name="note" placeholder="Ladepunkt 1" maxlength="200"
-                                   ${mayChange ? '' : html`disabled`} />
+                                   ?disabled=${!mayChange} />
                         </label>
 
                         <label>Group
-                            <select name="group" ${mayChange ? '' : html`disabled`}>
+                            <select name="group" ?disabled=${!mayChange}>
                                 ${logins.groups.map(group => html`
                                     <option value="${group.id}"
-                                            ${group.id === logins.defaultGroup ? html`selected` : ''}>
+                                            ?selected=${group.id === logins.defaultGroup}>
                                         ${group.name}
                                     </option>
                                 `)}
@@ -325,11 +330,11 @@ export const stationLoginsPage: Page = {
                         <label>Password
                             <input type="text" name="password" placeholder="leave empty to make one up"
                                    minlength="${logins.minPasswordLength}" maxlength="64"
-                                   ${mayChange ? '' : html`disabled`} />
+                                   ?disabled=${!mayChange} />
                         </label>
 
                         <div class="form-actions">
-                            <button type="submit" class="btn primary" ${mayChange ? '' : html`disabled`}>
+                            <button type="submit" class="btn primary" ?disabled=${!mayChange}>
                                 Add or change
                             </button>
                             <span id="station-error" class="form-error" role="alert"></span>
@@ -343,7 +348,7 @@ export const stationLoginsPage: Page = {
         }
 
 
-        function loginRow(station: StationLogin, logins: StationLogins): HTMLFragment {
+        function loginRow(station: StationLogin, logins: StationLogins): TemplateResult {
 
             const group = logins.groups.find(one => one.id === station.group);
 
@@ -360,32 +365,34 @@ export const stationLoginsPage: Page = {
                     <td>${station.note ?? '-'}</td>
 
                     <td>
-                        <select class="station-group" data-id="${station.id}" ${mayChange ? '' : html`disabled`}>
-                            ${logins.groups.map(one => html`
-                                <option value="${one.id}" ${one.id === station.group ? html`selected` : ''}>
+                        <select class="station-group" data-id="${station.id}" ?disabled=${!mayChange}
+                                .value=${live(station.group)}
+                                @change=${(event: Event) => void move(station.id, (event.target as HTMLSelectElement).value)}>
+                            ${repeat(logins.groups, one => one.id, one => html`
+                                <option value="${one.id}" ?selected=${one.id === station.group}>
                                     ${one.name}
                                 </option>
                             `)}
                         </select>
-                        ${group?.enabled === false ? html`<div class="small warn">the group is switched off</div>` : ''}
+                        ${group?.enabled === false ? html`<div class="small warn">the group is switched off</div>` : nothing}
                     </td>
 
                     <td>
                         ${station.hasPassword
                               ? html`<span class="badge ${usable('basic') ? '' : 'warn'}">password</span> `
-                              : ''}
+                              : nothing}
                         ${station.hasTOTP
                               ? html`<span class="badge ${usable('totp') ? '' : 'warn'}">token</span> `
-                              : ''}
+                              : nothing}
                         ${!station.hasPassword && !station.hasTOTP
                               ? html`<span class="badge">certificate only</span>`
-                              : ''}
+                              : nothing}
                         ${station.totp
                               ? html`<div class="small muted">
                                          ${station.totp.length} characters of ${station.totp.hashAlgorithm},
                                          every ${station.totp.validitySeconds}s
                                      </div>`
-                              : ''}
+                              : nothing}
                     </td>
 
                     <td class="small muted">${formatTimestamp(station.addedAt)}</td>
@@ -393,31 +400,32 @@ export const stationLoginsPage: Page = {
                     <td>
                         <label class="switch small">
                             <input type="checkbox" class="station-enabled" data-id="${station.id}"
-                                   ${station.enabled ? html`checked` : ''}
-                                   ${mayChange ? '' : html`disabled`} />
+                                   .checked=${live(station.enabled)}
+                                   ?disabled=${!mayChange}
+                                   @change=${(event: Event) => void enable(station.id, (event.target as HTMLInputElement).checked)} />
                             <span>${station.enabled ? 'yes' : 'no'}</span>
                         </label>
                     </td>
 
                     <td class="right">
                         <button type="button" class="btn small station-totp" data-id="${station.id}"
-                                ${mayChange ? '' : html`disabled`}>
+                                ?disabled=${!mayChange} @click=${() => void giveAToken(station.id)}>
                             ${station.hasTOTP ? 'New token secret' : 'Give it a token'}
                         </button>
                         ${station.hasTOTP ? html`
                             <button type="button" class="btn small station-totp-remove" data-id="${station.id}"
-                                    ${mayChange ? '' : html`disabled`}>
+                                    ?disabled=${!mayChange} @click=${() => void dropToken(station.id)}>
                                 Drop token
                             </button>
-                        ` : ''}
+                        ` : nothing}
                         ${station.hasPassword ? html`
                             <button type="button" class="btn small station-password-remove" data-id="${station.id}"
-                                    ${mayChange ? '' : html`disabled`}>
+                                    ?disabled=${!mayChange} @click=${() => void dropPassword(station.id)}>
                                 Drop password
                             </button>
-                        ` : ''}
+                        ` : nothing}
                         <button type="button" class="btn small danger station-remove" data-id="${station.id}"
-                                ${mayChange ? '' : html`disabled`}>
+                                ?disabled=${!mayChange} @click=${() => void removeStation(station.id)}>
                             Remove
                         </button>
                     </td>
@@ -428,65 +436,24 @@ export const stationLoginsPage: Page = {
         }
 
 
-        function wire(): void {
-
-            content.querySelectorAll<HTMLButtonElement>('.group-edit').forEach(button => {
-                button.addEventListener('click', () => { editing = button.dataset.id ?? null; keepDrafts(content, null, draw); });
-            });
-
-            const makeOne = content.querySelector<HTMLButtonElement>('#group-new');
-            makeOne?.addEventListener('click', () => { editing = ''; keepDrafts(content, null, draw); });
-
-            const cancel = content.querySelector<HTMLButtonElement>('#group-cancel');
-            cancel?.addEventListener('click', () => { editing = null; keepDrafts(content, null, draw); });
-
-            content.querySelector<HTMLFormElement>('#group-form')?.addEventListener('submit', event => {
-                event.preventDefault();
-                void saveGroup(event.target as HTMLFormElement);
-            });
-
-            content.querySelectorAll<HTMLButtonElement>('.group-remove').forEach(button => {
-                button.addEventListener('click', () => void removeGroup(button.dataset.id ?? ''));
-            });
-
-            if (!mayChange)
-                return;
-
-            must<HTMLFormElement>(content, '#station-form').addEventListener('submit', event => {
-                event.preventDefault();
-                const form = event.target as HTMLFormElement;
-                void addStation(field(form, 'id'), field(form, 'password', false),
-                                field(form, 'group'), field(form, 'note', false));
-            });
-
-            content.querySelectorAll<HTMLInputElement>('.station-enabled').forEach(box => {
-                box.addEventListener('change', () => void enable(box.dataset.id ?? '', box.checked));
-            });
-
-            content.querySelectorAll<HTMLSelectElement>('.station-group').forEach(chooser => {
-                chooser.addEventListener('change', () => void move(chooser.dataset.id ?? '', chooser.value));
-            });
-
-            content.querySelectorAll<HTMLButtonElement>('.station-totp').forEach(button => {
-                button.addEventListener('click', () => void giveAToken(button.dataset.id ?? ''));
-            });
-
-            content.querySelectorAll<HTMLButtonElement>('.station-totp-remove').forEach(button => {
-                button.addEventListener('click', () => void dropToken(button.dataset.id ?? ''));
-            });
-
-            content.querySelectorAll<HTMLButtonElement>('.station-password-remove').forEach(button => {
-                button.addEventListener('click', () => void dropPassword(button.dataset.id ?? ''));
-            });
-
-            content.querySelectorAll<HTMLButtonElement>('.station-remove').forEach(button => {
-                button.addEventListener('click', () => void removeStation(button.dataset.id ?? ''));
-            });
-
+        /**
+         * Open a group's settings - or a new group's, for ''. Drawn with
+         * keyed(), the form for another group is another form, and does not
+         * keep what was typed into the one open before.
+         */
+        function openGroup(id: string): void {
+            editing = id;
+            draw();
         }
 
 
-        async function saveGroup(form: HTMLFormElement): Promise<void> {
+        function saveGroup(event: SubmitEvent): void {
+            event.preventDefault();
+            void tellGroup(event.currentTarget as HTMLFormElement);
+        }
+
+
+        async function tellGroup(form: HTMLFormElement): Promise<void> {
 
             const error = content.querySelector<HTMLElement>('#group-error');
 
@@ -524,7 +491,7 @@ export const stationLoginsPage: Page = {
                     return;
 
                 editing = null;
-                keepDrafts(content, 'group-form', draw);
+                draw();
 
             }
             catch (problem)
@@ -546,7 +513,19 @@ export const stationLoginsPage: Page = {
         }
 
 
-        async function addStation(id: string, password: string, group: string, note: string): Promise<void> {
+        function addStation(event: SubmitEvent): void {
+
+            event.preventDefault();
+
+            const form = event.currentTarget as HTMLFormElement;
+
+            void tellStation(form, field(form, 'id'), field(form, 'password', false),
+                             field(form, 'group'), field(form, 'note', false));
+
+        }
+
+
+        async function tellStation(form: HTMLFormElement, id: string, password: string, group: string, note: string): Promise<void> {
 
             const error = must<HTMLElement>(content, '#station-error');
             error.textContent = '';
@@ -564,7 +543,11 @@ export const stationLoginsPage: Page = {
                                 ? null
                                 : { id, what: 'password', secret: answer.password };
 
-                keepDrafts(content, 'station-form', draw);
+                draw();
+
+                // A draw leaves a form as it is typed into; this station was
+                // added, so the form is emptied for the next.
+                form.reset();
 
             }
             catch (problem)
@@ -599,7 +582,7 @@ export const stationLoginsPage: Page = {
                                 ? null
                                 : { id, what: 'TOTP shared secret', secret: answer.sharedSecret };
 
-                keepDrafts(content, null, draw);
+                draw();
 
             }
             catch (problem)
@@ -662,7 +645,7 @@ export const stationLoginsPage: Page = {
                 store     = answer;
                 justMade  = null;
 
-                keepDrafts(content, null, draw);
+                draw();
 
             }
             catch (problem)
@@ -670,7 +653,9 @@ export const stationLoginsPage: Page = {
                 if (!cancelled)
                 {
                     window.alert(errorMessage(problem));
-                    void load(true);
+                    // A switch or a chooser goes back to what the controller
+                    // has, which a draw puts right.
+                    void load();
                 }
             }
 
@@ -678,14 +663,11 @@ export const stationLoginsPage: Page = {
 
 
         /**
-         * The logins as the local controller has them now: drawn from nothing -
-         * or, keeping, drawn anew over the page as it is, what is typed on it
-         * kept, after something done on it failed.
+         * The logins as the local controller has them now, drawn over the page
+         * as it is - what is typed into its forms kept, as a draw keeps it.
+         * Reload empties them itself.
          */
-        async function load(keeping = false): Promise<void> {
-
-            if (!keeping)
-                render(content, html`<div class="loading">Loading ...</div>`);
+        async function load(): Promise<void> {
 
             try
             {
@@ -697,10 +679,7 @@ export const stationLoginsPage: Page = {
 
                 store = logins;
 
-                if (keeping)
-                    keepDrafts(content, null, draw);
-                else
-                    draw();
+                draw();
 
             }
             catch (problem)
@@ -708,6 +687,20 @@ export const stationLoginsPage: Page = {
                 if (!cancelled)
                     render(content, html`<div class="error-box">${errorMessage(problem)}</div>`);
             }
+
+        }
+
+
+        /**
+         * Loaded anew - Reload - is what the controller has, the forms too,
+         * which a draw on its own would leave as typed.
+         */
+        async function reload(): Promise<void> {
+
+            await load();
+
+            if (!cancelled)
+                content.querySelectorAll('form').forEach(form => form.reset());
 
         }
 

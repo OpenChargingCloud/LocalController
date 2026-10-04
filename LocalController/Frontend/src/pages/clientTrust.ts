@@ -1,12 +1,12 @@
 import { api, type ClientTrust, type OCPPServerConfiguration, type TrustedChain } from '../api/client';
 import { auth } from '../auth';
-import { html, must, render, type HTMLFragment } from '@node/html';
-import { keepDrafts } from '@node/drafts';
+import { html as stringHTML, must } from '@node/html';
 import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
 import { mayButNot, shell } from '@node/shell';
 import { errorMessage, field, formatTimestamp } from '@node/ui';
 import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
+import { html, live, nothing, render, repeat, type TemplateResult } from '@node/view';
 
 /**
  * Which chains a charging station's own certificate may lead to - the other
@@ -19,6 +19,9 @@ import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
  * station that this controller would then believe. A charging station is
  * vouched for by whoever runs the charging network, and that is a list with one
  * or two entries on it.
+ *
+ * Drawn by view.ts: a draw changes only what differs, so that an authority
+ * half pasted into the form outlives a chain switched off or removed.
  */
 export const clientTrustPage: Page = {
 
@@ -30,7 +33,7 @@ export const clientTrustPage: Page = {
             active:    '/configuration/ocpp-server/trust',
             title:     'Accepted chains',
             subtitle:  'Which certificate authorities a charging station may be vouched for by.',
-            actions:   html`<button type="button" id="reload" class="btn small">Reload</button>`
+            actions:   stringHTML`<button type="button" id="reload" class="btn small">Reload</button>`
         });
 
         render(content, html`<div class="loading">Loading ...</div>`);
@@ -60,14 +63,14 @@ export const clientTrustPage: Page = {
 
             render(content, html`
 
-                ${mayManage ? '' : html`
+                ${mayManage ? nothing : html`
                     <div class="notice">
                         ${mayButNot('look at the accepted chains', 'change them')} Whoever may add one can let
                         in a charging station that nobody issued a password to.
                     </div>
                 `}
 
-                ${configuration.securityProfiles.includes(3) ? '' : html`
+                ${configuration.securityProfiles.includes(3) ? nothing : html`
                     <div class="notice">
                         <a href="${toURL('/configuration/ocpp-server')}">Security profile 3</a> is not allowed at the moment,
                         so nothing here is being used: no charging station is asked for a certificate.
@@ -79,7 +82,7 @@ export const clientTrustPage: Page = {
                         Security profile 3 is allowed and no chain is accepted, so no charging station can connect
                         with a certificate. An empty list is "nobody", not "everybody".
                     </div>
-                ` : ''}
+                ` : nothing}
 
                 <div class="cards">
 
@@ -87,16 +90,16 @@ export const clientTrustPage: Page = {
 
                         <h2><i class="fa-solid fa-plus"></i> Accept another</h2>
 
-                        <form id="add-form" class="form-stack">
+                        <form id="add-form" class="form-stack" @submit=${add}>
 
                             <label>What to call it
                                 <input type="text" name="name" maxlength="100"
-                                       placeholder="Our charging network" ${mayManage ? '' : html`disabled`} />
+                                       placeholder="Our charging network" ?disabled=${!mayManage} />
                             </label>
 
                             <label>The certificate authority
                                 <textarea name="pem" rows="6" placeholder="-----BEGIN CERTIFICATE-----&#10;..."
-                                          ${mayManage ? '' : html`disabled`}></textarea>
+                                          ?disabled=${!mayManage}></textarea>
                             </label>
 
                             <span class="hint">
@@ -107,7 +110,7 @@ export const clientTrustPage: Page = {
                             </span>
 
                             <div class="form-actions">
-                                <button type="submit" class="btn primary" ${mayManage ? '' : html`disabled`}>Accept it</button>
+                                <button type="submit" class="btn primary" ?disabled=${!mayManage}>Accept it</button>
                                 <span id="add-error" class="form-error" role="alert"></span>
                             </div>
 
@@ -126,19 +129,17 @@ export const clientTrustPage: Page = {
 
                         ${store.entries.length === 0
                               ? html`<p class="muted">No certificate authority has been named yet.</p>`
-                              : store.entries.map(entry => entryCard(entry))}
+                              : repeat(store.entries, entry => entry.id, entry => entryCard(entry))}
 
                     </section>
 
                 </div>
             `);
 
-            wire();
-
         }
 
 
-        function entryCard(entry: TrustedChain): HTMLFragment {
+        function entryCard(entry: TrustedChain): TemplateResult {
 
             return html`
                 <div class="entry ${entry.enabled ? '' : 'dimmed'}">
@@ -148,17 +149,18 @@ export const clientTrustPage: Page = {
                             <strong>${entry.name}</strong>
                             <code class="small">${entry.id}</code>
                             <span class="badge ${entry.state === 'valid' ? 'ok' : 'warn'}">${entry.state}</span>
-                            ${entry.isCA ? '' : html`<span class="badge warn">not an authority</span>`}
+                            ${entry.isCA ? nothing : html`<span class="badge warn">not an authority</span>`}
                         </div>
                         <div class="entry-actions">
                             <label class="switch small">
                                 <input type="checkbox" class="trust-enabled" data-id="${entry.id}"
-                                       ${entry.enabled ? html`checked` : ''}
-                                       ${mayManage ? '' : html`disabled`} />
+                                       .checked=${live(entry.enabled)}
+                                       ?disabled=${!mayManage}
+                                       @change=${(event: Event) => void setEnabled(entry.id, (event.target as HTMLInputElement).checked)} />
                                 <span>${entry.enabled ? 'accepted' : 'switched off'}</span>
                             </label>
                             <button type="button" class="btn small danger trust-remove" data-id="${entry.id}"
-                                    ${mayManage ? '' : html`disabled`}>
+                                    ?disabled=${!mayManage} @click=${() => void remove(entry.id)}>
                                 Remove
                             </button>
                         </div>
@@ -189,7 +191,7 @@ export const clientTrustPage: Page = {
                         <dd><code class="small">${entry.thumbprint}</code></dd>
                     </dl>
 
-                    ${entry.warnings.length === 0 ? '' : html`
+                    ${entry.warnings.length === 0 ? nothing : html`
                         <div class="notice warn">
                             <ul>${entry.warnings.map(warning => html`<li>${warning}</li>`)}</ul>
                         </div>
@@ -201,33 +203,18 @@ export const clientTrustPage: Page = {
         }
 
 
-        function wire(): void {
+        function add(event: SubmitEvent): void {
 
-            if (!mayManage)
-                return;
+            event.preventDefault();
 
-            must<HTMLFormElement>(content, '#add-form').addEventListener('submit', event => {
+            const form = event.currentTarget as HTMLFormElement;
 
-                event.preventDefault();
-
-                const form = event.target as HTMLFormElement;
-
-                void add(field(form, 'pem', false), field(form, 'name'));
-
-            });
-
-            content.querySelectorAll<HTMLInputElement>('.trust-enabled').forEach(box => {
-                box.addEventListener('change', () => void setEnabled(box.dataset.id ?? '', box.checked));
-            });
-
-            content.querySelectorAll<HTMLButtonElement>('.trust-remove').forEach(button => {
-                button.addEventListener('click', () => void remove(button.dataset.id ?? ''));
-            });
+            void accept(form, field(form, 'pem', false), field(form, 'name'));
 
         }
 
 
-        async function add(pem: string, name: string): Promise<void> {
+        async function accept(form: HTMLFormElement, pem: string, name: string): Promise<void> {
 
             const error = must<HTMLElement>(content, '#add-error');
             error.textContent = '';
@@ -241,6 +228,10 @@ export const clientTrustPage: Page = {
                     return;
 
                 await load(false);
+
+                // A draw leaves a form as it is typed into; this one was
+                // taken in, so it is emptied.
+                form.reset();
 
                 if (answer.warnings.length > 0)
                     window.alert(`It was accepted, with something to say about it:\n\n${answer.warnings.join('\n\n')}`);
@@ -263,13 +254,18 @@ export const clientTrustPage: Page = {
                 trust = await api.ocppServer.trust.update(id, { enabled });
 
                 if (!cancelled)
-                    keepDrafts(content, null, draw);
+                    draw();
 
             }
             catch (problem)
             {
                 if (!cancelled)
+                {
+                    // The switch back to what the controller has: refused, it
+                    // went on saying what had been clicked.
+                    draw();
                     window.alert(errorMessage(problem));
+                }
             }
 
         }
@@ -286,7 +282,7 @@ export const clientTrustPage: Page = {
                 trust = await api.ocppServer.trust.remove(id);
 
                 if (!cancelled)
-                    keepDrafts(content, null, draw);
+                    draw();
 
             }
             catch (problem)

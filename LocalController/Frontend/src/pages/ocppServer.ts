@@ -1,12 +1,12 @@
 ﻿import { api, type OCPPServerConfiguration, type OCPPServerUpdate, type StationLogins } from '../api/client';
 import { auth } from '../auth';
-import { html, must, render, type HTMLFragment } from '@node/html';
-import { keepDrafts } from '@node/drafts';
+import { html as stringHTML, must } from '@node/html';
 import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
 import { mayButNot, shell } from '@node/shell';
 import { errorMessage, field, formatTimestamp, isChecked, numberField } from '@node/ui';
 import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
+import { html, live, nothing, render, type TemplateResult } from '@node/view';
 
 /**
  * The server the charging stations connect to, and which of them may.
@@ -19,6 +19,10 @@ import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
  * What is decided when the socket opens cannot be changed under a running
  * server, so the page says which of the fields it just saved are waiting for
  * the next start rather than letting somebody find out from a charging station.
+ *
+ * Drawn by view.ts: a draw changes only what differs, so that what is typed
+ * into one card - and its focus - outlives another card being saved or the
+ * server being switched on or off.
  */
 export const ocppServerPage: Page = {
 
@@ -30,7 +34,7 @@ export const ocppServerPage: Page = {
             active:    '/configuration/ocpp-server',
             title:     'Charging stations',
             subtitle:  'The HTTP WebSocket server the charging stations below this local controller connect to.',
-            actions:   html`<button type="button" id="reload" class="btn small">Reload</button>`
+            actions:   stringHTML`<button type="button" id="reload" class="btn small">Reload</button>`
         });
 
         render(content, html`<div class="loading">Loading ...</div>`);
@@ -40,7 +44,7 @@ export const ocppServerPage: Page = {
         // asks first.
         must<HTMLButtonElement>(root, '#reload').addEventListener('click', () => {
             if (unsaved.mayBeLost())
-                void load();
+                void reload();
         });
 
         const mayChange = auth.can('stations', 'edit');
@@ -60,13 +64,13 @@ export const ocppServerPage: Page = {
 
             render(content, html`
 
-                ${mayChange ? '' : html`
+                ${mayChange ? nothing : html`
                     <div class="notice">
                         ${mayButNot('look at the charging station server', 'change it')}
                     </div>
                 `}
 
-                ${waiting.length === 0 ? '' : html`
+                ${waiting.length === 0 ? nothing : html`
                     <div class="notice warn">
                         <strong>Saved, and waiting for the next start:</strong> ${waiting.join(', ')}.
                         The socket is opened once, when the server is built - so these are in the configuration
@@ -84,8 +88,9 @@ export const ocppServerPage: Page = {
 
                         <label class="switch">
                             <input type="checkbox" id="enabled"
-                                   ${configuration.enabled ? html`checked` : ''}
-                                   ${mayChange ? '' : html`disabled`} />
+                                   .checked=${live(configuration.enabled)}
+                                   ?disabled=${!mayChange}
+                                   @change=${(event: Event) => void save({ enabled: (event.target as HTMLInputElement).checked }, 'socket', null)} />
                             <span>${configuration.enabled ? 'switched on' : 'switched off'}</span>
                         </label>
 
@@ -101,16 +106,16 @@ export const ocppServerPage: Page = {
 
                         <h2><i class="fa-solid fa-network-wired"></i> Socket</h2>
 
-                        <form id="socket-form" class="form-stack">
+                        <form id="socket-form" class="form-stack" @submit=${saveSocket}>
 
                             <label>Listen on
                                 <input type="text" name="address" value="${configuration.address ?? ''}"
-                                       placeholder="0.0.0.0" ${mayChange ? '' : html`disabled`} />
+                                       placeholder="0.0.0.0" ?disabled=${!mayChange} />
                             </label>
 
                             <label>TCP port
                                 <input type="number" name="port" min="1" max="65535"
-                                       value="${configuration.port}" ${mayChange ? '' : html`disabled`} />
+                                       value="${configuration.port}" ?disabled=${!mayChange} />
                             </label>
 
                             <fieldset class="checks">
@@ -118,18 +123,18 @@ export const ocppServerPage: Page = {
                                 ${configuration.limits.subprotocols.map(subprotocol => html`
                                     <label class="check">
                                         <input type="checkbox" name="subprotocol" value="${subprotocol}"
-                                               ${configuration.subprotocols.includes(subprotocol) ? html`checked` : ''}
-                                               ${mayChange ? '' : html`disabled`} />
+                                               ?checked=${configuration.subprotocols.includes(subprotocol)}
+                                               ?disabled=${!mayChange} />
                                         <span>${subprotocol}</span>
                                     </label>
                                 `)}
                             </fieldset>
 
                             <label>Oldest TLS version accepted
-                                <select name="minTLSVersion" ${mayChange ? '' : html`disabled`}>
+                                <select name="minTLSVersion" ?disabled=${!mayChange}>
                                     ${configuration.limits.tlsVersions.map(version => html`
                                         <option value="${version}"
-                                                ${version === configuration.minTLSVersion ? html`selected` : ''}>
+                                                ?selected=${version === configuration.minTLSVersion}>
                                             TLS ${version}
                                         </option>
                                     `)}
@@ -138,12 +143,12 @@ export const ocppServerPage: Page = {
 
                             <label>At most this many connected at once
                                 <input type="number" name="maxConnections" min="1" max="${configuration.limits.maxConnections}"
-                                       value="${configuration.maxConnections}" ${mayChange ? '' : html`disabled`} />
+                                       value="${configuration.maxConnections}" ?disabled=${!mayChange} />
                             </label>
 
                             <label>Ping a silent connection every ... seconds
                                 <input type="number" name="pingEverySeconds" min="5" max="3600"
-                                       value="${configuration.pingEverySeconds}" ${mayChange ? '' : html`disabled`} />
+                                       value="${configuration.pingEverySeconds}" ?disabled=${!mayChange} />
                             </label>
 
                             <span class="hint">
@@ -153,7 +158,7 @@ export const ocppServerPage: Page = {
                             </span>
 
                             <div class="form-actions">
-                                <button type="submit" class="btn primary" ${mayChange ? '' : html`disabled`}>Save</button>
+                                <button type="submit" class="btn primary" ?disabled=${!mayChange}>Save</button>
                                 <span id="socket-note"  class="form-notice" role="status"></span>
                                 <span id="socket-error" class="form-error"  role="alert"></span>
                             </div>
@@ -175,13 +180,11 @@ export const ocppServerPage: Page = {
                 </div>
             `);
 
-            wire();
-
         }
 
 
         // Which OCPP security profiles a station may connect with.
-        function profilesCard(configuration: OCPPServerConfiguration): HTMLFragment {
+        function profilesCard(configuration: OCPPServerConfiguration): TemplateResult {
 
             const descriptions: Record<number, string> = {
                 1: 'A password over an unencrypted connection. Only usable on a network nobody else is on.',
@@ -194,15 +197,15 @@ export const ocppServerPage: Page = {
 
                     <h2><i class="fa-solid fa-shield-halved"></i> Security profiles</h2>
 
-                    <form id="profiles-form" class="form-stack">
+                    <form id="profiles-form" class="form-stack" @submit=${saveProfiles}>
 
                         <fieldset class="checks">
                             <legend>A charging station may connect with</legend>
                             ${configuration.limits.securityProfiles.map(profile => html`
                                 <label class="check">
                                     <input type="checkbox" name="profile" value="${profile}"
-                                           ${configuration.securityProfiles.includes(profile) ? html`checked` : ''}
-                                           ${mayChange ? '' : html`disabled`} />
+                                           ?checked=${configuration.securityProfiles.includes(profile)}
+                                           ?disabled=${!mayChange} />
                                     <span><strong>Profile ${profile}</strong> &mdash; ${descriptions[profile] ?? ''}</span>
                                 </label>
                             `)}
@@ -210,8 +213,8 @@ export const ocppServerPage: Page = {
 
                         <label class="check">
                             <input type="checkbox" name="checkCertificateRevocation"
-                                   ${configuration.checkCertificateRevocation ? html`checked` : ''}
-                                   ${mayChange ? '' : html`disabled`} />
+                                   ?checked=${configuration.checkCertificateRevocation}
+                                   ?disabled=${!mayChange} />
                             <span>Check a station's certificate against its issuer's revocation list</span>
                         </label>
 
@@ -221,7 +224,7 @@ export const ocppServerPage: Page = {
                         </span>
 
                         <div class="form-actions">
-                            <button type="submit" class="btn primary" ${mayChange ? '' : html`disabled`}>Save</button>
+                            <button type="submit" class="btn primary" ?disabled=${!mayChange}>Save</button>
                             <span id="profiles-note"  class="form-notice" role="status"></span>
                             <span id="profiles-error" class="form-error"  role="alert"></span>
                         </div>
@@ -234,7 +237,7 @@ export const ocppServerPage: Page = {
                                       <a href="${toURL('/configuration/ocpp-server/certificates')}">Make a signing request</a>.
                                   </div>
                               `
-                              : ''}
+                              : nothing}
 
                         ${configuration.securityProfiles.includes(3) && configuration.state.trustedChains === 0
                               ? html`
@@ -245,7 +248,7 @@ export const ocppServerPage: Page = {
                                       <a href="${toURL('/configuration/ocpp-server/trust')}">name one</a>.
                                   </div>
                               `
-                              : ''}
+                              : nothing}
 
                     </form>
 
@@ -256,19 +259,20 @@ export const ocppServerPage: Page = {
 
 
         // The names a certificate has to carry.
-        function reachableCard(configuration: OCPPServerConfiguration): HTMLFragment {
+        function reachableCard(configuration: OCPPServerConfiguration): TemplateResult {
 
             return html`
                 <section class="card">
 
                     <h2><i class="fa-solid fa-location-dot"></i> Reachable as</h2>
 
-                    <form id="reachable-form" class="form-stack">
+                    <form id="reachable-form" class="form-stack" @submit=${saveReachable}>
 
                         <label>One name or address per line
                             <textarea name="reachableAs" rows="4"
                                       placeholder="lc001.example.org&#10;192.168.1.10"
-                                      ${mayChange ? '' : html`disabled`}>${configuration.reachableAs.join('\n')}</textarea>
+                                      .defaultValue=${configuration.reachableAs.join('\n')}
+                                      ?disabled=${!mayChange}></textarea>
                         </label>
 
                         <span class="hint">
@@ -278,7 +282,7 @@ export const ocppServerPage: Page = {
                         </span>
 
                         <div class="form-actions">
-                            <button type="submit" class="btn primary" ${mayChange ? '' : html`disabled`}>Save</button>
+                            <button type="submit" class="btn primary" ?disabled=${!mayChange}>Save</button>
                             <span id="reachable-note"  class="form-notice" role="status"></span>
                             <span id="reachable-error" class="form-error"  role="alert"></span>
                         </div>
@@ -292,7 +296,7 @@ export const ocppServerPage: Page = {
 
 
         // What of this server ends up in the log.
-        function loggingCard(configuration: OCPPServerConfiguration): HTMLFragment {
+        function loggingCard(configuration: OCPPServerConfiguration): TemplateResult {
 
             const logging = configuration.logging;
             const window  = Math.round(configuration.limits.suggestedPayloadWindowSeconds / 60);
@@ -302,17 +306,17 @@ export const ocppServerPage: Page = {
 
                     <h2><i class="fa-solid fa-list-check"></i> What goes into the log</h2>
 
-                    <form id="logging-form" class="form-stack">
+                    <form id="logging-form" class="form-stack" @submit=${saveLogging}>
 
                         <label class="check">
-                            <input type="checkbox" name="connections" ${logging.connections ? html`checked` : ''}
-                                   ${mayChange ? '' : html`disabled`} />
+                            <input type="checkbox" name="connections" ?checked=${logging.connections}
+                                   ?disabled=${!mayChange} />
                             <span>Charging stations connecting and disconnecting</span>
                         </label>
 
                         <label class="check">
-                            <input type="checkbox" name="authentication" ${logging.authentication ? html`checked` : ''}
-                                   ${mayChange ? '' : html`disabled`} />
+                            <input type="checkbox" name="authentication" ?checked=${logging.authentication}
+                                   ?disabled=${!mayChange} />
                             <span>Refused sign-ins and failed TLS handshakes</span>
                         </label>
 
@@ -321,22 +325,22 @@ export const ocppServerPage: Page = {
                         </span>
 
                         <label class="check">
-                            <input type="checkbox" name="messages" ${logging.messages ? html`checked` : ''}
-                                   ${mayChange ? '' : html`disabled`} />
+                            <input type="checkbox" name="messages" ?checked=${logging.messages}
+                                   ?disabled=${!mayChange} />
                             <span>Every OCPP message, by name and identification</span>
                         </label>
 
                         <label class="check">
-                            <input type="checkbox" name="pings" ${logging.pings ? html`checked` : ''}
-                                   ${mayChange ? '' : html`disabled`} />
+                            <input type="checkbox" name="pings" ?checked=${logging.pings}
+                                   ?disabled=${!mayChange} />
                             <span>The WebSocket pings that keep a connection open</span>
                         </label>
 
                         <hr />
 
                         <label class="check">
-                            <input type="checkbox" name="payloads" ${logging.payloads ? html`checked` : ''}
-                                   ${mayChange ? '' : html`disabled`} />
+                            <input type="checkbox" name="payloads" ?checked=${logging.payloads}
+                                   ?disabled=${!mayChange} />
                             <span>...and what those messages carry, for the next ${window} minutes</span>
                         </label>
 
@@ -348,11 +352,11 @@ export const ocppServerPage: Page = {
                             ${logging.payloadsUntil !== null
                                   ? html`<br /><strong>${logging.payloadsNow ? 'On until' : 'The window ended at'}
                                          ${formatTimestamp(logging.payloadsUntil)}.</strong>`
-                                  : ''}
+                                  : nothing}
                         </div>
 
                         <div class="form-actions">
-                            <button type="submit" class="btn primary" ${mayChange ? '' : html`disabled`}>Save</button>
+                            <button type="submit" class="btn primary" ?disabled=${!mayChange}>Save</button>
                             <span id="logging-note"  class="form-notice" role="status"></span>
                             <span id="logging-error" class="form-error"  role="alert"></span>
                         </div>
@@ -368,7 +372,7 @@ export const ocppServerPage: Page = {
         // Who may sign in now lives on its own page: it grew groups, one-time
         // tokens and two kinds of credential per login, none of which belongs
         // beside the socket settings.
-        function loginsCard(logins: StationLogins): HTMLFragment {
+        function loginsCard(logins: StationLogins): TemplateResult {
 
             return html`
                 <section class="card">
@@ -395,7 +399,7 @@ export const ocppServerPage: Page = {
         }
 
 
-        function stateCard(configuration: OCPPServerConfiguration): HTMLFragment {
+        function stateCard(configuration: OCPPServerConfiguration): TemplateResult {
 
             return html`
                 <section class="card">
@@ -432,91 +436,88 @@ export const ocppServerPage: Page = {
         }
 
 
-        function wire(): void {
+        function saveSocket(event: SubmitEvent): void {
 
-            if (!mayChange)
-                return;
+            event.preventDefault();
 
-            must<HTMLInputElement>(content, '#enabled').addEventListener('change', event => {
-                // A switch, not the form it sits beside: what is typed into
-                // the form stays.
-                void save({ enabled: (event.target as HTMLInputElement).checked }, 'socket', null);
-            });
+            const form = event.currentTarget as HTMLFormElement;
 
-            must<HTMLFormElement>(content, '#socket-form').addEventListener('submit', event => {
-
-                event.preventDefault();
-
-                const form = event.target as HTMLFormElement;
-
-                void save({
-                    address:           field(form, 'address') || undefined,
-                    port:              numberField(form, 'port'),
-                    subprotocols:      checked(form, 'subprotocol'),
-                    minTLSVersion:     field(form, 'minTLSVersion'),
-                    maxConnections:    numberField(form, 'maxConnections'),
-                    pingEverySeconds:  numberField(form, 'pingEverySeconds')
-                }, 'socket');
-
-            });
-
-            must<HTMLFormElement>(content, '#profiles-form').addEventListener('submit', event => {
-
-                event.preventDefault();
-
-                const form = event.target as HTMLFormElement;
-
-                void save({
-                    securityProfiles:            checked(form, 'profile').map(Number),
-                    checkCertificateRevocation:  isChecked(form, 'checkCertificateRevocation')
-                }, 'profiles');
-
-            });
-
-            must<HTMLFormElement>(content, '#reachable-form').addEventListener('submit', event => {
-
-                event.preventDefault();
-
-                const lines = field(event.target as HTMLFormElement, 'reachableAs', false).
-                                  split('\n').
-                                  map(line => line.trim()).
-                                  filter(line => line.length > 0);
-
-                void save({ reachableAs: lines }, 'reachable');
-
-            });
-
-            must<HTMLFormElement>(content, '#logging-form').addEventListener('submit', event => {
-
-                event.preventDefault();
-
-                const form     = event.target as HTMLFormElement;
-                const payloads = isChecked(form, 'payloads');
-
-                // The window is computed here rather than typed: what somebody
-                // is agreeing to is "for the next hour", and a date field would
-                // invite "until 2099" without anybody meaning it.
-                const until = payloads
-                                  ? new Date(Date.now() + (server?.limits.suggestedPayloadWindowSeconds ?? 3600) * 1000).toISOString()
-                                  : null;
-
-                void save({
-                    logging: {
-                        connections:     isChecked(form, 'connections'),
-                        authentication:  isChecked(form, 'authentication'),
-                        messages:        isChecked(form, 'messages'),
-                        pings:           isChecked(form, 'pings'),
-                        payloads,
-                        payloadsUntil:   until
-                    }
-                }, 'logging');
-
-            });
+            void save({
+                address:           field(form, 'address') || undefined,
+                port:              numberField(form, 'port'),
+                subprotocols:      checked(form, 'subprotocol'),
+                minTLSVersion:     field(form, 'minTLSVersion'),
+                maxConnections:    numberField(form, 'maxConnections'),
+                pingEverySeconds:  numberField(form, 'pingEverySeconds')
+            }, 'socket', form);
 
         }
 
 
-        async function save(update: OCPPServerUpdate, where: string, saved: string | null = `${where}-form`): Promise<void> {
+        function saveProfiles(event: SubmitEvent): void {
+
+            event.preventDefault();
+
+            const form = event.currentTarget as HTMLFormElement;
+
+            void save({
+                securityProfiles:            checked(form, 'profile').map(Number),
+                checkCertificateRevocation:  isChecked(form, 'checkCertificateRevocation')
+            }, 'profiles', form);
+
+        }
+
+
+        function saveReachable(event: SubmitEvent): void {
+
+            event.preventDefault();
+
+            const form  = event.currentTarget as HTMLFormElement;
+            const lines = field(form, 'reachableAs', false).
+                              split('\n').
+                              map(line => line.trim()).
+                              filter(line => line.length > 0);
+
+            void save({ reachableAs: lines }, 'reachable', form);
+
+        }
+
+
+        function saveLogging(event: SubmitEvent): void {
+
+            event.preventDefault();
+
+            const form     = event.currentTarget as HTMLFormElement;
+            const payloads = isChecked(form, 'payloads');
+
+            // The window is computed here rather than typed: what somebody
+            // is agreeing to is "for the next hour", and a date field would
+            // invite "until 2099" without anybody meaning it.
+            const until = payloads
+                              ? new Date(Date.now() + (server?.limits.suggestedPayloadWindowSeconds ?? 3600) * 1000).toISOString()
+                              : null;
+
+            void save({
+                logging: {
+                    connections:     isChecked(form, 'connections'),
+                    authentication:  isChecked(form, 'authentication'),
+                    messages:        isChecked(form, 'messages'),
+                    pings:           isChecked(form, 'pings'),
+                    payloads,
+                    payloadsUntil:   until
+                }
+            }, 'logging', form);
+
+        }
+
+
+        /**
+         * Tell the controller what one card says, and show what it took.
+         *
+         * @param form  the form saved, which then says what the controller
+         *              took - or null for the switch, which is in none.
+         */
+        async function save(update: OCPPServerUpdate, where: string, form: HTMLFormElement | null): Promise<void> {
 
             const note  = content.querySelector<HTMLElement>(`#${where}-note`);
             const error = content.querySelector<HTMLElement>(`#${where}-error`);
@@ -532,7 +533,14 @@ export const ocppServerPage: Page = {
                 if (cancelled)
                     return;
 
-                keepDrafts(content, saved, draw);
+                if (note)
+                    note.textContent = '';
+
+                draw();
+
+                // A draw leaves a form as it is typed into; the one saved goes
+                // back to what it says now - the controller's answer.
+                form?.reset();
 
             }
             catch (problem)
@@ -547,14 +555,8 @@ export const ocppServerPage: Page = {
                 // What the controller refused is not what it is running, so the
                 // page goes back to saying what is true - a switch flipped back
                 // with it, what is typed into the forms kept, to be put right,
-                // and why it was refused as well. Drawn anew from the answer,
-                // the page threw all three away before anybody could read it.
-                await load(false);
-
-                const refused = content.querySelector<HTMLElement>(`#${where}-error`);
-
-                if (refused)
-                    refused.textContent = errorMessage(problem);
+                // and why it was refused as well.
+                await load();
 
             }
 
@@ -562,14 +564,11 @@ export const ocppServerPage: Page = {
 
 
         /**
-         * The page as the controller has it now: from nothing, the first time
-         * and on Reload - or, not showing that it loads, drawn anew over the
-         * page as it is, what is typed into its forms kept.
+         * The page as the controller has it now, drawn over the page as it
+         * is - what is typed into its forms kept, as a draw keeps it. Reload
+         * empties them itself.
          */
-        async function load(showLoading = true): Promise<void> {
-
-            if (showLoading)
-                render(content, html`<div class="loading">Loading ...</div>`);
+        async function load(): Promise<void> {
 
             try
             {
@@ -585,10 +584,7 @@ export const ocppServerPage: Page = {
                 server   = configuration;
                 stations = logins;
 
-                if (showLoading)
-                    draw();
-                else
-                    keepDrafts(content, null, draw);
+                draw();
 
             }
             catch (problem)
@@ -596,6 +592,20 @@ export const ocppServerPage: Page = {
                 if (!cancelled)
                     render(content, html`<div class="error-box">${errorMessage(problem)}</div>`);
             }
+
+        }
+
+
+        /**
+         * Loaded anew - Reload - is what the controller has, the forms too,
+         * which a draw on its own would leave as typed.
+         */
+        async function reload(): Promise<void> {
+
+            await load();
+
+            if (!cancelled)
+                content.querySelectorAll('form').forEach(form => form.reset());
 
         }
 
