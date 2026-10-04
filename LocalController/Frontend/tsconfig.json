@@ -16,9 +16,13 @@
     "newLine": "lf",
 
     // "@node/..." is what every kind of node shares, in the WWCP_Node next to
-    // this repository - where webpack.config.js's alias finds it too.
+    // this repository - where webpack.config.js's alias finds it too. lit-html,
+    // which the shared files draw with, is this directory's, as webpack's
+    // resolve.modules finds it.
     "paths": {
-      "@node/*": [ "../../../WWCP_Node/Frontend/src/*" ]
+      "@node/*":     [ "../../../WWCP_Node/Frontend/src/*" ],
+      "lit-html":    [ "./node_modules/lit-html" ],
+      "lit-html/*":  [ "./node_modules/lit-html/*" ]
     }
   },
 

@@ -61,7 +61,13 @@ module.exports = (env, argv) => {
             // bundle like its own files; nothing is loaded from elsewhere.
             alias: {
                 '@node': path.resolve(__dirname, '../../../WWCP_Node/Frontend/src')
-            }
+            },
+            // A package a shared file imports - lit-html, which @node/view
+            // draws with - comes from this directory's node_modules: from
+            // where the shared file is, webpack would look in WWCP_Node's,
+            // which nothing installs. One copy in the bundle, at the version
+            // package.json pins.
+            modules: [ path.resolve(__dirname, 'node_modules'), 'node_modules' ]
         },
 
         module: {
