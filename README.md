@@ -112,6 +112,19 @@ the user `root`, keeps it under `accounts/` and prints the password once:
 
 Then open http://127.0.0.1:2350/ and sign in.
 
+Recommended for the first start: bring `root` your own SSH key, for the
+command line over SSH -
+
+```
+dotnet run --project LocalControllerCLI -- --authorize-ssh-key root=C:\Users\you\.ssh\id_ed25519.pub
+```
+
+Without it, the first start makes up a key pair for `root` and prints its
+private key once, below the password, from `-----BEGIN OPENSSH PRIVATE KEY-----`
+to the END line, to be saved as a file only you can read. See
+[LocalControllerCLI](https://github.com/OpenChargingCloud/LocalControllerCLI)
+for signing in with it.
+
 Port 2350 and not 2348: an OpenChargingCloud charging station uses 2348 and
 2349, and a controller and a station are often tried out on the same bench.
 
