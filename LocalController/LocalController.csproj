@@ -44,7 +44,8 @@
                                              interface at all, which is a warning and not an error
 
     Three separate targets on purpose:
-      - NpmInstall     runs "npm ci" only when node_modules is missing
+      - NpmInstall     runs "npm ci" when node_modules is missing or older than
+                       package.json or package-lock.json (Inputs/Outputs)
       - BuildFrontend  runs "npm run build" incrementally (Inputs/Outputs)
       - EmbedFrontend  adds the EmbeddedResource items; it must NOT carry
                        Inputs/Outputs, because a target skipped as up-to-date
@@ -69,10 +70,22 @@
     <FrontendInput Include="$(MSBuildProjectDirectory)\..\..\WWCP_Node\Frontend\src\**\*" />
   </ItemGroup>
 
-  <Target Name="NpmInstall" Condition="'$(FrontendBuildEnabled)' == 'true' And !Exists('$(FrontendDir)node_modules')">
-    <Message Importance="high" Text="Frontend: installing npm dependencies in '$(FrontendDir)' ..." />
-    <Exec Command="npm install" WorkingDirectory="$(FrontendDir)" Condition="!Exists('$(FrontendDir)package-lock.json')" />
-    <Exec Command="npm ci" WorkingDirectory="$(FrontendDir)" Condition="Exists('$(FrontendDir)package-lock.json')" />
+  <!-- npm keeps a copy of the lock file it last installed by, in
+       node_modules/.package-lock.json. Missing, nothing is installed yet;
+       older than package.json or package-lock.json - a pull that brought a
+       dependency the frontend now imports, say - node_modules is no longer
+       what the lock file asks for, and webpack fails on what is not there.
+       It used to be installed only where node_modules was missing, so a
+       checkout that had built once never got the new dependency. "npm ci"
+       makes node_modules exactly what the lock file says, and the copy is
+       touched after, so that this is up to date until either file changes. -->
+  <Target Name="NpmInstall"
+          Inputs="$(FrontendDir)package.json;$(FrontendDir)package-lock.json"
+          Outputs="$(FrontendDir)node_modules\.package-lock.json"
+          Condition="'$(FrontendBuildEnabled)' == 'true'">
+    <Message Importance="high" Text="Frontend: installing npm dependencies in '$(FrontendDir)' as package-lock.json says ..." />
+    <Exec Command="npm ci" WorkingDirectory="$(FrontendDir)" />
+    <Touch Files="$(FrontendDir)node_modules\.package-lock.json" AlwaysCreate="true" />
   </Target>
 
   <Target Name="BuildFrontend" DependsOnTargets="NpmInstall" Inputs="@(FrontendInput)" Outputs="$(FrontendDist)index.html" Condition="'$(FrontendBuildEnabled)' == 'true'">

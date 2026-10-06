@@ -132,7 +132,8 @@ Port 2350 and not 2348: an OpenChargingCloud charging station uses 2348 and
 ## Building
 
 `dotnet build` builds the frontend too: `LocalController.csproj` runs
-`npm ci` (only when `Frontend/node_modules` is missing) and `npm run build`
+`npm ci` (when `Frontend/node_modules` is missing or older than
+`package.json` or `package-lock.json`) and `npm run build`
 (only when something changed under `Frontend/src`, or under
 `libs/WWCP_Node/Frontend/src`, which holds what the web interface of every
 kind of node shares and is bundled in as `@node/...`), then embeds every file of
