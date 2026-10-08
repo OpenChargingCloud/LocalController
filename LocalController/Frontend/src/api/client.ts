@@ -206,6 +206,31 @@ export interface ServerCertificates {
     canImportPrivateKeys:  boolean;
 }
 
+/** One certificate found in a text or a file, and the key of this controller it is for. */
+export interface ServerCertificateFound {
+    id:             string;
+    thumbprint:     string;
+    label:          string;
+    subject:        string;
+    issuer:         string;
+    notBefore:      string;
+    notAfter:       string;
+    chainLength:    number;
+    /** Whether it came with its private key - which is refused: none arrives here. */
+    hasPrivateKey:  boolean;
+    /** The key of this controller it belongs to, by its public key; null for none. */
+    keyId:          string | null;
+    /** Why it would not be taken in, as far as can be said before trying; null where nothing speaks against it. */
+    refusal:        string | null;
+}
+
+/** What an upload of several certificates did, one by one. */
+export interface ServerCertificatesUploaded {
+    taken:    { id: string; label: string; warnings: string[] }[];
+    refused:  { label: string; error: string }[];
+    error?:   string;
+}
+
 /** One chain a charging station's certificate may lead to. */
 export interface TrustedChain {
     id:             string;
@@ -428,7 +453,17 @@ export const api = {
 
             remove:  (id: string) =>
                          request<ServerCertificates>('DELETE',
-                             `/configuration/ocpp-server/certificates/${encodeURIComponent(id)}`)
+                             `/configuration/ocpp-server/certificates/${encodeURIComponent(id)}`),
+
+            /** What a text or a file holds, and which key of this controller each certificate is for - nothing taken in. */
+            inspect: (what: { pem?: string; content?: string; password?: string }) =>
+                         request<{ certificates: ServerCertificateFound[]; pem: string }>('POST',
+                             '/configuration/ocpp-server/certificates/inspect', what),
+
+            /** Every certificate of a text or a file taken in under the key it is for. */
+            uploadAll: (what: { pem?: string; content?: string; password?: string }) =>
+                         request<ServerCertificatesUploaded>('POST',
+                             '/configuration/ocpp-server/certificates/upload', what)
 
         },
 

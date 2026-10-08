@@ -391,25 +391,38 @@ presents itself, each with its private key - the one it signs in to the CSMS
 with under security profile 3 among them. It lives in `certificates/` beside
 `configuration.json`, one file per certificate and an `index.json` saying what
 each is called, whether it is switched on and what it is kept for; a file
-copied into the right directory by hand is taken in at the next start, or by
-"Re-read the directory" on the page.
+copied into the right directory by hand is taken in at the next start. One
+certificate may be kept as several kinds - a TLS root and a kind made up, say -
+and the page shows it in three tabs: by usage, every certificate once, and the
+upload, where certificates are pasted or files dropped and every one of them is
+kept as every kind ticked.
 
 A TLS root and a server certificate are told what they are for - the name
 servers, the time servers, or every use - at the upload and later: a root kept
 for the name servers alone vouches for no time server, and only a root kept for
-every use vouches for the CSMS. A TLS identity is told nothing: a local
-controller names no listeners it could be shown on some of and not others, so
-the page offers it no uses. The dialog in which a time server or a name server
+every use vouches for the CSMS. A local controller names no listeners an
+identity could be shown on some of and not others, so the page offers it no
+uses of its own; any certificate may be marked with a usage made up, for a
+configuration or code to name later. The dialog in which a time server or a name server
 is pinned offers the store's certificates for its service, and a pinned
 fingerprint the store keeps is named by its label.
 
 It is the node's store and every node's routes, the vehicle's among them -
-`GET` and `POST /api/v1/certificates`, `POST /api/v1/certificates/reload`, and
-`GET`, `PATCH` and `DELETE /api/v1/certificates/{id}` - at `certificates:read`
-to look and `certificates:edit` to change. The charging station port's own keys
+`GET` and `POST /api/v1/certificates`, `POST /api/v1/certificates/inspect`,
+`POST /api/v1/certificates/reload`, and `GET`, `PATCH` and
+`DELETE /api/v1/certificates/{id}` - at `certificates:read` to look and
+`certificates:edit` to change. The charging station port's own keys
 and the chains it accepts from charging stations are not in it: they keep the
 stores of their own they have always had, on the pages "Server certificates" and
 "Accepted chains".
+
+"Server certificates" has three tabs as well: the keys and their signing
+requests, every certificate once by name or by fingerprint with the key it is
+for, and an upload that takes any number of certificates in at once - renewals
+for several keys, say - each under the key it belongs to, which the controller
+reads from the certificate itself (`POST …/ocpp-server/certificates/inspect`
+and `…/upload`). A private key that comes along in a file is left out of the
+box and its certificate refused: the key is made here and never arrives.
 
 The private keys are kept unencrypted, as the vehicle's are, and the page says
 so as soon as there is one. The identity the CSMS connection signs in with is

@@ -1,12 +1,30 @@
-import { api, type OCPPServerConfiguration, type ServerCertificate, type ServerCertificates } from '../api/client';
+import { api, type OCPPServerConfiguration, type ServerCertificate, type ServerCertificateFound,
+         type ServerCertificates, type ServerCertificatesUploaded } from '../api/client';
 import { auth } from '../auth';
+import { ApiError } from '@node/api/client';
 import { must } from '@node/html';
 import { toURL } from '@node/basePath';
+import { appendText, pemBox } from '@node/pemBox';
+import { base64Of, fingerprintOf } from '@node/pages/certificates';
 import type { Page } from '@node/router';
 import { mayButNot, reloadButton, shell } from '@node/shell';
+import { rememberTab, tabFromURL, tabsView, type Tab } from '@node/tabs';
 import { errorMessage, field, formatTimestamp } from '@node/ui';
 import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
 import { html, nothing, render, repeat, type TemplateResult } from '@node/view';
+
+/** The largest file the upload offers to read: a certificate chain is a few kilobytes. */
+const largestFile = 1024 * 1024;
+
+/** How long the upload waits after the last key before it asks what the box holds. */
+const inspectAfter_ms = 350;
+
+/** The tabs: the keys and their requests, every certificate by name, and the upload. */
+const allTabs: readonly Tab[] = [
+    { id: 'keys',    label: 'Keys and requests',  icon: 'fa-key'         },
+    { id: 'all',     label: 'All certificates',   icon: 'fa-list'        },
+    { id: 'upload',  label: 'Upload',             icon: 'fa-file-import' }
+];
 
 /**
  * The certificates this local controller presents to the charging stations.
@@ -17,18 +35,28 @@ import { html, nothing, render, repeat, type TemplateResult } from '@node/view';
  * arrives even if it only becomes valid in two days, and the controller
  * switches over by itself at the moment it may.
  *
+ * Three tabs. **Keys and requests** makes a key and its signing request, and
+ * shows each key with the certificate it was given. **All certificates** is
+ * every certificate once, by name or by fingerprint, with the key it is for.
+ * **Upload** is a box for certificates as text - typed, pasted, or dropped
+ * files on - every one of which goes in under the key it belongs to, which the
+ * controller works out from the certificate itself: renewals for several keys
+ * are pasted at once, and nobody has to know which is whose.
+ *
  * There is no way to upload a private key, and saying so on the page is
  * deliberate: the key is made here and never leaves, and somebody looking for
- * the button should find the reason instead.
+ * the button should find the reason instead. A key that comes along in a file
+ * is not put into the box, and its certificate is said to be refused for it.
  *
  * Drawn by view.ts: a draw changes only what differs, so that a certificate
- * pasted under one key outlives another key being made or removed.
+ * pasted under one key outlives another key being made or removed - and the
+ * upload, half filled in, outlives a look at another tab.
  */
 export const serverCertificatesPage: Page = {
 
     title: 'Server certificates',
 
-    render({ root }) {
+    render({ root, url }) {
 
         const content = shell(root, {
             active:    '/configuration/ocpp-server/certificates',
@@ -40,6 +68,7 @@ export const serverCertificatesPage: Page = {
         render(content, html`<div class="loading">Loading ...</div>`);
 
         const mayManage = auth.can('certificates', 'edit');
+        const tabs      = mayManage ? allTabs : allTabs.filter(tab => tab.id !== 'upload');
 
         let cancelled = false;
         let store:  ServerCertificates      | null = null;
@@ -54,6 +83,27 @@ export const serverCertificatesPage: Page = {
          */
         let algorithmChosen: string | undefined;
 
+        /** The tab shown; the order of the list of all certificates, and what it is narrowed to. */
+        let shown   = tabFromURL(tabs, url);
+        let order:  'name' | 'fingerprint' = 'name';
+        let narrow  = '';
+
+        // What the upload has found and done, for as long as the page is open:
+        // the box itself holds its text.
+        let found:         ServerCertificateFound[]          = [];
+        let foundProblem:  string | null                     = null;
+        let uploaded:      ServerCertificatesUploaded | null = null;
+        let inspection     = 0;
+        let inspectTimer:  ReturnType<typeof setTimeout> | undefined;
+
+
+        /** Show another tab, and keep it in the address. */
+        function show(id: string): void {
+            shown = id;
+            rememberTab(tabs, id);
+            draw();
+        }
+
 
         function draw(): void {
 
@@ -62,7 +112,6 @@ export const serverCertificatesPage: Page = {
 
             const certificates   = store;
             const configuration  = server;
-            const kindOfKey      = algorithmChosen ?? 'ecdsa-p256';
 
             render(content, html`
 
@@ -80,6 +129,35 @@ export const serverCertificatesPage: Page = {
                     </div>
                 `}
 
+                ${tabsView(tabs, shown, show, 'The server certificates')}
+
+                <section class="tab-panel" role="tabpanel" id="panel-keys" aria-labelledby="tab-keys" ?hidden=${shown !== 'keys'}>
+                    ${keysView(certificates, configuration)}
+                </section>
+
+                <section class="tab-panel" role="tabpanel" id="panel-all" aria-labelledby="tab-all" ?hidden=${shown !== 'all'}>
+                    ${allView(certificates)}
+                </section>
+
+                ${mayManage ? html`
+                    <section class="tab-panel" role="tabpanel" id="panel-upload" aria-labelledby="tab-upload" ?hidden=${shown !== 'upload'}>
+                        ${uploadView()}
+                    </section>` : nothing}
+
+            `);
+
+        }
+
+
+        // ---------------------------------------------------------------------
+        // Keys and requests
+        // ---------------------------------------------------------------------
+
+        function keysView(certificates: ServerCertificates, configuration: OCPPServerConfiguration): TemplateResult {
+
+            const kindOfKey = algorithmChosen ?? 'ecdsa-p256';
+
+            return html`
                 <div class="cards">
 
                     <section class="card">
@@ -172,7 +250,7 @@ export const serverCertificatesPage: Page = {
                     </section>
 
                 </div>
-            `);
+            `;
 
         }
 
@@ -272,6 +350,321 @@ export const serverCertificatesPage: Page = {
 
         }
 
+
+        // ---------------------------------------------------------------------
+        // All certificates
+        // ---------------------------------------------------------------------
+
+        /** Every key that has a certificate, by the certificate's name or fingerprint, narrowed down as asked. */
+        function certificatesListed(certificates: ServerCertificates): ServerCertificate[] {
+
+            const wanted = narrow.trim().toLowerCase();
+
+            return certificates.entries.
+                       filter(entry => entry.certificate !== undefined).
+                       filter(entry => wanted.length === 0 ||
+                                       [ entry.id, entry.certificate!.subject, entry.certificate!.issuer, entry.certificate!.thumbprint,
+                                         ...entry.certificate!.subjectAltNames ].some(said => said.toLowerCase().includes(wanted))).
+                       sort((one, other) => order === 'fingerprint'
+                                                ? one.certificate!.thumbprint.localeCompare(other.certificate!.thumbprint)
+                                                : one.certificate!.subject.localeCompare(other.certificate!.subject, undefined, { sensitivity: 'base' }) ||
+                                                  one.certificate!.thumbprint.localeCompare(other.certificate!.thumbprint));
+
+        }
+
+
+        function allView(certificates: ServerCertificates): TemplateResult {
+
+            const listed = certificatesListed(certificates);
+            const total  = certificates.entries.filter(entry => entry.certificate !== undefined).length;
+
+            return html`
+
+                <div class="list-controls">
+                    <span class="segmented" role="radiogroup" aria-label="Order">
+                        <label class="checkbox"><input type="radio" name="order" value="name"        .checked=${order === 'name'}
+                                                       @change=${() => { order = 'name';        draw(); }} /> by name</label>
+                        <label class="checkbox"><input type="radio" name="order" value="fingerprint" .checked=${order === 'fingerprint'}
+                                                       @change=${() => { order = 'fingerprint'; draw(); }} /> by fingerprint</label>
+                    </span>
+                    <input type="search" id="all-filter" placeholder="Narrow down: a name, an issuer, a fingerprint, a key"
+                           .value=${narrow} @input=${(event: Event) => { narrow = (event.target as HTMLInputElement).value; draw(); }} />
+                    <span class="muted">${listed.length === total ? `${total} certificate(s)` : `${listed.length} of ${total} certificate(s)`}</span>
+                </div>
+
+                ${listed.length === 0
+                      ? html`<p class="hint">${total === 0 ? 'No key has a certificate yet.' : 'None that matches.'}</p>`
+                      : repeat(listed, entry => entry.id, entry => {
+                            const certificate = entry.certificate!;
+                            return html`
+                                <article class="card certificate-card" data-certificate="${entry.id}">
+                                    <h3>
+                                        ${certificate.subject}
+                                        ${entry.inUse ? html`<span class="badge ok">being presented</span>` : nothing}
+                                        <span class="badge ${stateClass(certificate.state)}">${certificate.state}</span>
+                                    </h3>
+                                    <div class="certificate-facts">
+                                        <span>issued by ${certificate.issuer}</span>
+                                        <span class="muted">${[ `for key ${entry.id} (${entry.algorithm})`,
+                                                                ...(certificate.intermediates > 0 ? [ `+${certificate.intermediates} intermediate(s)` ] : []),
+                                                                `valid ${certificate.notBefore.slice(0, 10)} to ${certificate.notAfter.slice(0, 10)}`,
+                                                                `${certificate.daysRemaining} day(s) left` ].join(', ')}</span>
+                                        ${certificate.subjectAltNames.length > 0 ? html`<span class="muted">valid for ${certificate.subjectAltNames.join(', ')}</span>` : nothing}
+                                        <code class="fingerprint" title="SHA-256">${fingerprintOf(certificate.thumbprint)}</code>
+                                    </div>
+                                </article>
+                            `;
+                        })}
+
+            `;
+
+        }
+
+
+        // ---------------------------------------------------------------------
+        // Upload
+        // ---------------------------------------------------------------------
+
+        function uploadView(): TemplateResult {
+
+            return html`
+                <section class="card">
+
+                    <h2><i class="fa-solid fa-file-import"></i> Upload certificates</h2>
+
+                    <form id="upload-all-form" class="form-stack" @submit=${(event: SubmitEvent) => { event.preventDefault(); void uploadAll(event.currentTarget as HTMLFormElement); }}>
+
+                        <label for="upload-pem">Certificates, as text</label>
+                        ${pemBox({
+                            id:         'upload-pem',
+                            name:       'pem',
+                            rows:       12,
+                            accept:     '.pem,.crt,.cer,.der,.p7b',
+                            onFiles:    (files, box) => void readFiles(files, box),
+                            onChanged:  () => inspectSoon()
+                        })}
+                        <p class="hint">
+                            The certificates that answer this controller's signing requests, each with the
+                            intermediates that lead to it - for any number of keys at once. Which key each one is
+                            for is read from the certificate itself. A file dropped on the box or chosen is read by
+                            this controller and put into the box as PEM; a private key in it is not: the key is made
+                            here and never arrives.
+                        </p>
+                        <span id="upload-files-note" class="form-error" role="alert"></span>
+
+                        <div id="upload-found" aria-live="polite">${foundView()}</div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn primary">Take them in</button>
+                            <span id="upload-note"  class="form-notice" role="status"></span>
+                            <span id="upload-error" class="form-error"  role="alert"></span>
+                        </div>
+
+                        <div id="upload-result">${resultView()}</div>
+
+                    </form>
+
+                </section>
+            `;
+
+        }
+
+
+        function foundView(): TemplateResult | typeof nothing {
+
+            if (foundProblem !== null)
+                return html`<p class="form-error">${foundProblem}</p>`;
+
+            if (found.length === 0)
+                return nothing;
+
+            return html`
+                <p class="hint">The box holds ${found.length} certificate(s):</p>
+                <ul class="found-certificates">
+                    ${repeat(found, one => one.id, one => html`
+                        <li data-found="${one.id}">
+                            <strong>${one.label}</strong>
+                            <code class="muted" title="SHA-256: ${one.thumbprint}">${one.id}</code>
+                            ${one.chainLength > 0 ? html`<span class="chip">+${one.chainLength} intermediate(s)</span>` : nothing}
+                            ${one.keyId !== null && one.refusal === null ? html`<span class="chip on">for key ${one.keyId}</span>` : nothing}
+                            <span class="muted">valid until ${one.notAfter.slice(0, 10)}</span>
+                            ${one.refusal === null ? nothing : html`<span class="form-error refusal">${one.refusal}</span>`}
+                        </li>
+                    `)}
+                </ul>
+            `;
+
+        }
+
+
+        function resultView(): TemplateResult | typeof nothing {
+
+            if (uploaded === null)
+                return nothing;
+
+            return html`
+                <ul class="upload-result">
+                    ${uploaded.taken.map(one => html`
+                        <li class="went-in">${one.label}: taken in for key ${one.id}${one.warnings.length > 0 ? html` - ${one.warnings.join(' ')}` : nothing}</li>
+                    `)}
+                    ${uploaded.refused.map(one => html`
+                        <li class="refused"><strong>${one.label}</strong>: ${one.error}</li>
+                    `)}
+                </ul>
+            `;
+
+        }
+
+
+        /** Ask what the box holds, once the typing has stopped. */
+        function inspectSoon(): void {
+            clearTimeout(inspectTimer);
+            inspectTimer = setTimeout(() => void inspectNow(), inspectAfter_ms);
+        }
+
+        /** Ask what the box holds now - and forget an answer to an earlier question. */
+        async function inspectNow(): Promise<void> {
+
+            const text  = content.querySelector<HTMLTextAreaElement>('#upload-pem')?.value.trim() ?? '';
+            const asked = ++inspection;
+
+            if (text.length === 0) {
+                found        = [];
+                foundProblem = null;
+                draw();
+                return;
+            }
+
+            try
+            {
+                const answer = await api.ocppServer.certificates.inspect({ pem: text });
+
+                if (cancelled || asked !== inspection)
+                    return;
+
+                found        = answer.certificates;
+                foundProblem = null;
+            }
+            catch (problem)
+            {
+                if (cancelled || asked !== inspection)
+                    return;
+
+                found        = [];
+                foundProblem = errorMessage(problem);
+            }
+
+            draw();
+
+        }
+
+
+        /** Files chosen or dropped: each read by the controller and put into the box as PEM, without a key - or why not. */
+        async function readFiles(files: File[], box: HTMLTextAreaElement): Promise<void> {
+
+            const problems: string[] = [];
+
+            must<HTMLElement>(content, '#upload-files-note').textContent = '';
+
+            for (const file of files)
+            {
+
+                if (file.size > largestFile) {
+                    problems.push(`'${file.name}' is ${Math.round(file.size / 1024)} kB, and a certificate is a few - almost certainly not the file you meant.`);
+                    continue;
+                }
+
+                try
+                {
+                    const answer = await api.ocppServer.certificates.inspect({ content: await base64Of(file) });
+
+                    if (cancelled)
+                        return;
+
+                    appendText(box, answer.pem);
+
+                    for (const one of answer.certificates.filter(certificate => certificate.hasPrivateKey))
+                        problems.push(`'${file.name}' brought the private key of ${one.label} along, which was left out: the key is made here and never arrives.`);
+                }
+                catch (problem)
+                {
+                    problems.push(problem instanceof ApiError && (problem.body as { passwordWanted?: boolean } | undefined)?.passwordWanted === true
+                                      ? `'${file.name}' opens only with a password - which a file of certificates alone does not need.`
+                                      : `'${file.name}': ${errorMessage(problem)}`);
+                }
+
+            }
+
+            if (!cancelled)
+                must<HTMLElement>(content, '#upload-files-note').textContent = problems.join(' ');
+
+        }
+
+
+        /** Every certificate in the box taken in, each under the key it is for. */
+        async function uploadAll(form: HTMLFormElement): Promise<void> {
+
+            const note  = must<HTMLElement>(content, '#upload-note');
+            const error = must<HTMLElement>(content, '#upload-error');
+            const text  = must<HTMLTextAreaElement>(content, '#upload-pem').value.trim();
+
+            note.textContent  = '';
+            error.textContent = '';
+
+            if (text.length === 0) {
+                error.textContent = 'Paste a certificate into the box, or drop a file on it, first.';
+                return;
+            }
+
+            let done: ServerCertificatesUploaded;
+
+            try
+            {
+                done = await api.ocppServer.certificates.uploadAll({ pem: text });
+            }
+            catch (problem)
+            {
+                // What was pasted stays in the box, to be corrected.
+                const said = problem instanceof ApiError ? problem.body as Partial<ServerCertificatesUploaded> | undefined : undefined;
+
+                if (said?.refused !== undefined) {
+                    uploaded = { taken: said.taken ?? [], refused: said.refused };
+                    draw();
+                }
+
+                must<HTMLElement>(content, '#upload-error').textContent = errorMessage(problem);
+                return;
+            }
+
+            if (cancelled)
+                return;
+
+            uploaded = done;
+            justMade = null;
+            store    = await api.ocppServer.certificates.get();
+            server   = await api.ocppServer.get();
+
+            if (done.refused.length === 0) {
+                found        = [];
+                foundProblem = null;
+                draw();
+                // Taken in, every one of them: the box goes back to an empty one.
+                form.reset();
+            }
+            else
+                draw();
+
+            must<HTMLElement>(content, '#upload-note').textContent =
+                done.refused.length === 0
+                    ? `Taken in: ${done.taken.length} certificate(s).`
+                    : `Taken in: ${done.taken.length} certificate(s); ${done.refused.length} not.`;
+
+        }
+
+
+        // ---------------------------------------------------------------------
+        // One key
+        // ---------------------------------------------------------------------
 
         function create(event: SubmitEvent): void {
 
@@ -405,6 +798,9 @@ export const serverCertificatesPage: Page = {
                 store            = certificates;
                 server           = configuration;
                 algorithmChosen  = undefined;
+                found            = [];
+                foundProblem     = null;
+                uploaded         = null;
 
                 draw();
 
@@ -424,7 +820,7 @@ export const serverCertificatesPage: Page = {
 
         void load();
 
-        return () => { cancelled = true; release(); };
+        return () => { cancelled = true; clearTimeout(inspectTimer); release(); };
 
     }
 

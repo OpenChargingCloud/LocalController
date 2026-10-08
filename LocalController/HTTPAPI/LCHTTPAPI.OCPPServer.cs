@@ -18,7 +18,9 @@
 #region Usings
 
 using System.Diagnostics.CodeAnalysis;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.RegularExpressions;
 
 using Newtonsoft.Json.Linq;
 
@@ -26,6 +28,7 @@ using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 
 using cloud.charging.open.LocalController.OCPP;
+using cloud.charging.open.protocols.WWCP.Node.Certificates;
 using cloud.charging.open.protocols.WWCP.Node.Web;
 
 #endregion
@@ -63,6 +66,8 @@ namespace cloud.charging.open.LocalController
 
             AddHandler(root + "certificates",         GetCertificates,          HTTPMethod.GET);
             AddHandler(root + "certificates",         PostCertificateRequest,   HTTPMethod.POST);
+            AddHandler(root + "certificates/inspect", PostCertificateInspect,   HTTPMethod.POST);
+            AddHandler(root + "certificates/upload",  PostCertificateUpload,    HTTPMethod.POST);
             AddHandler(root + "certificates/{id}/csr", GetCertificateRequest,   HTTPMethod.GET);
             AddHandler(root + "certificates/{id}",    PutCertificate,           HTTPMethod.PUT);
             AddHandler(root + "certificates/{id}",    DeleteCertificate,        HTTPMethod.DELETE);
@@ -311,6 +316,195 @@ namespace cloud.charging.open.LocalController
                    );
 
         }
+
+        /// <summary>
+        /// POST .../certificates/inspect with {"pem"} or {"content", "password"}:
+        /// what a text or a file holds, certificate by certificate, and which
+        /// key of this controller each belongs to - without taking anything in.
+        /// </summary>
+        /// <remarks>
+        /// A private key that came along is not handed back: the key of a
+        /// certificate this controller presents is the one it generated, and
+        /// none arrives. The certificate it came with is said to be refused for
+        /// it, and the text that goes back into the page's box is the
+        /// certificates alone.
+        /// </remarks>
+        private Task<HTTPResponse> PostCertificateInspect(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permission.Edit(NodeResources.Certificates), true, out _, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryParseJSONObject(Request, out var json, out var errorResponse))
+                return Task.FromResult(errorResponse);
+
+            if (!TryReadContent(json, out var bytes, out var contentError))
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, contentError));
+
+            var inspection = CertificateStore.Inspect(bytes, json.Value<String>("password"));
+
+            if (inspection.Error is not null)
+                return Task.FromResult(
+                           ErrorJSON(Request, HTTPStatusCode.BadRequest, inspection.Error,
+                                     inspection.PasswordWanted ? new JProperty("passwordWanted", true) : null)
+                       );
+
+            var found = inspection.Certificates.Select(certificate => (certificate, keyId: KeyOf(certificate))).ToList();
+
+            return Task.FromResult(
+                       JSONResponse(Request, HTTPStatusCode.OK, new JObject(
+                           new JProperty("certificates", new JArray(found.Select(one => new JObject(
+                               new JProperty("id",             one.certificate.Id),
+                               new JProperty("thumbprint",     one.certificate.Thumbprint),
+                               new JProperty("label",          one.certificate.CommonName),
+                               new JProperty("subject",        one.certificate.Subject),
+                               new JProperty("issuer",         one.certificate.Issuer),
+                               new JProperty("notBefore",      one.certificate.NotBefore.UtcDateTime),
+                               new JProperty("notAfter",       one.certificate.NotAfter. UtcDateTime),
+                               new JProperty("chainLength",    one.certificate.ChainLength),
+                               new JProperty("hasPrivateKey",  one.certificate.HasPrivateKey),
+                               new JProperty("keyId",          one.keyId),
+                               new JProperty("refusal",        RefusalOf(one.certificate, one.keyId))
+                           )))),
+                           new JProperty("pem",          String.Concat(inspection.Certificates.Select(certificate => WithoutKey(certificate.Pem))))
+                       ))
+                   );
+
+        }
+
+        /// <summary>
+        /// POST .../certificates/upload with {"pem"} or {"content", "password"}:
+        /// every certificate in a text or a file taken in under the key of this
+        /// controller it belongs to - each answered on its own, {"taken": [{"id",
+        /// "label", "warnings"}], "refused": [{"label", "error"}]}, and refused
+        /// as a whole, with 400, where none was taken in.
+        /// </summary>
+        /// <remarks>
+        /// Which key a certificate is for is worked out from the certificate,
+        /// as it is for one uploaded under a key: the page that pastes several
+        /// at once - a renewal for each key, say - need not know which is
+        /// whose. One that came with its private key is refused for it.
+        /// </remarks>
+        private Task<HTTPResponse> PostCertificateUpload(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permission.Edit(NodeResources.Certificates), true, out var user, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryParseJSONObject(Request, out var json, out var errorResponse))
+                return Task.FromResult(errorResponse);
+
+            if (!TryReadContent(json, out var bytes, out var contentError))
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, contentError));
+
+            var inspection = CertificateStore.Inspect(bytes, json.Value<String>("password"));
+
+            if (inspection.Error is not null)
+                return Task.FromResult(
+                           ErrorJSON(Request, HTTPStatusCode.BadRequest, inspection.Error,
+                                     inspection.PasswordWanted ? new JProperty("passwordWanted", true) : null)
+                       );
+
+            var taken   = new JArray();
+            var refusedOnes = new JArray();
+
+            foreach (var certificate in inspection.Certificates)
+            {
+
+                if (certificate.HasPrivateKey)
+                {
+                    refusedOnes.Add(new JObject(new JProperty("label", certificate.CommonName),
+                                                new JProperty("error", RefusalOf(certificate, KeyOf(certificate)))));
+                    continue;
+                }
+
+                if (!Controller.ServerCertificates.TryAddCertificate(
+                         WithoutKey(certificate.Pem),
+                         Controller.OCPPServerSettings.ReachableAs ?? [],
+                         out var id,
+                         out var warnings,
+                         out var error,
+                         out var notSaved))
+                {
+
+                    if (notSaved)
+                        return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, error, notSaved));
+
+                    refusedOnes.Add(new JObject(new JProperty("label", certificate.CommonName),
+                                                new JProperty("error", error)));
+                    continue;
+
+                }
+
+                Log.Notice($"'{user.Id}' uploaded a certificate for the key '{id}'.", "ocpp", "tls", "web");
+
+                taken.Add(new JObject(new JProperty("id",        id),
+                                      new JProperty("label",     certificate.CommonName),
+                                      new JProperty("warnings",  new JArray(warnings))));
+
+            }
+
+            var answer = new JObject(new JProperty("taken",   taken),
+                                     new JProperty("refused", refusedOnes));
+
+            if (taken.Count == 0)
+            {
+                answer.Add("error", refusedOnes.Count == 1
+                                        ? refusedOnes[0]!.Value<String>("error")
+                                        : $"None of the {refusedOnes.Count} certificates was taken in.");
+                return Task.FromResult(JSONResponse(Request, HTTPStatusCode.BadRequest, answer));
+            }
+
+            return Task.FromResult(JSONResponse(Request, HTTPStatusCode.OK, answer));
+
+        }
+
+        /// <summary>
+        /// Which key of this controller the leaf of an inspected certificate belongs to, or nothing.
+        /// </summary>
+        private String? KeyOf(InspectedCertificate Certificate)
+        {
+
+            var collection = new X509Certificate2Collection();
+
+            collection.ImportFromPem(Certificate.Pem);
+
+            try
+            {
+                return collection.Count > 0
+                           ? Controller.ServerCertificates.KeyOf(collection[0])
+                           : null;
+            }
+            finally
+            {
+                foreach (var one in collection)
+                    one.Dispose();
+            }
+
+        }
+
+        /// <summary>
+        /// Why a certificate in a text would not be taken in, as far as can be
+        /// said before trying: a key that came along, or no key here it is for.
+        /// </summary>
+        private static String? RefusalOf(InspectedCertificate  Certificate,
+                                         String?               KeyId)
+
+            => Certificate.HasPrivateKey
+                   ? "That certificate came with its private key, and none arrives here: the key of a certificate " +
+                     "this local controller presents is the one it generated for its signing request. " +
+                     "Take the certificate on its own."
+                   : KeyId is null
+                         ? "It belongs to no key of this local controller. A certificate is only usable here if it " +
+                           "answers a signing request made here."
+                         : null;
+
+        /// <summary>
+        /// A PEM with every private key block taken out of it.
+        /// </summary>
+        private static String WithoutKey(String Pem)
+
+            => Regex.Replace(Pem, @"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----\s*", "");
 
         /// <summary>
         /// DELETE .../certificates/{id}: throw a key and its certificate away.

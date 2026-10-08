@@ -550,7 +550,7 @@ namespace cloud.charging.open.LocalController
                 return false;
             }
 
-            var entry = Certificates.Get(handle) ?? Certificates.ByFingerprint(handle);
+            var entry = ChosenIdentity(handle);
 
             if (entry is null)
             {
@@ -674,6 +674,23 @@ namespace cloud.charging.open.LocalController
         #region UsedByCSMS(Handle)
 
         /// <summary>
+        /// The certificate the CSMS connection names, by its handle or its
+        /// fingerprint - as the TLS identity it is kept as, where it is kept as
+        /// one among other kinds, and otherwise as whatever it is kept as, which
+        /// is then refused for what it is.
+        /// </summary>
+        private CertificateEntry? ChosenIdentity(String Handle)
+        {
+
+            var any = Certificates.Get(Handle) ?? Certificates.ByFingerprint(Handle);
+
+            return any is null
+                       ? null
+                       : Certificates.Get(any.Id, CertificateKind.TLSIdentity) ?? any;
+
+        }
+
+        /// <summary>
         /// The setting of the CSMS connection that names this certificate, or
         /// null where none does.
         /// </summary>
@@ -713,7 +730,7 @@ namespace cloud.charging.open.LocalController
             if (csmsSettings.ChosenClientCertificate is String handle)
             {
 
-                var entry = Certificates.Get(handle) ?? Certificates.ByFingerprint(handle);
+                var entry = ChosenIdentity(handle);
 
                 json.Add("clientCertificateIs", entry is null
                                                     ? new JObject(

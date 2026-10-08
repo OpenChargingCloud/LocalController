@@ -138,9 +138,8 @@ namespace cloud.charging.open.LocalController.Tests
 
                 Assert.That(store["kinds"]!["tlsRoot"]!["usages"]?.Values<String>(),         Is.EqualTo(new[] { "dns", "nts" }), "what a page may offer a root");
                 Assert.That(store["kinds"]!["tlsServer"]!["usages"]?.Values<String>(),       Is.EqualTo(new[] { "dns", "nts" }));
-                Assert.That(store["kinds"]!["tlsIdentity"]!["hasUsages"]!.Value<Boolean>(),  Is.False,
+                Assert.That(store["kinds"]!["tlsIdentity"]!["usages"]?.Children().Any(),     Is.False,
                             "a local controller names no listener an identity could be told of, so a page offers it nothing - not the services a root vouches for");
-                Assert.That(store["kinds"]!["tlsIdentity"]!["usages"]?.Children().Any(),     Is.False);
 
                 Assert.That(Path.GetFullPath(store["directory"]!.Value<String>()!),
                             Is.EqualTo(Path.GetFullPath(Path.Combine(Directory, "certificates"))),

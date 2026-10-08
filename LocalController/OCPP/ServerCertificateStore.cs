@@ -786,6 +786,32 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
+        #region KeyOf(Certificate)
+
+        /// <summary>
+        /// The key of this controller the given certificate belongs to - by its
+        /// public key, which is the only thing that says so - or nothing.
+        /// </summary>
+        /// <remarks>
+        /// What the upload asks before anything is taken in, so that a page can
+        /// say of each certificate in a text which key it is for, and of one
+        /// that is for none that it is not this controller's.
+        /// </remarks>
+        /// <param name="Certificate">A certificate.</param>
+        public String? KeyOf(X509Certificate2 Certificate)
+        {
+
+            var spki = Certificate.PublicKey.ExportSubjectPublicKeyInfo();
+
+            lock (updateLock)
+            {
+                return publicKeys.FirstOrDefault(pair => pair.Value.AsSpan().SequenceEqual(spki)).Key;
+            }
+
+        }
+
+        #endregion
+
         #region TryRemove(Id, out Error)
 
         /// <summary>

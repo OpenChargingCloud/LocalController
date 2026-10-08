@@ -5,7 +5,7 @@
  * follows the one chosen, and a request made empties its form.
  */
 
-import { anOCPPServer, asked, change, field, open, submit, until, type Asked } from '../../test/controller.ts';
+import { anOCPPServer, asked, change, field, open, refused, submit, type, until, type Asked } from '../../test/controller.ts';
 
 import { strict as assert }  from 'node:assert';
 import { describe, it }      from 'node:test';
@@ -22,10 +22,44 @@ function aKey(id: string): ServerCertificate {
 
 let held: ServerCertificates;
 
-function controller({ method, path }: Asked): unknown {
+/** A certificate a key was given, for the list of all of them. */
+function withCertificate(id: string, subject: string, thumbprint: string, inUse = false): ServerCertificate {
+    return { ...aKey(id), hasCertificate: true, inUse,
+             certificate: { subject, issuer: 'CN=Fleet CA', serialNumber: '01', thumbprint, notBefore: '2026-09-01T00:00:00Z',
+                            notAfter: '2027-09-01T00:00:00Z', subjectAltNames: [ 'lc001.example.org' ], intermediates: 1,
+                            state: 'valid', daysRemaining: 330 } };
+}
+
+/** What the stand-in finds in a text: k1's certificate, and one of nobody's key. */
+const foundInText = [
+    { id: '1111111111111111', thumbprint: '11'.repeat(32), label: 'lc001.example.org', subject: 'CN=lc001.example.org', issuer: 'CN=Fleet CA',
+      notBefore: '2026-09-01T00:00:00Z', notAfter: '2027-09-01T00:00:00Z', chainLength: 1, hasPrivateKey: false, keyId: 'k1', refusal: null },
+    { id: '2222222222222222', thumbprint: '22'.repeat(32), label: 'Somebody Else', subject: 'CN=Somebody Else', issuer: 'CN=Somebody Else',
+      notBefore: '2026-09-01T00:00:00Z', notAfter: '2027-09-01T00:00:00Z', chainLength: 0, hasPrivateKey: false, keyId: null,
+      refusal: 'It belongs to no key of this local controller.' }
+];
+
+let refuseTheUpload = false;
+
+function controller({ method, path, body }: Asked): unknown {
 
     if (path === '/configuration/ocpp-server')
         return anOCPPServer();
+
+    if (path === '/configuration/ocpp-server/certificates/inspect') {
+        const { content } = body as { content?: string };
+        if (content !== undefined)
+            return { certificates: [ { ...foundInText[0]!, hasPrivateKey: true, refusal: 'That certificate came with its private key.' } ],
+                     pem: '-----BEGIN CERTIFICATE-----\nFROMFILE\n-----END CERTIFICATE-----\n' };
+        return { certificates: foundInText, pem: '' };
+    }
+
+    if (path === '/configuration/ocpp-server/certificates/upload') {
+        if (refuseTheUpload)
+            return refused(400, 'None of the 2 certificates was taken in.', { taken: [], refused: [ { label: 'Somebody Else', error: 'Not ours.' } ] });
+        held = { ...held, entries: held.entries.map(entry => entry.id === 'k1' ? withCertificate('k1', 'CN=lc001.example.org', '11'.repeat(32), true) : entry) };
+        return { taken: [ { id: 'k1', label: 'lc001.example.org', warnings: [] } ], refused: [] };
+    }
 
     if (path === '/configuration/ocpp-server/certificates' && method === 'GET')
         return held;
@@ -51,12 +85,13 @@ function controller({ method, path }: Asked): unknown {
 
 }
 
-async function opened(): Promise<HTMLElement> {
+async function opened(path = '/configuration/ocpp-server/certificates', permissions = [ 'certificates:read', 'certificates:edit' ]): Promise<HTMLElement> {
+    refuseTheUpload = false;
     held = { directory: 'certificates', now: '2026-10-04T12:00:00Z', servedId: null, canImportPrivateKeys: false,
              entries:    [ aKey('k1'), aKey('k2') ],
              algorithms: [ { id: 'ecdsa-p256', name: 'ECDSA P-256', remark: 'What every station takes.' },
                            { id: 'rsa-4096',   name: 'RSA 4096',    remark: 'Takes a while to make.' } ] } as ServerCertificates;
-    return open(serverCertificatesPage, '/configuration/ocpp-server/certificates', [ 'certificates:read', 'certificates:edit' ],
+    return open(serverCertificatesPage, path, permissions,
                 controller, root => root.querySelector('.upload-form[data-id="k2"]') !== null);
 }
 
@@ -131,6 +166,103 @@ describe('the server certificates', () => {
         assert.equal(field<HTMLSelectElement>(root, '#create-form', 'algorithm').value,   'ecdsa-p256');
         assert.equal(root.querySelector('#algorithm-remark')!.textContent!.trim(),        'What every station takes.');
         assert.match(root.querySelector('pre.pem')?.textContent ?? '', /BEGIN CERTIFICATE REQUEST/);
+
+    });
+
+});
+
+
+describe('the server certificates, in their tabs', () => {
+
+    const box  = (root: HTMLElement) => root.querySelector<HTMLTextAreaElement>('#upload-pem')!;
+    const text = '-----BEGIN CERTIFICATE-----\nA\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nB\n-----END CERTIFICATE-----\n';
+
+    it('list every certificate once, by name or by fingerprint, narrowed down as typed', async () => {
+
+        const root = await opened('/configuration/ocpp-server/certificates?tab=all');
+
+        held = { ...held, entries: [ withCertificate('k1', 'CN=zulu.example.org', 'aa'.repeat(32)),
+                                     withCertificate('k2', 'CN=Alpha.example.org', 'bb'.repeat(32), true), aKey('k3') ] };
+        root.querySelector<HTMLButtonElement>('#reload')?.click();
+        await until(() => root.querySelectorAll('#panel-all [data-certificate]').length === 2, 'the certificates are not listed');
+
+        const listed = () => [ ...root.querySelectorAll<HTMLElement>('#panel-all [data-certificate]') ].map(card => card.dataset['certificate']);
+
+        assert.equal(root.querySelector<HTMLElement>('#panel-all')!.hidden, false, 'the tab the address names is not shown');
+        assert.deepEqual(listed(), [ 'k2', 'k1' ], 'not by name, in any case, or a key without a certificate is listed');
+        assert.match(root.querySelector('#panel-all [data-certificate="k2"]')!.textContent!, /being presented/);
+
+        const byFingerprint = root.querySelector<HTMLInputElement>('#panel-all input[name="order"][value="fingerprint"]')!;
+        byFingerprint.checked = true;
+        byFingerprint.dispatchEvent(new Event('change', { bubbles: true }));
+        assert.deepEqual(listed(), [ 'k1', 'k2' ]);
+
+        type(root.querySelector<HTMLInputElement>('#all-filter')!, 'ALPHA');
+        assert.deepEqual(listed(), [ 'k2' ]);
+
+    });
+
+    it('say which key each certificate in the box is for, and which is for none', async () => {
+
+        const root = await opened('/configuration/ocpp-server/certificates?tab=upload');
+
+        type(box(root), text);
+        await until(() => root.querySelectorAll('#upload-found [data-found]').length === 2, 'what the box holds is not said');
+
+        assert.match(root.querySelector('[data-found="1111111111111111"]')!.textContent!, /for key k1/);
+        assert.match(root.querySelector('[data-found="2222222222222222"] .refusal')!.textContent!, /belongs to no key/);
+
+    });
+
+    it('take every certificate in the box in, each under its key, and empty the box', async () => {
+
+        const root = await opened('/configuration/ocpp-server/certificates?tab=upload');
+
+        type(box(root), text);
+        submit(root, '#upload-all-form');
+        await until(() => (root.querySelector('#upload-note')?.textContent ?? '').startsWith('Taken in'), 'nothing was taken in');
+
+        assert.deepEqual(asked.find(one => one.path.endsWith('/certificates/upload'))!.body, { pem: text.trim() });
+        assert.match(root.querySelector('#upload-result .went-in')!.textContent!, /lc001\.example\.org: taken in for key k1/);
+        assert.equal(box(root).value, '', 'what was taken in is still in the box');
+        assert.ok(root.querySelector('#panel-keys .entry.in-use') !== null, 'the key that took its certificate in is not drawn as such');
+
+    });
+
+    it('keep the box, and say why, where nothing was taken in', async () => {
+
+        const root = await opened('/configuration/ocpp-server/certificates?tab=upload');
+
+        type(box(root), text);
+        refuseTheUpload = true;
+        submit(root, '#upload-all-form');
+        await until(() => (root.querySelector('#upload-error')?.textContent ?? '') !== '', 'the refusal is not said');
+
+        assert.equal(box(root).value, text);
+        assert.match(root.querySelector('#upload-result .refused')!.textContent!, /Somebody Else: Not ours\./);
+
+    });
+
+    it('put a file dropped on the box into it without its key, and say that the key was left out', async () => {
+
+        const root = await opened('/configuration/ocpp-server/certificates?tab=upload');
+        const drop = new Event('drop', { bubbles: true, cancelable: true });
+
+        Object.defineProperty(drop, 'dataTransfer', { value: { files: [ new File([ 'p12' ], 'lc001.p12') ], getData: () => '' } });
+        root.querySelector('.pem-box')!.dispatchEvent(drop);
+
+        await until(() => box(root).value.includes('FROMFILE'), 'the file is not in the box');
+        await until(() => /left out/.test(root.querySelector('#upload-files-note')?.textContent ?? ''), 'the key left out is not said');
+
+        assert.doesNotMatch(box(root).value, /PRIVATE KEY/);
+
+    });
+
+    it('offer no upload to somebody who may only look', async () => {
+
+        const root = await opened('/configuration/ocpp-server/certificates', [ 'certificates:read' ]);
+
+        assert.ok(root.querySelector('#tab-upload') === null && root.querySelector('#upload-all-form') === null, 'a reader is offered the upload');
 
     });
 
