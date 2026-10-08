@@ -4,6 +4,7 @@
          type Certificate        as NodeCertificate,
          type CertificateImport  as NodeCertificateImport,
          type CertificateStore   as NodeCertificateStore,
+         type ChosenCertificate,
          type NodeConfiguration,
          type NodeMe,
          type NodeResource,
@@ -63,9 +64,9 @@ export type CertificateImport = NodeCertificateImport<CertificateKind>;
 
 /** The whole store, and which of it the CSMS connection signs in with. */
 export interface CertificateStore extends NodeCertificateStore<CertificateKind> {
-    /** Which handle the CSMS connection signs in with under security profile 3. */
+    /** Which handle the CSMS connection signs in with under security profile 3, and as which kind. */
     chosen?: {
-        csmsClientCertificate:  string | null;
+        csmsClientCertificate:  ChosenCertificate | null;
     };
 }
 

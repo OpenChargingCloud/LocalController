@@ -26,6 +26,8 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using cloud.charging.open.protocols.WWCP.Node.Certificates;
+
 #endregion
 
 namespace cloud.charging.open.LocalController.Tests
@@ -176,6 +178,9 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.That(Controller.TryUpdateCSMSConfiguration(new JObject(new JProperty("clientCertificate", id)), out var chooseError),
                         Is.True, chooseError);
 
+            var asServer          = Controller.WhatUses(id, CertificateKind.TLSServer);
+            var asIdentity        = Controller.WhatUses(id, CertificateKind.TLSIdentity);
+
             var (_, store)        = await Send(http, HttpMethod.Get,    "api/v1/certificates");
             var (_, csms)         = await Send(http, HttpMethod.Get,    "api/v1/configuration/csms");
             var (refused, said)   = await Send(http, HttpMethod.Delete, path);
@@ -191,7 +196,11 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
 
-                Assert.That(store["chosen"]!["csmsClientCertificate"]!.Value<String>(),  Is.EqualTo(id), "the store's page marks it");
+                Assert.That(store["chosen"]!["csmsClientCertificate"]!.Value<String>("id"),    Is.EqualTo(id), "the store's page marks it");
+                Assert.That(store["chosen"]!["csmsClientCertificate"]!.Value<String>("kind"),  Is.EqualTo("tlsIdentity"), "as the TLS identity it is kept as");
+
+                Assert.That(asServer,                                                    Is.Null,     "kept as a server's certificate too, it would go as that");
+                Assert.That(asIdentity,                                                  Does.Contain("'csms.clientCertificate'"));
 
                 Assert.That(csms["clientCertificateIs"]!["label"]!.Value<String>(),      Is.EqualTo("Towards the CSMS"));
                 Assert.That(csms["clientCertificateIs"]!["usable"]!.Value<Boolean>(),    Is.True);

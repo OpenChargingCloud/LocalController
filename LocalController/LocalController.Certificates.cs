@@ -19,6 +19,8 @@
 
 using Newtonsoft.Json.Linq;
 
+using cloud.charging.open.protocols.WWCP.Node.Certificates;
+
 #endregion
 
 namespace cloud.charging.open.LocalController
@@ -35,25 +37,36 @@ namespace cloud.charging.open.LocalController
         #region (protected override) CompleteCertificatesJSON(JSON)
 
         /// <summary>
-        /// Which handle the CSMS connection signs in with, so that the page can
-        /// mark it without also reading the CSMS settings.
+        /// Which handle the CSMS connection signs in with, and as which kind,
+        /// so that the page can mark it without also reading the CSMS settings
+        /// - as the TLS identity it is kept as, and not as a root or a server's
+        /// certificate it may be kept as too.
         /// </summary>
         protected override void CompleteCertificatesJSON(JObject JSON)
         {
 
+            var chosen   = csmsSettings.ChosenClientCertificate;
+            var identity = chosen is not null ? ChosenIdentity(chosen) : null;
+
             JSON["chosen"] = new JObject(
-                                 new JProperty("csmsClientCertificate",  csmsSettings.ChosenClientCertificate)
+                                 new JProperty("csmsClientCertificate",  identity is not null
+                                                                             ? new JObject(
+                                                                                   new JProperty("id",    identity.Id),
+                                                                                   new JProperty("kind",  identity.Kind.AsText())
+                                                                               )
+                                                                             : chosen)
                              );
 
         }
 
         #endregion
 
-        #region (override) WhatUses(Handle)
+        #region (override) WhatUses(Handle, Kind)
 
         /// <summary>
         /// The CSMS connection, where it signs in with the certificate of this
-        /// handle - as the sentence a refusal to delete it says.
+        /// handle as the kind it would be deleted as - as the sentence a
+        /// refusal to delete it says.
         /// </summary>
         /// <remarks>
         /// Deleting it anyway would leave a controller configured to sign in
@@ -61,9 +74,10 @@ namespace cloud.charging.open.LocalController
         /// dialling rather than here - and switching it off is what somebody
         /// taking a certificate out of service usually meant.
         /// </remarks>
-        public override String? WhatUses(String Handle)
+        public override String? WhatUses(String            Handle,
+                                         CertificateKind?  Kind)
 
-            => UsedByCSMS(Handle) is String field
+            => UsedByCSMS(Handle, Kind) is String field
                    ? $"That certificate is what 'csms.{field}' names. Choose another one for the CSMS " +
                       "connection first, or switch this one off instead of deleting it."
                    : null;

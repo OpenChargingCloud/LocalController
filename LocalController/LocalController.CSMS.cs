@@ -691,10 +691,12 @@ namespace cloud.charging.open.LocalController
         }
 
         /// <summary>
-        /// The setting of the CSMS connection that names this certificate, or
-        /// null where none does.
+        /// The setting of the CSMS connection that names this certificate - as
+        /// the given kind, the kind it signs in with it as, where one is given -
+        /// or null where none does.
         /// </summary>
-        public String? UsedByCSMS(String? Handle)
+        public String? UsedByCSMS(String?           Handle,
+                                  CertificateKind?  Kind   = null)
         {
 
             if (Handle is null or { Length: 0 } || csmsSettings.ChosenClientCertificate is not String chosen)
@@ -702,8 +704,9 @@ namespace cloud.charging.open.LocalController
 
             var entry = Certificates.Get(Handle);
 
-            return String.Equals(chosen, Handle,          StringComparison.OrdinalIgnoreCase) ||
-                   String.Equals(chosen, entry?.Thumbprint, StringComparison.OrdinalIgnoreCase)
+            return (String.Equals(chosen, Handle,          StringComparison.OrdinalIgnoreCase) ||
+                    String.Equals(chosen, entry?.Thumbprint, StringComparison.OrdinalIgnoreCase)) &&
+                   (Kind is null || ChosenIdentity(chosen)?.Kind == Kind)
                        ? "clientCertificate"
                        : null;
 
