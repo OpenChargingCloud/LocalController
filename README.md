@@ -43,7 +43,8 @@ CSMS and the charging station port on top.
 | DNS client | the name servers and how they are asked; a test lookup, of all of them or of one | `dns:edit`, `dns:run` |
 | NTS client | the time servers and the rules for believing them; a synchronisation, and a test of one server step by step | `nts:edit`, `nts:run` |
 | CSMS connection | where the controller reports to, how it dials, and what it signs in with | `csms:edit` |
-| Certificate store | the TLS roots of the servers the controller connects to, their certificates, and what it presents in TLS itself | `certificates:edit` |
+| Certificate store | the TLS roots of the servers the controller connects to, and their certificates - certificates alone, no private key | `certificates:edit` |
+| Identities | who the controller is as a client, each with its private key: the TLS identity it signs in to the CSMS with | `certificates:edit` |
 | Charging stations | the server the charging stations connect to: its port, the security profiles it accepts, the names it is reachable as, what it logs | `stations:edit` |
 | Logins and groups | which charging stations may sign in, with what, and what their group allows them | `stations:edit` |
 | Server certificates | the keys this controller presents, and the certificates that answer them | `certificates:edit` |
@@ -79,7 +80,7 @@ controller is restarted, whether it comes at the start or on the way back. The
 CSMS page says which of these it is, and since when the line is up.
 
 Security profile 3 signs in with a TLS identity of the certificate store -
-chosen on the CSMS page, and kept as `clientCertificate` in the `csms` section
+looked after on the Identities page, chosen on the CSMS page, and kept as `clientCertificate` in the `csms` section
 by its handle - rather than with a password; one that is not chosen, not in the
 store, switched off or out of its validity is said so, and not dialled with.
 Over TLS, the CSMS's certificate is judged by the node as a time server's is:
@@ -392,10 +393,16 @@ with under security profile 3 among them. It lives in `certificates/` beside
 `configuration.json`, one file per certificate and an `index.json` saying what
 each is called, whether it is switched on and what it is kept for; a file
 copied into the right directory by hand is taken in at the next start. One
-certificate may be kept as several kinds - a TLS root and a kind made up, say -
-and the page shows it in three tabs: by usage, every certificate once, and the
-upload, where certificates are pasted or files dropped and every one of them is
-kept as every kind ticked.
+certificate may be kept as several kinds - a TLS root and a kind made up, say.
+
+It is looked after on two pages. **Certificate store** keeps certificates
+alone, with no private key: the TLS roots and the server certificates - an
+upload there leaves a key in the box out, and says where it goes.
+**Identities** keeps who the controller is as a client, each with its key: the
+TLS identities, and the one the CSMS connection signs in with is marked there.
+Each page has three tabs: by usage, every certificate once, and the upload,
+where certificates are pasted or files dropped and every one of them is kept as
+every kind ticked.
 
 A TLS root and a server certificate are told what they are for - the name
 servers, the time servers, or every use - at the upload and later: a root kept

@@ -63,6 +63,15 @@ async function opened(): Promise<HTMLElement> {
 
 describe('the CSMS page', () => {
 
+    it('sends whoever looks for the identity profile 3 signs in with to the Identities, where who the controller is as a client is kept', async () => {
+
+        const root = await opened();
+
+        assert.ok(root.querySelector('a[href$="/configuration/identities"]') !== null, 'the identity is not looked for on the Identities');
+        assert.ok(root.querySelector('a[href$="/configuration/certificates"]') === null, 'the identity is looked for among the certificates, which keep no key');
+
+    });
+
     it('keeps what is typed into the credentials, and its focus, while the connection is saved', async () => {
 
         const root      = await opened();

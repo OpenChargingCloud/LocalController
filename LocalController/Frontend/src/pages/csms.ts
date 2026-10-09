@@ -174,7 +174,7 @@ export const csmsPage: Page = {
                             <strong>Profile 1 sends the password in the clear.</strong> The line to a backend
                             crosses networks this site does not own, so profile 2 is the least that makes sense
                             outside a laboratory. Profile 3 signs in with a TLS identity of this controller's own,
-                            chosen below from the <a href="${toURL('/configuration/certificates')}">certificate store</a>.
+                            chosen below from its <a href="${toURL('/configuration/identities')}">identities</a>.
                         </div>
 
                         ${identityField(settings)}

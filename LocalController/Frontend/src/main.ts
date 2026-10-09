@@ -30,6 +30,7 @@ startNode({
             nodeMenu.nts,
             { path: '/configuration/csms',                      label: 'CSMS connection',     icon: 'fa-satellite-dish',    permission: [ 'csms:read' ]         },
             { ...nodeMenu.certificates,                         label: 'Certificate store',   icon: 'fa-vault'                                                  },
+            nodeMenu.identities,
             { path: '/configuration/ocpp-server',               label: 'Charging stations',   icon: 'fa-charging-station',  permission: [ 'stations:read' ]     },
             { path: '/configuration/ocpp-server/logins',        label: 'Logins and groups',   icon: 'fa-users-gear',        permission: [ 'stations:read' ]     },
             { path: '/configuration/ocpp-server/certificates',  label: 'Server certificates', icon: 'fa-certificate',       permission: [ 'certificates:read' ] },
@@ -41,7 +42,8 @@ startNode({
     // "Certificate store", because there is a page called "Server certificates"
     // as well - the charging station server's. And the certificate the line up
     // to the CSMS signs in with, which the controller does not let go of until
-    // another one is chosen on the CSMS page.
+    // another one is chosen on the CSMS page: a TLS identity, marked on the
+    // Identities page, where who the controller is as a client is kept.
     certificates: {
         title:   'Certificate store',
         chosen:  {
