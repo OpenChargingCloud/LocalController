@@ -87,7 +87,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(roles,       Is.EquivalentTo(new[] { "systemadmin" }));
-                Assert.That(permissions, Is.EquivalentTo(from resource  in new[] { "configuration", "dns", "nts", "certificates", "csms", "stations" }
+                Assert.That(permissions, Is.EquivalentTo(from resource  in new[] { "configuration", "dns", "nts", "certificates", "ssh", "csms", "stations" }
                                                          from operation in new[] { "read", "edit", "run" }
                                                          select $"{resource}:{operation}"));
             });

@@ -28,6 +28,7 @@ startNode({
         nodeMenu.configuration([
             nodeMenu.dns,
             nodeMenu.nts,
+            nodeMenu.ssh,
             { path: '/configuration/csms',                      label: 'CSMS connection',     icon: 'fa-satellite-dish',    permission: [ 'csms:read' ]         },
             { ...nodeMenu.certificates,                         label: 'Certificate store',   icon: 'fa-vault'                                                  },
             nodeMenu.identities,

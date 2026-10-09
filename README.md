@@ -42,6 +42,7 @@ CSMS and the charging station port on top.
 | Configuration | nothing - it answers "what am I running" | `configuration:read` |
 | DNS client | the name servers and how they are asked; a test lookup, of all of them or of one | `dns:edit`, `dns:run` |
 | NTS client | the time servers and the rules for believing them; a synchronisation, and a test of one server step by step | `nts:edit`, `nts:run` |
+| SSH server | whether the command line is served over SSH, on which port, and whether passwords open it - in effect at once; its host key, who is connected, the keys of the accounts and what it offers | `ssh:edit` |
 | CSMS connection | where the controller reports to, how it dials, and what it signs in with | `csms:edit` |
 | Certificate store | the TLS roots of the servers the controller connects to, and their certificates - certificates alone, no private key | `certificates:edit` |
 | Identities | who the controller is as a client, each with its private key: the TLS identity it signs in to the CSMS with | `certificates:edit` |

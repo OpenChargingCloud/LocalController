@@ -208,7 +208,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(lc.Roles,             Is.EqualTo(new[] { "viewer", "cpo", WWCPNode.AdminRole }));
-                Assert.That(lc.Access.Resources,  Is.EqualTo(new[] { "configuration", "dns", "nts", "certificates", "csms", "stations" }));
+                Assert.That(lc.Access.Resources,  Is.EqualTo(new[] { "configuration", "dns", "nts", "certificates", "ssh", "csms", "stations" }));
             });
 
         }
@@ -406,6 +406,8 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("POST",    "api/v1/configuration/ocpp-server/trust",                   "certificates:edit")]
         [TestCase("PUT",     "api/v1/configuration/ocpp-server/trust/t1",                "certificates:edit")]
         [TestCase("DELETE",  "api/v1/configuration/ocpp-server/trust/t1",                "certificates:edit")]
+        [TestCase("GET",     "api/v1/configuration/ssh",                                 "ssh:read")]
+        [TestCase("PUT",     "api/v1/configuration/ssh",                                 "ssh:edit")]
         [TestCase("GET",     "api/v1/certificates",                                      "certificates:read")]
         [TestCase("POST",    "api/v1/certificates",                                      "certificates:edit")]
         [TestCase("POST",    "api/v1/certificates/reload",                               "certificates:edit")]
@@ -417,7 +419,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var roles = new JObject();
 
-            foreach (var resource in new[] { "configuration", "dns", "nts", "certificates", "csms", "stations" })
+            foreach (var resource in new[] { "configuration", "dns", "nts", "certificates", "ssh", "csms", "stations" })
                 foreach (var operation in new[] { "read", "edit", "run" })
                     roles.Add($"r-{resource}-{operation}", new JArray($"{resource}:{operation}"));
 
