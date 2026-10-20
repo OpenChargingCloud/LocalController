@@ -204,12 +204,14 @@ and copied between them:
 ```json
 {
   "dns": { "enabled": true, "servers": [ "192.168.1.1" ] },
-  "nts": { "enabled": true,
-           "servers": [ "ptbtime1.ptb.de", "ptbtime2.ptb.de",
-                        "ptbtime3.ptb.de", "ptbtime4.ptb.de" ],
-           "minServers": 2,
-           "checkEverySeconds": 900,
-           "legalTimeAuthority": "PTB" }
+  "nts": { "groups": {
+    "legal": { "enabled": true,
+               "servers": [ "ptbtime1.ptb.de", "ptbtime2.ptb.de",
+                            "ptbtime3.ptb.de", "ptbtime4.ptb.de" ],
+               "minServers": 2,
+               "checkEverySeconds": 900,
+               "legalTimeAuthority": "PTB" }
+  } }
 }
 ```
 
@@ -225,7 +227,11 @@ the form the DNS page writes the list back in:
 takes. A file saying it is refused at the start, with the entry named.
 
 That `nts` block is what a local controller asks when the file says nothing at
-all: the PTB's four, of which two have to answer. Naming them changes nothing;
+all: one group of time servers, `legal`, the PTB's four, of which two have to
+answer. Further groups stand beside it under `groups`, each with servers of
+its own; a section that names its servers outside `groups` - the flat form of
+older files - is refused at the start, and says to move them into
+`nts.groups.legal`. Naming them changes nothing;
 it is written out here because a file that names its time servers is a file
 somebody can check.
 

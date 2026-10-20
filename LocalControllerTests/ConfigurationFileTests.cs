@@ -83,7 +83,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var node       = new WWCPConfiguration(
                                  DNS:   new DNSConfiguration(Enabled: false),
-                                 NTS:   new NTSConfiguration(Enabled: true)
+                                 NTS:   new NTSSection([ new ("legal", new NTSConfiguration(Enabled: true)) ])
                              );
 
             var controller = new ControllerConfiguration(
@@ -101,7 +101,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(read!.DNS?.Enabled,        Is.False);
-                Assert.That(read.NTS?.Enabled,         Is.True);
+                Assert.That(read.NTS?["legal"]?.Enabled, Is.True);
                 Assert.That(own!.OCPP?.NodeId,         Is.EqualTo("lc042"));
                 Assert.That(own.OCPP?.VendorName,      Is.EqualTo("ACME"));
                 Assert.That(read.IsEmpty,              Is.False);
