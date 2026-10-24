@@ -520,6 +520,21 @@ permissions travel to the browser, spelt out resource by resource, so a page can
 grey out what somebody may not do - a courtesy, not a lock: every request is
 checked again on arrival.
 
+Behind a reverse proxy every request comes from the proxy. The `web` section
+names the proxies that are believed when they say who the client is, and the
+one header they say it in - `X-Forwarded-For` unless it says otherwise; an API
+key bound to addresses opens the door only from them, and password guesses are
+counted per client:
+
+```json
+"web": { "trustedProxies": [ "127.0.0.1", "::1" ] }
+```
+
+From anybody else, and without the section, the client is the TCP peer,
+whatever its headers say. How the header is read is described in
+[WWCP_Node](https://github.com/OpenChargingCloud/WWCP_Node) under "Who may sign
+in".
+
 
 ## Your participation
 
