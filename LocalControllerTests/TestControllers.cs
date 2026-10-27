@@ -64,12 +64,14 @@ namespace cloud.charging.open.LocalController.Tests
         /// <param name="LogToConsole">Whether its log reaches the console, for a test about who gets to write there. Off otherwise, because a test run's console is for the test run.</param>
         /// <param name="LogPath">A directory for its log files, for a test about those. None otherwise.</param>
         /// <param name="BridgeDebugLog">Whether what the libraries below write with DebugX ends up in its log, for a test about that. Off otherwise, because every controller of a test run would pick up every other one's lines.</param>
-        public static LocalController New(String         Directory,
-                                          JObject?       Configuration    = null,
-                                          TimeProvider?  Clock            = null,
-                                          Boolean        LogToConsole     = false,
-                                          String?        LogPath          = null,
-                                          Boolean        BridgeDebugLog   = false)
+        /// <param name="Web">What a program would say of HTTPS and of the proxies in front, for a test about passing that on. Nothing otherwise.</param>
+        public static LocalController New(String             Directory,
+                                          JObject?           Configuration    = null,
+                                          TimeProvider?      Clock            = null,
+                                          Boolean            LogToConsole     = false,
+                                          String?            LogPath          = null,
+                                          Boolean            BridgeDebugLog   = false,
+                                          WebConfiguration?  Web              = null)
         {
 
             System.IO.Directory.CreateDirectory(Directory);
@@ -86,7 +88,8 @@ namespace cloud.charging.open.LocalController.Tests
                        LogToConsole:     LogToConsole,
                        LogPath:          LogPath,
                        BridgeDebugLog:   BridgeDebugLog,
-                       TimeProvider:     Clock
+                       TimeProvider:     Clock,
+                       Web:              Web
                    );
 
         }

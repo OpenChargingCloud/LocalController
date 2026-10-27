@@ -397,7 +397,11 @@ to - a time server, a name server over TLS or HTTPS - beside the ones this
 machine trusts; the **server certificates** of such servers, kept so that one
 can be held to its fingerprint; and the **TLS identities** this controller
 presents itself, each with its private key - the one it signs in to the CSMS
-with under security profile 3 among them. It lives in `certificates/` beside
+with under security profile 3 among them. Where the web interface is served
+over HTTPS from the store - `"web": { "tls": { "certificate": "store" } }` in
+the configuration file, or `--https` - it also keeps a **TLS server
+identity**, who the web interface is, and `--import-certificate
+tlsServerIdentity=<file>` puts one in. It lives in `certificates/` beside
 `configuration.json`, one file per certificate and an `index.json` saying what
 each is called, whether it is switched on and what it is kept for; a file
 copied into the right directory by hand is taken in at the next start. One
@@ -534,6 +538,18 @@ From anybody else, and without the section, the client is the TCP peer,
 whatever its headers say. How the header is read is described in
 [WWCP_Node](https://github.com/OpenChargingCloud/WWCP_Node) under "Who may sign
 in".
+
+The sign-in's password, every API key and the session cookie travel with every
+request, and beyond the loopback over plain HTTP they cross the network in the
+clear; the controller then says so in its log, below its banner and above every
+page to its administrators. The `web` section is the way out: HTTPS of the
+controller's own - with the store's TLS server identity, or certbot's PEM
+files, read again when they change - with HSTS and a port that redirects to it,
+or the reverse proxies in front that do the HTTPS and are believed when they
+say so. `--https`, `--https-cert <file>` with `--https-key <file>`,
+`--redirect-port <number>` and `--trusted-proxy <address>` say the same and win
+over the file - see
+[WWCP_Node's README](https://github.com/OpenChargingCloud/WWCP_Node#https-and-the-proxies-in-front).
 
 
 ## Your participation

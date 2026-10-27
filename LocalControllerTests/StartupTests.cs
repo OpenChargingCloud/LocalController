@@ -22,6 +22,7 @@ using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 using cloud.charging.open.protocols.WWCP.Node.Certificates;
+using cloud.charging.open.protocols.WWCP.Node.CommandLine;
 
 using cloud.charging.open.LocalController.Configuration;
 
@@ -119,6 +120,46 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(Path.GetFullPath(controller.Certificates.Directory),
                             Is.EqualTo(Path.GetFullPath(Path.Combine(directory, "certificates"))),
                             "The node's store is not beside the configuration file, which is what it is measured from.");
+
+            });
+
+        }
+
+        #endregion
+
+        #region TheSwitchesForHTTPSAndTheProxiesInFrontReachTheNode()
+
+        /// <summary>
+        /// --https and --trusted-proxy, handed to the controller as its program
+        /// hands them, reach the node below: it serves its web interface over
+        /// HTTPS from the store, keeping a TLS server identity for it, believes
+        /// the proxy - and the step every program takes before the start lets
+        /// such a command line through, where a controller that kept them to
+        /// itself would be stopped there with 2.
+        /// </summary>
+        [Test]
+        public async Task TheSwitchesForHTTPSAndTheProxiesInFrontReachTheNode()
+        {
+
+            var arguments        = NodeArguments.Parse(["--https", "--trusted-proxy", "192.0.2.1"]);
+            var web              = arguments.Web;
+
+            await using var controller = TestControllers.New(directory, TestControllers.Offline, Web: web);
+
+            var error            = new StringWriter();
+            var notImported      = controller.ImportCertificates(arguments, out _, TextWriter.Null, error);
+
+            Assert.Multiple(() => {
+
+                Assert.That(arguments.Problem,  Is.Null);
+                Assert.That(web,                Is.Not.Null);
+                Assert.That(notImported,        Is.Null, error.ToString());
+
+                Assert.That(controller.WebSwitches,                 Is.SameAs(web), "the switches did not reach the node");
+                Assert.That(controller.WebSettings.TLS,             Is.Not.Null,    "the node does not serve HTTPS");
+                Assert.That(controller.WebSettings.TrustedProxies,  Is.EqualTo(new[] { System.Net.IPNetwork.Parse("192.0.2.1/32") }));
+                Assert.That(controller.Certificates.Kinds,          Does.Contain(CertificateKind.TLSServerIdentity),
+                            "the node keeps no TLS server identity to serve HTTPS with");
 
             });
 

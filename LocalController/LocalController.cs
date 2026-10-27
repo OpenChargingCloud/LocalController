@@ -130,7 +130,10 @@ namespace cloud.charging.open.LocalController
         /// this controller presents in TLS itself. What its station port
         /// presents and which chains it accepts from charging stations stay in
         /// the stores of their own they have always had: ocpp-server-keys and
-        /// ocpp-client-trust.
+        /// ocpp-client-trust. Who its web interface is, where that is served
+        /// over HTTPS from the store - "web": { "tls": { "certificate":
+        /// "store" } }, or --https - is a TLS server identity, a kind the node
+        /// below keeps then all the same.
         /// </remarks>
         public static readonly IReadOnlyList<CertificateKind>  CertificateKinds  = [
                                                                                      CertificateKind.TLSRoot,
@@ -225,6 +228,7 @@ namespace cloud.charging.open.LocalController
         /// <param name="BridgeDebugLog">Whether what the libraries below write with DebugX ends up in the log.</param>
         /// <param name="TimeProvider">Where this controller reads the time; the system clock by default.</param>
         /// <param name="SSH">What the program says about serving the command line over SSH; nothing by default - see SSHSettings.</param>
+        /// <param name="Web">What the program says of HTTPS and of the reverse proxies in front - --https, --https-cert, --redirect-port and --trusted-proxy - over the "web" section of the configuration file; nothing by default, and then the file alone says it.</param>
         public LocalController(DNSClient?             DNSClient          = null,
                                NTSClient?             NTSClient          = null,
                                HTTPServer?            HTTPServer         = null,
@@ -244,7 +248,8 @@ namespace cloud.charging.open.LocalController
                                String?                LogPath            = null,
                                Boolean                BridgeDebugLog     = true,
                                TimeProvider?          TimeProvider       = null,
-                               SSHSettings?           SSH                = null)
+                               SSHSettings?           SSH                = null,
+                               WebConfiguration?      Web                = null)
 
             : base(Kind:               LocalControllerKind,
                    Version:            typeof(LocalController).Assembly.GetName().Version?.ToString(3) ?? "0.0.0",
@@ -271,7 +276,8 @@ namespace cloud.charging.open.LocalController
                    BridgeDebugLog:     BridgeDebugLog,
                    TraceTags:          TraceTags,
                    TimeProvider:       TimeProvider,
-                   SSH:                SSH)
+                   SSH:                SSH,
+                   Web:                Web)
 
         {
 
