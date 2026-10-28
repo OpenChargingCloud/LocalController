@@ -400,8 +400,11 @@ presents itself, each with its private key - the one it signs in to the CSMS
 with under security profile 3 among them. Where the web interface is served
 over HTTPS from the store - `"web": { "tls": { "certificate": "store" } }` in
 the configuration file, or `--https` - it also keeps a **TLS server
-identity**, who the web interface is, and `--import-certificate
-tlsServerIdentity=<file>` puts one in. It lives in `certificates/` beside
+identity**, who the web interface is. `--import-certificate
+tlsServerIdentity=<file>` puts one in with `--https` on the same command line;
+where only the configuration file asks for it, it goes in on the Server
+identities page, which the Certificate store page links to, or by copying it
+in. The store lives in `certificates/` beside
 `configuration.json`, one file per certificate and an `index.json` saying what
 each is called, whether it is switched on and what it is kept for; a file
 copied into the right directory by hand is taken in at the next start. One

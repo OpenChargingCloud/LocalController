@@ -17,6 +17,9 @@
 
 #region Usings
 
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+
 using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
@@ -63,6 +66,59 @@ namespace cloud.charging.open.LocalController.Tests
         [TearDown]
         public void RemoveTheDirectory()
             => TestControllers.Remove(directory);
+
+        #endregion
+
+        #region (helpers) SelfSigned(Name) / ShownAt(URL)
+
+        /// <summary>
+        /// A certificate for 127.0.0.1 with its key, the given name in its
+        /// subject: through a PKCS#12, because a key that only ever lived in
+        /// memory is one Windows' TLS will not sign with.
+        /// </summary>
+        private static X509Certificate2 SelfSigned(String Name)
+        {
+
+            using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+
+            var request   = new CertificateRequest($"CN={Name}", key, HashAlgorithmName.SHA256);
+            var names     = new SubjectAlternativeNameBuilder();
+
+            names.AddIpAddress(System.Net.IPAddress.Loopback);
+
+            request.CertificateExtensions.Add(names.Build());
+            request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([ new Oid("1.3.6.1.5.5.7.3.1") ], false));
+
+            using var ephemeral = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+
+            return X509CertificateLoader.LoadPkcs12(ephemeral.Export(X509ContentType.Pkcs12), null, X509KeyStorageFlags.Exportable);
+
+        }
+
+        /// <summary>
+        /// The thumbprint of the certificate a server shows at the handshake of
+        /// a GET, whatever it answers.
+        /// </summary>
+        private static async Task<String?> ShownAt(String URL)
+        {
+
+            String? shown = null;
+
+            var handler = new HttpClientHandler {
+                              AllowAutoRedirect                          = false,
+                              ServerCertificateCustomValidationCallback  = (message, served, chain, errors) => {
+                                                                               shown = served is null ? null : CertificateEntry.ThumbprintOf(served);
+                                                                               return true;
+                                                                           }
+                          };
+
+            using var client = new HttpClient(handler, disposeHandler: true) { Timeout = TimeSpan.FromSeconds(15) };
+
+            using var response = await client.GetAsync(URL);
+
+            return shown;
+
+        }
 
         #endregion
 
@@ -161,6 +217,64 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(controller.Certificates.Kinds,          Does.Contain(CertificateKind.TLSServerIdentity),
                             "the node keeps no TLS server identity to serve HTTPS with");
 
+            });
+
+        }
+
+        #endregion
+
+        #region AServerIdentityImportedWithHTTPSIsWhoTheWebInterfaceIs()
+
+        /// <summary>
+        /// --import-certificate tlsServerIdentity=&lt;file&gt; beside --https, as
+        /// the README says: the step before the controller is made lets it
+        /// through, the store takes it in, and the web interface shows it at
+        /// the handshake.
+        /// </summary>
+        /// <remarks>
+        /// A controller's own kinds have no server identity in them; the node
+        /// keeps one where the web interface is served from the store. The
+        /// step before the node is made did not know that, and stopped the
+        /// command line the README gave with 2.
+        /// </remarks>
+        [Test]
+        public async Task AServerIdentityImportedWithHTTPSIsWhoTheWebInterfaceIs()
+        {
+
+            using var certificate  = SelfSigned("local controller web interface");
+
+            var file               = Path.Combine(directory, "web.pem");
+
+            using (var key = certificate.GetECDsaPrivateKey()!)
+                File.WriteAllText(file, certificate.ExportCertificatePem() + "\n" + key.ExportPkcs8PrivateKeyPem());
+
+            var arguments          = NodeArguments.Parse(["--https", "--import-certificate", $"tlsServerIdentity={file}"]);
+
+            var usage              = new NodeUsage(Program:           "LocalControllerCLI",
+                                                   Kind:              LocalController.LocalControllerKind,
+                                                   DefaultPort:       LocalController.DefaultHTTPPort,
+                                                   FrontendSources:   "libs/LocalController/LocalController/Frontend",
+                                                   CertificateKinds:  LocalController.CertificateKinds);
+
+            var refusal            = new StringWriter();
+
+            Assert.That(arguments.Refused(usage, TextWriter.Null, refusal), Is.Null, refusal.ToString());
+
+            await using var controller = TestControllers.New(directory, TestControllers.Offline, Web: arguments.Web);
+
+            var error              = new StringWriter();
+            var notImported        = controller.ImportCertificates(arguments, out var imported, TextWriter.Null, error);
+
+            Assert.That(notImported, Is.Null, error.ToString());
+
+            await controller.Start();
+
+            var shown              = await ShownAt($"https://127.0.0.1:{controller.HTTPPort}/");
+
+            Assert.Multiple(() => {
+                Assert.That(imported.Select(entry => entry.Kind),  Is.EqualTo(new[] { CertificateKind.TLSServerIdentity }));
+                Assert.That(shown,                                 Is.EqualTo(CertificateEntry.ThumbprintOf(certificate)),
+                            "the web interface does not show the identity imported");
             });
 
         }
