@@ -17,8 +17,10 @@
 
 #region Usings
 
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 
 using Newtonsoft.Json.Linq;
 
@@ -69,7 +71,7 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region (helpers) SelfSigned(Name) / ShownAt(URL)
+        #region (helpers) SelfSigned(Name) / ShownAt(URL) / CertificatePagesOf(Controller)
 
         /// <summary>
         /// A certificate for 127.0.0.1 with its key, the given name in its
@@ -120,6 +122,34 @@ namespace cloud.charging.open.LocalController.Tests
 
         }
 
+        /// <summary>
+        /// The pages of certificates the controller's "me" says its store keeps
+        /// kinds for - the ones the menu offers - asked as root, over HTTPS
+        /// where it serves that, whatever certificate it shows.
+        /// </summary>
+        private static async Task<String[]?> CertificatePagesOf(LocalController Controller)
+        {
+
+            var handler = new HttpClientHandler {
+                              ServerCertificateCustomValidationCallback = (message, served, chain, errors) => true
+                          };
+
+            using var client = new HttpClient(handler, disposeHandler: true) {
+                                   BaseAddress  = new Uri(Controller.WebInterfaceURL.ToString()),
+                                   Timeout      = TimeSpan.FromSeconds(15)
+                               };
+
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                                                             "Basic",
+                                                             Convert.ToBase64String(Encoding.UTF8.GetBytes($"root:{Controller.GeneratedPassword}"))
+                                                         );
+
+            var me = JObject.Parse(await client.GetStringAsync("api/v1/auth/me"));
+
+            return me["certificatePages"]?.Values<String>().OfType<String>().ToArray();
+
+        }
+
         #endregion
 
 
@@ -150,7 +180,9 @@ namespace cloud.charging.open.LocalController.Tests
         /// The node below keeps the certificates its kind asks for, and a
         /// local controller asks for TLS's: the roots of the servers it
         /// connects to, their certificates, and what it presents itself - and
-        /// none of ISO 15118's, which are a vehicle's.
+        /// none of ISO 15118's, which are a vehicle's. No server identity
+        /// either, over plain HTTP: "me" names no page for one, so the menu
+        /// offers none.
         /// </summary>
         /// <remarks>
         /// Until it had a use for them it asked for none, and nothing was made
@@ -167,7 +199,13 @@ namespace cloud.charging.open.LocalController.Tests
 
             await controller.Start();
 
+            var pages = await CertificatePagesOf(controller);
+
             Assert.Multiple(() => {
+
+                Assert.That(pages,
+                            Is.EqualTo(new[] { "certificates", "identities" }),
+                            "The menu would offer a page of server identities, which a controller over plain HTTP does not keep.");
 
                 Assert.That(controller.Certificates.Kinds,
                             Is.EquivalentTo(new[] { CertificateKind.TLSRoot, CertificateKind.TLSServer, CertificateKind.TLSIdentity }),
@@ -270,11 +308,14 @@ namespace cloud.charging.open.LocalController.Tests
             await controller.Start();
 
             var shown              = await ShownAt($"https://127.0.0.1:{controller.HTTPPort}/");
+            var pages              = await CertificatePagesOf(controller);
 
             Assert.Multiple(() => {
                 Assert.That(imported.Select(entry => entry.Kind),  Is.EqualTo(new[] { CertificateKind.TLSServerIdentity }));
                 Assert.That(shown,                                 Is.EqualTo(CertificateEntry.ThumbprintOf(certificate)),
                             "the web interface does not show the identity imported");
+                Assert.That(pages,                                 Does.Contain("serverIdentities"),
+                            "the menu offers no page for the identity imported");
             });
 
         }

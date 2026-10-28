@@ -403,20 +403,23 @@ the configuration file, or `--https` - it also keeps a **TLS server
 identity**, who the web interface is. `--import-certificate
 tlsServerIdentity=<file>` puts one in with `--https` on the same command line;
 where only the configuration file asks for it, it goes in on the Server
-identities page, which the Certificate store page links to, or by copying it
-in. The store lives in `certificates/` beside
+identities page or by copying it in. The store lives in `certificates/` beside
 `configuration.json`, one file per certificate and an `index.json` saying what
 each is called, whether it is switched on and what it is kept for; a file
 copied into the right directory by hand is taken in at the next start. One
 certificate may be kept as several kinds - a TLS root and a kind made up, say.
 
-It is looked after on two pages. **Certificate store** keeps certificates
+It is looked after on two pages, and on a third where the web interface is
+served over HTTPS from the store. **Certificate store** keeps certificates
 alone, with no private key: the TLS roots and the server certificates - an
 upload there leaves a key in the box out, and says where it goes.
 **Identities** keeps who the controller is as a client, each with its key: the
 TLS identities, and the one the CSMS connection signs in with is marked there.
-Each page has three tabs: by usage, every certificate once, and the upload,
-where certificates are pasted or files dropped and every one of them is kept as
+**Server identities**, in the menu only then, keeps who the web interface is,
+with its key - not to be mixed up with **Server certificates**, what the
+charging station port presents, which is a store of its own. Each page has
+three tabs: by usage, every certificate once, and the upload, where
+certificates are pasted or files dropped and every one of them is kept as
 every kind ticked.
 
 A TLS root and a server certificate are told what they are for - the name

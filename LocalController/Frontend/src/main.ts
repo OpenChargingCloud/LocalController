@@ -18,7 +18,10 @@ import { clientTrustPage }        from './pages/clientTrust';
 // up to its CSMS, and the server its charging stations connect to. The sign-in,
 // the log, the name servers, the time servers, the certificate store, the
 // frame and following the log while somebody is signed in are every node's -
-// see WWCP_Node's start.ts.
+// see WWCP_Node's start.ts. Server identities is the node's store too: who the
+// web interface is where it is served over HTTPS from the store, in the menu
+// only then. What the station port presents is under Server certificates, a
+// store of its own.
 startNode({
 
     name:  'Local Controller',
@@ -32,7 +35,8 @@ startNode({
             { path: '/configuration/csms',                      label: 'CSMS connection',     icon: 'fa-satellite-dish',    permission: [ 'csms:read' ]         },
             { ...nodeMenu.certificates,                         label: 'Certificate store',   icon: 'fa-vault'                                                  },
             nodeMenu.identities,
-            { path: '/configuration/ocpp-server',               label: 'Charging stations',   icon: 'fa-charging-station',  permission: [ 'stations:read' ]     },
+            nodeMenu.serverIdentities,
+            { path: '/configuration/ocpp-server',              label: 'Charging stations',   icon: 'fa-charging-station',  permission: [ 'stations:read' ]     },
             { path: '/configuration/ocpp-server/logins',        label: 'Logins and groups',   icon: 'fa-users-gear',        permission: [ 'stations:read' ]     },
             { path: '/configuration/ocpp-server/certificates',  label: 'Server certificates', icon: 'fa-certificate',       permission: [ 'certificates:read' ] },
             { path: '/configuration/ocpp-server/trust',         label: 'Accepted chains',     icon: 'fa-user-shield',       permission: [ 'certificates:read' ] }
