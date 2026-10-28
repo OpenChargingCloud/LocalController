@@ -439,7 +439,12 @@ It is the node's store and every node's routes, the vehicle's among them -
 `certificates:edit` to change. The charging station port's own keys
 and the chains it accepts from charging stations are not in it: they keep the
 stores of their own they have always had, on the pages "Server certificates" and
-"Accepted chains".
+"Accepted chains" - `ocpp-server-keys/` and `ocpp-client-trust/` beside
+`configuration.json`. Like the node's store, the accounts and the logs, both
+are readable by the account the controller runs under alone - 0700 on Unix, on
+Windows an access list of that account, SYSTEM and the administrators - and
+what an older controller left open is taken back at the next start; where the
+file system cannot do that, the log says so.
 
 "Server certificates" has three tabs as well: the keys and their signing
 requests, every certificate once by name or by fingerprint with the key it is

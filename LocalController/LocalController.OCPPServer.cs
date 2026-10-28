@@ -235,6 +235,14 @@ namespace cloud.charging.open.LocalController
 
             ClientTrust.OnNotice += (level, message) => Log.Log(level, message, "ocpp", "tls", "trust");
 
+            // Their owner's alone, as the node keeps its accounts and its own
+            // certificates: a key read by somebody else is somebody else's
+            // server, and a chain added by somebody else lets their charging
+            // stations in. What an older controller left open is taken back
+            // here, once somebody listens to what cannot be done.
+            ServerCertificates.KeepToItsOwner();
+            ClientTrust.       KeepToItsOwner();
+
             StationLogins      = new ChargingStationLogins(
                                      Path.Combine(directory, ChargingStationLogins.DefaultFileName),
                                      TimeProvider

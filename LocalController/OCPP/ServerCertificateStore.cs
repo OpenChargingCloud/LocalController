@@ -41,6 +41,7 @@ using BCx509 = Org.BouncyCastle.X509;
 using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.PKI;
 
+using cloud.charging.open.protocols.WWCP.Node;
 using cloud.charging.open.protocols.WWCP.Node.Logging;
 using cloud.charging.open.LocalController.Web;
 
@@ -247,6 +248,26 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
+
+        #region KeepToItsOwner()
+
+        /// <summary>
+        /// Keep everybody but the account the controller runs under out of the
+        /// directory and of everything in it, where it is there already - what
+        /// an older controller left open taken back. What cannot be done is
+        /// said as a warning.
+        /// </summary>
+        /// <remarks>
+        /// Not done by the constructor, which nobody is listening to yet: the
+        /// controller calls it once it is. A directory made later is made so.
+        /// </remarks>
+        public void KeepToItsOwner()
+        {
+            if (Directory.Exists(Path))
+                OwnerOnly.Directory(Path, Complain);
+        }
+
+        #endregion
 
         #region Reload()
 
@@ -1519,7 +1540,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region (private) FilePath / Known / CreateDirectory / WriteFile
+        #region (private) FilePath / Known / CreateDirectory / Complain / WriteFile
 
         private String FilePath(String Id, String Extension)
             => System.IO.Path.Combine(Path, $"{Id}.{Extension}");
@@ -1531,7 +1552,7 @@ namespace cloud.charging.open.LocalController.OCPP
         }
 
         /// <summary>
-        /// The directory, readable by its owner alone where that can be said.
+        /// The directory, readable by its owner alone - see <see cref="OwnerOnly"/>.
         /// </summary>
         private void CreateDirectory()
         {
@@ -1539,16 +1560,17 @@ namespace cloud.charging.open.LocalController.OCPP
             if (Directory.Exists(Path))
                 return;
 
-            if (OperatingSystem.IsWindows())
-                Directory.CreateDirectory(Path);
-
-            else
-                Directory.CreateDirectory(
-                    Path,
-                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
-                );
+            OwnerOnly.Directory(Path, Complain);
 
         }
+
+        /// <summary>
+        /// Say what could not be restricted: keys others may read are worth a
+        /// warning, not worth failing over.
+        /// </summary>
+        private void Complain(String Problem)
+
+            => OnNotice?.Invoke(LogLevel.Warning, Problem);
 
         /// <summary>
         /// One file of this store written, readable by its owner alone where

@@ -24,6 +24,7 @@ using System.Security.Cryptography.X509Certificates;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
+using cloud.charging.open.protocols.WWCP.Node;
 using cloud.charging.open.protocols.WWCP.Node.Logging;
 
 #endregion
@@ -176,6 +177,26 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
+
+        #region KeepToItsOwner()
+
+        /// <summary>
+        /// Keep everybody but the account the controller runs under out of the
+        /// directory and of everything in it, where it is there already - what
+        /// an older controller left open taken back. What cannot be done is
+        /// said as a warning.
+        /// </summary>
+        /// <remarks>
+        /// Not done by the constructor, which nobody is listening to yet: the
+        /// controller calls it once it is. A directory made later is made so.
+        /// </remarks>
+        public void KeepToItsOwner()
+        {
+            if (Directory.Exists(Path))
+                OwnerOnly.Directory(Path, Complain);
+        }
+
+        #endregion
 
         #region Reload()
 
@@ -941,19 +962,33 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region (private) CreateDirectory() / WriteFile(Target, Content)
+        #region (private) CreateDirectory() / Complain(Problem) / WriteFile(Target, Content)
 
+        /// <summary>
+        /// The directory, its owner's alone - see <see cref="OwnerOnly"/>.
+        /// </summary>
+        /// <remarks>
+        /// Nothing in here is secret - these are certificates, and a
+        /// certificate is a public document - but whoever may write here
+        /// decides which charging stations are let in.
+        /// </remarks>
         private void CreateDirectory()
         {
 
             if (Directory.Exists(Path))
                 return;
 
-            // Nothing in here is secret - these are certificates, and a
-            // certificate is a public document - so the ordinary mode.
-            Directory.CreateDirectory(Path);
+            OwnerOnly.Directory(Path, Complain);
 
         }
+
+        /// <summary>
+        /// Say what could not be restricted: a store others may change is worth
+        /// a warning, not worth failing over.
+        /// </summary>
+        private void Complain(String Problem)
+
+            => OnNotice?.Invoke(LogLevel.Warning, Problem);
 
         /// <summary>
         /// One file of this store written - past <see cref="BeforeWriting"/>
