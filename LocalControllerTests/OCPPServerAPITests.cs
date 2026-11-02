@@ -245,6 +245,10 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(csr.IsSuccessStatusCode,                     Is.True);
                 Assert.That(await csr.Content.ReadAsStringAsync(),        Does.StartWith("-----BEGIN CERTIFICATE REQUEST-----"));
 
+                // A file to save, named after the key.
+                Assert.That(csr.Content.Headers.ContentDisposition?.DispositionType,  Is.EqualTo("attachment"));
+                Assert.That(csr.Content.Headers.ContentDisposition?.FileName?.Trim('"'), Is.EqualTo($"{id}.csr.pem"));
+
                 // And nothing anywhere hands out the private key.
                 var listed = await GetJSON(http, $"{Root}/certificates");
 
