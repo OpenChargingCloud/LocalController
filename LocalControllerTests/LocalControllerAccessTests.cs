@@ -29,6 +29,7 @@ using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 using org.GraphDefined.Vanaheimr.Hermod.Mail;
 
 using cloud.charging.open.protocols.WWCP.Node;
+using cloud.charging.open.protocols.WWCP.Node.TestKit;
 using cloud.charging.open.protocols.WWCP.Node.Web;
 
 #endregion
@@ -270,7 +271,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ACPOMayLookAtTheCertificatesAndIsToldWhoMayChangeThem()
         {
 
-            await AController().Start();
+            await TestPorts.StartedOnFreshPorts(() => AController());
 
             using var cpo    = await SignedInAs("cpo1", "cpo");
 
@@ -308,12 +309,12 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ARoleFromTheConfigurationFileIsHeardByTheAPI()
         {
 
-            await AController(new JObject(
-                                  new JProperty("nts",    new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
-                                  new JProperty("roles",  new JObject(
-                                      new JProperty("support", new JArray("dns:read", "stations:read"))
-                                  ))
-                              )).Start();
+            await TestPorts.StartedOnFreshPorts(() => AController(new JObject(
+                                                                      new JProperty("nts",    new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
+                                                                      new JProperty("roles",  new JObject(
+                                                                          new JProperty("support", new JArray("dns:read", "stations:read"))
+                                                                      ))
+                                                                  )));
 
             using var support  = await SignedInAs("supporter", "support");
 
@@ -423,10 +424,10 @@ namespace cloud.charging.open.LocalController.Tests
                 foreach (var operation in new[] { "read", "edit", "run" })
                     roles.Add($"r-{resource}-{operation}", new JArray($"{resource}:{operation}"));
 
-            await AController(new JObject(
-                                  new JProperty("nts",    new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
-                                  new JProperty("roles",  roles)
-                              )).Start();
+            await TestPorts.StartedOnFreshPorts(() => AController(new JObject(
+                                                                      new JProperty("nts",    new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
+                                                                      new JProperty("roles",  roles)
+                                                                  )));
 
             using var nobody  = await SignedInAs("nobody1", null);
 
@@ -466,7 +467,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task TheClockIsForAnybodySignedIn()
         {
 
-            await AController().Start();
+            await TestPorts.StartedOnFreshPorts(() => AController());
 
             using var nobody   = await SignedInAs("nobody1", null);
 

@@ -82,7 +82,6 @@ namespace cloud.charging.open.LocalController.Tests
             // deciding whether a test passes, and it is why these two came
             // and went. ServableChainTests had it right already.
             ca        = TestCA.Create($"Test CA {Guid.NewGuid()}", WithIntermediate: true);
-            port      = TestPorts.Free();
 
             #region A key and a certificate, put there before anything starts
 
@@ -101,26 +100,34 @@ namespace cloud.charging.open.LocalController.Tests
 
             #endregion
 
-            controller = TestControllers.New(
-                             directory,
-                             new JObject(
+            // Made again on fresh ports where one was taken before the
+            // controller could bind it - the store in the directory as it is.
+            controller = TestPorts.StartedOnFreshPorts(() => {
 
-                                 new JProperty("nts", new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
+                             port      = TestPorts.Free();
 
-                                 new JProperty("ocppServer", new JObject(
-                                     new JProperty("enabled",           true),
-                                     new JProperty("address",           "127.0.0.1"),
-                                     new JProperty("port",              port),
-                                     new JProperty("securityProfiles",  new JArray(2)),
-                                     new JProperty("reachableAs",       new JArray("127.0.0.1"))
-                                 ))
+                             var made  = TestControllers.New(
+                                             directory,
+                                             new JObject(
 
-                             )
-                         );
+                                                 new JProperty("nts", new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
 
-            controller.StationLogins.TrySetPassword("cs001", ThePassword, null, null, out _, out _);
+                                                 new JProperty("ocppServer", new JObject(
+                                                     new JProperty("enabled",           true),
+                                                     new JProperty("address",           "127.0.0.1"),
+                                                     new JProperty("port",              port),
+                                                     new JProperty("securityProfiles",  new JArray(2)),
+                                                     new JProperty("reachableAs",       new JArray("127.0.0.1"))
+                                                 ))
 
-            controller.Start().GetAwaiter().GetResult();
+                                             )
+                                         );
+
+                             made.StationLogins.TrySetPassword("cs001", ThePassword, null, null, out _, out _);
+
+                             return made;
+
+                         }).GetAwaiter().GetResult();
 
         }
 

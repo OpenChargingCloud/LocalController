@@ -28,6 +28,7 @@ using NUnit.Framework;
 
 using cloud.charging.open.protocols.WWCP.Node.Certificates;
 using cloud.charging.open.protocols.WWCP.Node.CommandLine;
+using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 using cloud.charging.open.LocalController.Configuration;
 
@@ -195,9 +196,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AControllerKeepsTheKindsOfTLSInTheNodesStore()
         {
 
-            await using var controller = TestControllers.New(directory, TestControllers.Offline);
-
-            await controller.Start();
+            await using var controller = await TestPorts.StartedOnFreshPorts(() => TestControllers.New(directory, TestControllers.Offline));
 
             var pages = await CertificatePagesOf(controller);
 
@@ -298,14 +297,23 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.That(arguments.Refused(usage, TextWriter.Null, refusal), Is.Null, refusal.ToString());
 
-            await using var controller = TestControllers.New(directory, TestControllers.Offline, Web: arguments.Web);
+            // Made again on fresh ports where one was taken before the
+            // controller could bind it; the import, done again, finds the
+            // identity in the store already and changes nothing.
+            IReadOnlyList<CertificateEntry> imported = [];
 
-            var error              = new StringWriter();
-            var notImported        = controller.ImportCertificates(arguments, out var imported, TextWriter.Null, error);
+            await using var controller = await TestPorts.StartedOnFreshPorts(() => {
 
-            Assert.That(notImported, Is.Null, error.ToString());
+                                                   var made         = TestControllers.New(directory, TestControllers.Offline, Web: arguments.Web);
 
-            await controller.Start();
+                                                   var error        = new StringWriter();
+                                                   var notImported  = made.ImportCertificates(arguments, out imported, TextWriter.Null, error);
+
+                                                   Assert.That(notImported, Is.Null, error.ToString());
+
+                                                   return made;
+
+                                               });
 
             var shown              = await ShownAt($"https://127.0.0.1:{controller.HTTPPort}/");
             var pages              = await CertificatePagesOf(controller);

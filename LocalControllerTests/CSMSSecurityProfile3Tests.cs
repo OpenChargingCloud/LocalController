@@ -82,43 +82,52 @@ namespace cloud.charging.open.LocalController.Tests
             // A name of its own per run - see ChargingStationTLSTests for the
             // machine-wide cache that makes that matter.
             ca                 = TestCA.Create($"Site CA {Guid.NewGuid()}", WithIntermediate: true);
-            csmsPort           = TestPorts.Free();
 
-            upstreamDirectory  = TestControllers.TemporaryDirectory("csms-p3-upstream");
-            Directory.CreateDirectory(upstreamDirectory);
+            // Made again, on fresh ports and in a directory of its own, where
+            // another test run took a port before the controller could bind it.
+            upstream = await TestPorts.StartedOnFreshPorts(() => {
 
-            using (var store = new ServerCertificateStore(Path.Combine(upstreamDirectory, ServerCertificateStore.DefaultDirectoryName)))
-            {
+                           TestControllers.Remove(upstreamDirectory);
 
-                Assert.That(store.TryCreateKey("127.0.0.1", [ "127.0.0.1" ], null, out _, out var csr, out var keyError),
-                            Is.True, keyError);
+                           csmsPort           = TestPorts.Free();
 
-                using var certificate = ca.Sign(csr!, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+                           upstreamDirectory  = TestControllers.TemporaryDirectory("csms-p3-upstream");
+                           Directory.CreateDirectory(upstreamDirectory);
 
-                Assert.That(store.TryAddCertificate(ca.ChainPEM(certificate), [ "127.0.0.1" ], out _, out _, out var addError),
-                            Is.True, addError);
+                           using (var store = new ServerCertificateStore(Path.Combine(upstreamDirectory, ServerCertificateStore.DefaultDirectoryName)))
+                           {
 
-            }
+                               Assert.That(store.TryCreateKey("127.0.0.1", [ "127.0.0.1" ], null, out _, out var csr, out var keyError),
+                                           Is.True, keyError);
 
-            upstream = TestControllers.New(
-                           upstreamDirectory,
-                           new JObject(
-                               new JProperty("nts", new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
-                               new JProperty("ocppServer", new JObject(
-                                   new JProperty("enabled",           true),
-                                   new JProperty("address",           "127.0.0.1"),
-                                   new JProperty("port",              csmsPort),
-                                   new JProperty("securityProfiles",  new JArray(3)),
-                                   new JProperty("reachableAs",       new JArray("127.0.0.1")),
-                                   new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1"))
-                               ))
-                           )
-                       );
+                               using var certificate = ca.Sign(csr!, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
 
-            Assert.That(upstream.ClientTrust.TryAdd(ca.ChainPEM(ca.Certificate), "The site's authority", out _, out _, out var trustError),
-                        Is.True, trustError);
+                               Assert.That(store.TryAddCertificate(ca.ChainPEM(certificate), [ "127.0.0.1" ], out _, out _, out var addError),
+                                           Is.True, addError);
 
-            await upstream.Start();
+                           }
+
+                           var made = TestControllers.New(
+                                          upstreamDirectory,
+                                          new JObject(
+                                              new JProperty("nts", new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
+                                              new JProperty("ocppServer", new JObject(
+                                                  new JProperty("enabled",           true),
+                                                  new JProperty("address",           "127.0.0.1"),
+                                                  new JProperty("port",              csmsPort),
+                                                  new JProperty("securityProfiles",  new JArray(3)),
+                                                  new JProperty("reachableAs",       new JArray("127.0.0.1")),
+                                                  new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1"))
+                                              ))
+                                          )
+                                      );
+
+                           Assert.That(made.ClientTrust.TryAdd(ca.ChainPEM(ca.Certificate), "The site's authority", out _, out _, out var trustError),
+                                       Is.True, trustError);
+
+                           return made;
+
+                       });
 
             downstreamDirectory = TestControllers.TemporaryDirectory("csms-p3-downstream");
             Directory.CreateDirectory(downstreamDirectory);
@@ -189,55 +198,75 @@ namespace cloud.charging.open.LocalController.Tests
                                                                  Action<LocalController>?    Also       = null)
         {
 
-            var controller = TestControllers.New(
-                                 downstreamDirectory,
-                                 new JObject(
-                                     new JProperty("nts",  new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
-                                     new JProperty("ocpp", new JObject(new JProperty("nodeId", "lc002")))
-                                 )
-                             );
+            // Made again on fresh ports where one was taken before the
+            // controller could bind it - after the first, in a directory of
+            // its own, so that what the test puts into its store goes into an
+            // empty one again.
+            var attempt = 0;
 
-            String? handle = null;
-
-            if (Identity)
+            LocalController Made()
             {
-                Assert.That(controller.Certificates.Import(AnIdentity("lc002"), CertificateKind.TLSIdentity, null, "Towards the CSMS", null,
-                                                           out var entry, out var identityError),
-                            Is.True, identityError);
-                handle = entry!.Id;
+
+                if (attempt++ > 0)
+                {
+                    TestControllers.Remove(downstreamDirectory);
+                    downstreamDirectory = TestControllers.TemporaryDirectory("csms-p3-downstream");
+                    Directory.CreateDirectory(downstreamDirectory);
+                }
+
+                var controller = TestControllers.New(
+                                     downstreamDirectory,
+                                     new JObject(
+                                         new JProperty("nts",  new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
+                                         new JProperty("ocpp", new JObject(new JProperty("nodeId", "lc002")))
+                                     )
+                                 );
+
+                String? handle = null;
+
+                if (Identity)
+                {
+                    Assert.That(controller.Certificates.Import(AnIdentity("lc002"), CertificateKind.TLSIdentity, null, "Towards the CSMS", null,
+                                                               out var entry, out var identityError),
+                                Is.True, identityError);
+                    handle = entry!.Id;
+                }
+
+                if (Root)
+                    Assert.That(controller.Certificates.Import(Encoding.ASCII.GetBytes(ca.Certificate.ExportCertificatePem()),
+                                                               CertificateKind.TLSRoot, null, "The site's authority", null,
+                                                               out _, out var rootError),
+                                Is.True, rootError);
+
+                Also?.Invoke(controller);
+
+                // The controller's node id as the last segment of the path, as
+                // OCPP has a charging station dial its CSMS. With a password it
+                // says who it is by its user name; with a certificate alone,
+                // Hermod does not hand the certificate on to the request the CSMS
+                // reads the node id from, and the path is what is left.
+                var csms = new JObject(
+                               new JProperty("enabled",                true),
+                               new JProperty("url",                    $"wss://127.0.0.1:{csmsPort}/lc002"),
+                               new JProperty("securityProfile",        3),
+                               new JProperty("reconnectInitialDelay",  1),
+                               new JProperty("reconnectMaxDelay",      2)
+                           );
+
+                if ((Chosen ?? handle) is String chosen)
+                    csms.Add("clientCertificate", chosen);
+
+                Assert.That(controller.TryUpdateCSMSConfiguration(csms, out var csmsError), Is.True, csmsError);
+
+                return controller;
+
             }
 
-            if (Root)
-                Assert.That(controller.Certificates.Import(Encoding.ASCII.GetBytes(ca.Certificate.ExportCertificatePem()),
-                                                           CertificateKind.TLSRoot, null, "The site's authority", null,
-                                                           out _, out var rootError),
-                            Is.True, rootError);
+            var started = await TestPorts.StartedOnFreshPorts(Made);
 
-            Also?.Invoke(controller);
+            downstream  = started;
 
-            // The controller's node id as the last segment of the path, as
-            // OCPP has a charging station dial its CSMS. With a password it
-            // says who it is by its user name; with a certificate alone,
-            // Hermod does not hand the certificate on to the request the CSMS
-            // reads the node id from, and the path is what is left.
-            var csms = new JObject(
-                           new JProperty("enabled",                true),
-                           new JProperty("url",                    $"wss://127.0.0.1:{csmsPort}/lc002"),
-                           new JProperty("securityProfile",        3),
-                           new JProperty("reconnectInitialDelay",  1),
-                           new JProperty("reconnectMaxDelay",      2)
-                       );
-
-            if ((Chosen ?? handle) is String chosen)
-                csms.Add("clientCertificate", chosen);
-
-            Assert.That(controller.TryUpdateCSMSConfiguration(csms, out var csmsError), Is.True, csmsError);
-
-            downstream = controller;
-
-            await controller.Start();
-
-            return controller;
+            return started;
 
         }
 
