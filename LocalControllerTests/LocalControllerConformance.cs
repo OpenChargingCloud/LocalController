@@ -46,6 +46,12 @@ namespace cloud.charging.open.LocalController.Tests
 
             => TestControllers.New(Directory, Configuration);
 
+        protected override WWCPNode NewNodeWritingLogFiles(String   Directory,
+                                                           JObject  Configuration,
+                                                           String   LogPath)
+
+            => TestControllers.New(Directory, Configuration, LogPath: LogPath);
+
     }
 
 }
