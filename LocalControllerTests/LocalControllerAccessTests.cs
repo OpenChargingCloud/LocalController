@@ -209,7 +209,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(lc.Roles,             Is.EqualTo(new[] { "viewer", "cpo", WWCPNode.AdminRole }));
-                Assert.That(lc.Access.Resources,  Is.EqualTo(new[] { "configuration", "dns", "nts", "certificates", "ssh", "csms", "stations" }));
+                Assert.That(lc.Access.Resources,  Is.EqualTo(new[] { "configuration", "dns", "nts", "certificates", "ssh", "log", "csms", "stations" }));
             });
 
         }
@@ -420,7 +420,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var roles = new JObject();
 
-            foreach (var resource in new[] { "configuration", "dns", "nts", "certificates", "ssh", "csms", "stations" })
+            foreach (var resource in new[] { "configuration", "dns", "nts", "certificates", "ssh", "log", "csms", "stations" })
                 foreach (var operation in new[] { "read", "edit", "run" })
                     roles.Add($"r-{resource}-{operation}", new JArray($"{resource}:{operation}"));
 
