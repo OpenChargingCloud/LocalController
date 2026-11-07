@@ -20,6 +20,9 @@ let held: OCPPServerConfiguration;
 /** Refuses every change where told to. */
 let refuseChanges = false;
 
+/** Whether the stand-in's SSH server is on. */
+let sshServerOn = true;
+
 function controller({ method, path, body }: Asked): unknown {
 
     if (path === '/configuration/ocpp-server/stations')
@@ -31,6 +34,12 @@ function controller({ method, path, body }: Asked): unknown {
             return refused(409, 'no server certificate yet');
         const update = body as OCPPServerUpdate;
         held = { ...held, ...update } as OCPPServerConfiguration;
+        // OCPP over SSH is a field of its own, merged as the controller merges it.
+        if (update.ssh !== undefined)
+            held.ssh = { ...anOCPPServer().ssh, ...held.ssh, ...update.ssh,
+                         state: sshServerOn
+                                    ? { ...anOCPPServer().ssh.state, served: update.ssh.enabled === true }
+                                    : { ...anOCPPServer().ssh.state, served: false, sshServer: false, url: null, hostKey: null } };
         // A controller takes what it takes: names as it writes them, once each.
         if (update.reachableAs !== undefined)
             held.reachableAs = [ ...new Set(update.reachableAs.map(name => name.toLowerCase())) ];
@@ -47,6 +56,8 @@ function controller({ method, path, body }: Asked): unknown {
 async function opened(): Promise<HTMLElement> {
     held          = anOCPPServer();
     refuseChanges = false;
+    if (!sshServerOn)
+        held.ssh  = { ...held.ssh, state: { ...held.ssh.state, sshServer: false, url: null, hostKey: null } };
     return open(ocppServerPage, '/configuration/ocpp-server', [ 'stations:read', 'stations:edit' ],
                 controller, root => root.querySelector('#reachable-form') !== null);
 }
@@ -140,6 +151,44 @@ describe('the charging station server\'s page', () => {
 
         assert.equal(root.querySelector('#socket-error')!.textContent, 'no server certificate yet');
         assert.equal(field(root, '#socket-form', 'port').value, '443', 'what was typed went');
+
+    });
+
+    it('switches OCPP over SSH on, and says where the stations connect and which host key they pin', async () => {
+
+        const root = await opened();
+
+        assert.equal(root.querySelector('#ssh-no-server'), null, 'an SSH server that is on was said to be off');
+
+        change(root.querySelector<HTMLInputElement>('#ssh-enabled')!, true);
+        await until(() => held.ssh.enabled && root.querySelector('#ssh-card .ok') !== null, 'OCPP over SSH was not switched on');
+
+        assert.deepEqual(asked.find(one => one.method === 'PUT')?.body, { ssh: { enabled: true } }, 'more than the switch was sent');
+        assert.match(root.querySelector('#ssh-card')!.textContent!, /ssh:\/\/lc001\.example\.org:22/);
+        assert.equal(root.querySelector('#ssh-host-key')?.textContent, held.ssh.state.hostKey);
+
+    });
+
+    it('says so where OCPP over SSH is on and the SSH server is not', async () => {
+
+        sshServerOn = false;
+
+        try
+        {
+
+            const root = await opened();
+
+            change(root.querySelector<HTMLInputElement>('#ssh-enabled')!, true);
+            await until(() => held.ssh.enabled && root.querySelector('#ssh-no-server') !== null,
+                        'OCPP over SSH switched on without an SSH server was not said to reach nobody');
+
+            assert.equal(root.querySelector('#ssh-host-key'), null, 'a host key was shown for an SSH server that is off');
+
+        }
+        finally
+        {
+            sshServerOn = true;
+        }
 
     });
 

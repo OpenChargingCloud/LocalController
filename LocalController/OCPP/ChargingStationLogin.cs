@@ -43,7 +43,8 @@ namespace cloud.charging.open.LocalController.OCPP
     /// <b>What is stored differs between the two, and has to.</b> The password
     /// is a PBKDF2 hash and cannot be read back. The TOTP shared secret is the
     /// secret itself, because verifying a token means computing it. See
-    /// <see cref="TOTPSettings"/>.
+    /// <see cref="TOTPSettings"/>. The SSH keys are public keys, and nothing
+    /// about them is secret: they are written and shown alike.
     /// </remarks>
     /// <param name="Id">What the charging station calls itself in OCPP.</param>
     /// <param name="GroupId">The group that decides what it may do.</param>
@@ -52,16 +53,40 @@ namespace cloud.charging.open.LocalController.OCPP
     /// <param name="Enabled">Whether it may sign in at the moment.</param>
     /// <param name="AddedAt">When it was added.</param>
     /// <param name="Note">What it is, for whoever reads the list later.</param>
-    public sealed record ChargingStationLogin(String           Id,
-                                              String           GroupId,
-                                              SecurePassword?  Password,
-                                              TOTPSettings?    TOTP,
-                                              Boolean          Enabled,
-                                              DateTimeOffset   AddedAt,
-                                              String?          Note)
+    /// <param name="SSHKeys">The SSH public keys it signs in with for OCPP over SSH, as authorized_keys lines; null or none when it has none.</param>
+    public sealed record ChargingStationLogin(String                     Id,
+                                              String                     GroupId,
+                                              SecurePassword?            Password,
+                                              TOTPSettings?              TOTP,
+                                              Boolean                    Enabled,
+                                              DateTimeOffset             AddedAt,
+                                              String?                    Note,
+                                              IReadOnlyList<UserSSHKey>? SSHKeys = null)
     {
 
+        #region Data
+
+        /// <summary>
+        /// How many SSH keys one charging station may have: one, and the one
+        /// replacing it while it is being replaced - and some room.
+        /// </summary>
+        public const Int32 MaxSSHKeys = 8;
+
+        #endregion
+
         #region Properties
+
+        /// <summary>
+        /// Its SSH keys, none rather than null.
+        /// </summary>
+        public IReadOnlyList<UserSSHKey> Keys
+            => SSHKeys ?? [];
+
+        /// <summary>
+        /// Whether it has an SSH key at all, switched on or not.
+        /// </summary>
+        public Boolean HasSSHKey
+            => SSHKeys is { Count: > 0 };
 
         /// <summary>
         /// Whether a password has been set for this login.
@@ -96,7 +121,44 @@ namespace cloud.charging.open.LocalController.OCPP
                 if (HasTOTP)
                     yield return AuthMethod.TOTP;
 
+                if (HasSSHKey)
+                    yield return AuthMethod.SSHKey;
+
             }
+        }
+
+        #endregion
+
+
+        #region FindSSHKey(PublicKeyBlob, At)
+
+        /// <summary>
+        /// The key of this station a client offers - by its public key blob -
+        /// where it may sign in with it at the given time: switched on, not
+        /// one that vouches for certificates, and within its not-before and
+        /// expiry-time. Null where there is none.
+        /// </summary>
+        /// <remarks>
+        /// Whether the station itself is switched on, and what its group says,
+        /// is not asked here: see <see cref="ChargingStationLogins.FindSSHKey"/>.
+        /// </remarks>
+        /// <param name="PublicKeyBlob">The public key blob the client offers.</param>
+        /// <param name="At">When the client signs in.</param>
+        public UserSSHKey? FindSSHKey(ReadOnlySpan<Byte>  PublicKeyBlob,
+                                      DateTimeOffset      At)
+        {
+
+            foreach (var key in Keys)
+                if (!key.Key.IsCertAuthority &&
+                    !key.IsDisabled &&
+                     key.Key.Matches(PublicKeyBlob) &&
+                     key.Key.IsValidAt(At))
+                {
+                    return key;
+                }
+
+            return null;
+
         }
 
         #endregion
@@ -166,6 +228,55 @@ namespace cloud.charging.open.LocalController.OCPP
 
             #endregion
 
+            #region Its SSH keys, when it has any
+
+            List<UserSSHKey>? sshKeys = null;
+
+            if (JSON["sshKeys"] is JToken keysToken && keysToken.Type != JTokenType.Null)
+            {
+
+                if (keysToken is not JArray keyArray)
+                {
+                    Error = $"the 'sshKeys' of '{id}' must be a JSON array.";
+                    return false;
+                }
+
+                sshKeys = [];
+
+                foreach (var keyToken in keyArray)
+                {
+
+                    if (keyToken is not JObject keyJSON)
+                    {
+                        Error = $"an SSH key of '{id}' is not a JSON object.";
+                        return false;
+                    }
+
+                    if (!UserSSHKey.TryParse(keyJSON, out var sshKey, out var problem))
+                    {
+                        Error = $"an SSH key of '{id}' cannot be read: {problem}";
+                        return false;
+                    }
+
+                    // A key twice is one key: what lets the station in is the
+                    // same either way, and taking one away has to take it away.
+                    if (sshKeys.Any(known => known.Fingerprint == sshKey.Fingerprint))
+                    {
+                        Error = $"the SSH key {sshKey.Fingerprint} is listed twice for '{id}'.";
+                        return false;
+                    }
+
+                    sshKeys.Add(sshKey);
+
+                }
+
+                if (sshKeys.Count == 0)
+                    sshKeys = null;
+
+            }
+
+            #endregion
+
             var addedAt = DateTimeOffset.MinValue;
 
             DateTimeOffset.TryParse(JSON.Value<String>("addedAt"),
@@ -182,7 +293,8 @@ namespace cloud.charging.open.LocalController.OCPP
                         totp,
                         JSON.Value<Boolean?>("enabled") ?? true,
                         addedAt,
-                        JSON.Value<String>("note")?.Trim() is { Length: > 0 } note ? note : null
+                        JSON.Value<String>("note")?.Trim() is { Length: > 0 } note ? note : null,
+                        sshKeys
                     );
 
             return true;
@@ -206,11 +318,16 @@ namespace cloud.charging.open.LocalController.OCPP
                            new JProperty("enabled",      Enabled),
                            new JProperty("addedAt",      AddedAt.ToString("o")),
                            new JProperty("hasPassword",  HasPassword),
-                           new JProperty("hasTOTP",      HasTOTP)
+                           new JProperty("hasTOTP",      HasTOTP),
+                           new JProperty("hasSSHKey",    HasSSHKey)
                        );
 
             if (Note is not null)
                 json.Add("note", Note);
+
+            // Public keys, so the same with and without the secrets.
+            if (HasSSHKey)
+                json.Add("sshKeys", new JArray(Keys.Select(key => key.ToJSON())));
 
             if (TOTP is not null)
                 json.Add("totp", TOTP.ToJSON(WithSecret: WithSecrets));
@@ -229,7 +346,7 @@ namespace cloud.charging.open.LocalController.OCPP
         public override String ToString()
 
             => $"{Id} in '{GroupId}' ({(Enabled ? "on" : "off")}): " +
-               $"{(HasPassword || HasTOTP ? String.Join(" and ", Credentials.Select(method => method.AsText())) : "no credentials")}";
+               $"{(HasPassword || HasTOTP || HasSSHKey ? String.Join(" and ", Credentials.Select(method => method.AsText())) : "no credentials")}";
 
         #endregion
 

@@ -223,6 +223,10 @@ export const stationLoginsPage: Page = {
                             <input type="checkbox" name="certificate" ?checked=${ticked('certificate')} />
                             <span>A TLS client certificate</span>
                         </label>
+                        <label class="check">
+                            <input type="checkbox" name="sshkey" ?checked=${ticked('sshkey')} />
+                            <span>An SSH key (OCPP over SSH - no security profile, so the profiles below are not asked)</span>
+                        </label>
                     </fieldset>
 
                     <fieldset>
@@ -334,6 +338,41 @@ export const stationLoginsPage: Page = {
 
                     </form>
 
+                    <h3>An SSH key, for OCPP over SSH</h3>
+
+                    <p class="hint">
+                        The station's public key, as one line of an authorized_keys file - options such as
+                        <code>from="10.10.0.0/16"</code> in front where wanted. It signs in to this controller's SSH
+                        server under its identification, and gets OCPP and nothing else. A station that is not listed
+                        yet is added with it. One key is one charging station.
+                    </p>
+
+                    <form id="sshkey-form" class="form-row" @submit=${addSSHKey}>
+
+                        <label>Identification
+                            <input type="text" name="id" placeholder="cs001" maxlength="48"
+                                   ?disabled=${!mayChange} required />
+                        </label>
+
+                        <label>Its public key
+                            <input type="text" name="line" placeholder="ssh-ed25519 AAAA... cs001"
+                                   ?disabled=${!mayChange} required />
+                        </label>
+
+                        <label>Called
+                            <input type="text" name="label" placeholder="bay 1" maxlength="200"
+                                   ?disabled=${!mayChange} />
+                        </label>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn primary" ?disabled=${!mayChange}>
+                                Give it the key
+                            </button>
+                            <span id="sshkey-error" class="form-error" role="alert"></span>
+                        </div>
+
+                    </form>
+
                 </section>
             `;
 
@@ -376,7 +415,10 @@ export const stationLoginsPage: Page = {
                         ${station.hasTOTP
                               ? html`<span class="badge ${usable('totp') ? '' : 'warn'}">token</span> `
                               : nothing}
-                        ${!station.hasPassword && !station.hasTOTP
+                        ${station.hasSSHKey
+                              ? html`<span class="badge ${usable('sshkey') ? '' : 'warn'}">SSH key</span> `
+                              : nothing}
+                        ${!station.hasPassword && !station.hasTOTP && !station.hasSSHKey
                               ? html`<span class="badge">certificate only</span>`
                               : nothing}
                         ${station.totp
@@ -384,6 +426,20 @@ export const stationLoginsPage: Page = {
                                          ${station.totp.length} characters of ${station.totp.hashAlgorithm},
                                          every ${station.totp.validitySeconds}s
                                      </div>`
+                              : nothing}
+                        ${(station.sshKeys ?? []).map(key => html`
+                              <div class="small muted station-sshkey" data-id="${station.id}" data-fingerprint="${key.fingerprint}">
+                                  <code>${key.fingerprint}</code>${key.label ? ` - ${key.label}` : ''}
+                                  ${key.isDisabled ? html`<span class="warn">switched off</span>` : nothing}
+                                  <button type="button" class="btn small station-sshkey-remove"
+                                          data-id="${station.id}" data-fingerprint="${key.fingerprint}"
+                                          ?disabled=${!mayChange} @click=${() => void dropSSHKey(station.id, key.fingerprint)}>
+                                      Take away
+                                  </button>
+                              </div>
+                          `)}
+                        ${station.hasSSHKey && !usable('sshkey')
+                              ? html`<div class="small warn">its group does not accept SSH keys</div>`
                               : nothing}
                     </td>
 
@@ -460,6 +516,7 @@ export const stationLoginsPage: Page = {
             if (ticked('basic'))        methods.push('basic');
             if (ticked('totp'))         methods.push('totp');
             if (ticked('certificate'))  methods.push('certificate');
+            if (ticked('sshkey'))       methods.push('sshkey');
 
             const profiles: number[] = [];
 
@@ -547,6 +604,58 @@ export const stationLoginsPage: Page = {
                 if (!cancelled)
                     error.textContent = errorMessage(problem);
             }
+
+        }
+
+
+        function addSSHKey(event: SubmitEvent): void {
+
+            event.preventDefault();
+
+            void tellSSHKey(event.currentTarget as HTMLFormElement);
+
+        }
+
+
+        async function tellSSHKey(form: HTMLFormElement): Promise<void> {
+
+            const error = must<HTMLElement>(content, '#sshkey-error');
+            error.textContent = '';
+
+            try
+            {
+
+                // The group and the note are the station form's business; a key
+                // is given to a station as it is.
+                const answer = await api.ocppServer.stations.addSSHKey(
+                                   field(form, 'id'), field(form, 'line'), field(form, 'label', false), '', '');
+
+                if (cancelled)
+                    return;
+
+                store     = answer.stations;
+                justMade  = null;
+
+                draw();
+
+                form.reset();
+
+            }
+            catch (problem)
+            {
+                if (!cancelled)
+                    error.textContent = errorMessage(problem);
+            }
+
+        }
+
+
+        async function dropSSHKey(id: string, fingerprint: string): Promise<void> {
+
+            if (!window.confirm(`Take the SSH key ${fingerprint} away from '${id}'?\n\nA session it opened ends now.`))
+                return;
+
+            await change(() => api.ocppServer.stations.removeSSHKey(id, fingerprint));
 
         }
 
@@ -697,7 +806,7 @@ export const stationLoginsPage: Page = {
         }
 
 
-        // The group being edited and the station being added are drafts. The
+        // The group being edited, the station and the key being added are drafts. The
         // switches and choosers in the list are in no form: they take effect
         // the moment they are touched.
         const release = unsaved.heldBy(() => anyFormTypedSinceDrawn(content));

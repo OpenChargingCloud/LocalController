@@ -42,6 +42,22 @@ function controller({ method, path, body }: Asked): unknown {
         return { id: added.id, password: 'made up, shown once', stations: held };
     }
 
+    const keys = /^\/configuration\/ocpp-server\/stations\/([^/]+)\/sshKeys(?:\/([^/]+))?$/.exec(path);
+
+    if (keys && method === 'POST') {
+        const given = body as { line: string; label: string };
+        const key   = { fingerprint: 'SHA256:ab+cd/ef', line: given.line, label: given.label, created: '2026-11-07T00:00:00Z' };
+        held = { ...held, stations: held.stations.some(station => station.id === keys[1])
+                                        ? held.stations.map(station => station.id === keys[1] ? { ...station, hasSSHKey: true, sshKeys: [ key ] } : station)
+                                        : [ ...held.stations, { ...aStation(keys[1]!), hasPassword: false, hasSSHKey: true, sshKeys: [ key ] } ] };
+        return { id: keys[1], fingerprint: key.fingerprint, stations: held };
+    }
+
+    if (keys && method === 'DELETE') {
+        held = { ...held, stations: held.stations.map(station => station.id === keys[1] ? { ...station, hasSSHKey: false, sshKeys: [] } : station) };
+        return held;
+    }
+
     const one = /^\/configuration\/ocpp-server\/stations\/([^/]+)$/.exec(path);
 
     if (one && method === 'PUT') {
@@ -145,6 +161,31 @@ describe('the logins and groups', () => {
         assert.equal(field(root, '#station-form', 'id').value,                          '', 'the station added is still in the form');
         assert.equal(field(root, '#station-form', 'note').value,                        '');
         assert.equal(field<HTMLSelectElement>(root, '#station-form', 'group').value,    'default');
+
+    });
+
+    it('give a station an SSH key, say when its group does not take keys, and take the key away by a fingerprint fit for a URL', async () => {
+
+        const root = await opened();
+
+        field(root, '#sshkey-form', 'id').value    = 'cs003';
+        field(root, '#sshkey-form', 'line').value  = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA cs003';
+        field(root, '#sshkey-form', 'label').value = 'bay 3';
+
+        submit(root, '#sshkey-form');
+        await until(() => root.querySelector('.station-sshkey[data-id="cs003"]') !== null, 'the key given was not drawn');
+
+        assert.deepEqual(asked.find(one => one.method === 'POST')?.body,
+                         { line: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA cs003', label: 'bay 3', group: '', note: '' });
+        assert.match(root.querySelector('.station-sshkey[data-id="cs003"]')!.textContent!, /SHA256:ab\+cd\/ef - bay 3/);
+        assert.equal(field(root, '#sshkey-form', 'line').value, '', 'the key given is still in the form');
+        assert.match(root.querySelector('.station-sshkey[data-id="cs003"]')!.closest('td')!.textContent!, /does not accept SSH keys/,
+                     'a key its group does not take was not said to be of no use');
+
+        root.querySelector<HTMLButtonElement>('.station-sshkey-remove[data-id="cs003"]')!.click();
+        await until(() => root.querySelector('.station-sshkey[data-id="cs003"]') === null, 'the key taken away was still drawn');
+
+        assert.equal(asked.find(one => one.method === 'DELETE')?.path, '/configuration/ocpp-server/stations/cs003/sshKeys/ab-cd_ef');
 
     });
 

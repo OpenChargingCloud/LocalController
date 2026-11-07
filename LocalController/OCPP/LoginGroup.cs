@@ -36,6 +36,11 @@ namespace cloud.charging.open.LocalController.OCPP
     /// certificate. TOTP is not in OCPP at all; it is what this controller
     /// accepts beside them. So a group says both: which of these it accepts,
     /// and over which profiles.
+    ///
+    /// An SSH key is not in OCPP either, and it is no security profile: OCPP
+    /// over SSH is a transport of its own, encrypted and authenticated by SSH,
+    /// so a group's security profiles are not asked of a station that signs in
+    /// with one - only whether the group accepts SSH keys.
     /// </remarks>
     public enum AuthMethod
     {
@@ -54,7 +59,14 @@ namespace cloud.charging.open.LocalController.OCPP
         /// <summary>
         /// A TLS client certificate, held against the accepted chains.
         /// </summary>
-        Certificate
+        Certificate,
+
+        /// <summary>
+        /// An SSH public key of the charging station, for OCPP over SSH: the
+        /// station signs in to this controller's SSH server under its
+        /// identification.
+        /// </summary>
+        SSHKey
 
     }
 
@@ -74,6 +86,7 @@ namespace cloud.charging.open.LocalController.OCPP
                    AuthMethod.Basic        => "basic",
                    AuthMethod.TOTP         => "totp",
                    AuthMethod.Certificate  => "certificate",
+                   AuthMethod.SSHKey       => "sshkey",
                    _                       => Method.ToString().ToLowerInvariant()
                };
 
@@ -86,6 +99,7 @@ namespace cloud.charging.open.LocalController.OCPP
                    "basic"        => AuthMethod.Basic,
                    "totp"         => AuthMethod.TOTP,
                    "certificate"  => AuthMethod.Certificate,
+                   "sshkey"       => AuthMethod.SSHKey,
                    _              => null
                };
 
@@ -184,13 +198,19 @@ namespace cloud.charging.open.LocalController.OCPP
         /// about them. So the group those logins land in has to mean "as
         /// before" - and the narrowing happens where somebody decided it, not
         /// behind their back.
+        ///
+        /// SSH keys among them, as everything else this controller accepts: a
+        /// key does nothing until somebody gives a station one and switches
+        /// OCPP over SSH on. A default group that a file written before SSH
+        /// keys existed holds is that file's, and stays without them until
+        /// somebody adds them - the file said what it accepts.
         /// </remarks>
         public static LoginGroup Default(DateTimeOffset Now)
 
             => new (DefaultId,
                     "Default",
                     true,
-                    new HashSet<AuthMethod> { AuthMethod.Basic, AuthMethod.TOTP, AuthMethod.Certificate },
+                    new HashSet<AuthMethod> { AuthMethod.Basic, AuthMethod.TOTP, AuthMethod.Certificate, AuthMethod.SSHKey },
                     new HashSet<Byte>       { 1, 2, 3 },
                     Now,
                     null);

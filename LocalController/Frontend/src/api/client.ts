@@ -99,6 +99,8 @@ export interface OCPPServerConfiguration {
     maxConnections:              number;
     pingEverySeconds:            number;
     logging:                     OCPPServerLogging;
+    /** OCPP over SSH, on this controller's SSH server, beside the WebSocket port. */
+    ssh:                         OCPPServerSSH;
     state: {
         running:            boolean;
         tls:                boolean;
@@ -120,9 +122,32 @@ export interface OCPPServerConfiguration {
         tlsVersions:                    string[];
         maxConnections:                 number;
         maxReachableAs:                 number;
+        minMaxMessageSize?:             number;
+        maxMaxMessageSize?:             number;
         suggestedPayloadWindowSeconds:  number;
     };
     file:  string;
+}
+
+/** OCPP over SSH: the subsystem the stations ask for on this controller's SSH server. */
+export interface OCPPServerSSH {
+    enabled:           boolean;
+    /** Null where the WebSocket port's are offered. */
+    subprotocols:      string[] | null;
+    maxMessageSize:    number;
+    pingEverySeconds:  number;
+    subsystem:         string;
+    state: {
+        /** Whether a station can connect over SSH right now. */
+        served:            boolean;
+        /** Whether this controller's SSH server is on at all. */
+        sshServer:         boolean;
+        url:               string | null;
+        /** "ssh-ed25519 SHA256:...", what a station pins. */
+        hostKey:           string | null;
+        connections:       number;
+        stationsWithAKey:  number;
+    };
 }
 
 /** What a PUT to the charging station server may carry; everything is optional. */
@@ -137,6 +162,9 @@ export interface OCPPServerUpdate {
     checkCertificateRevocation?:  boolean;
     maxConnections?:              number;
     pingEverySeconds?:            number;
+    ssh?: {
+        enabled?:  boolean;
+    };
     logging?: {
         connections?:     boolean;
         authentication?:  boolean;
@@ -313,7 +341,19 @@ export interface CSMSUpdate {
 }
 
 /** A way a charging station can prove who it is. */
-export type AuthMethod = 'basic' | 'totp' | 'certificate';
+export type AuthMethod = 'basic' | 'totp' | 'certificate' | 'sshkey';
+
+/** An SSH public key a charging station signs in with for OCPP over SSH. Nothing about it is secret. */
+export interface StationSSHKey {
+    /** "SHA256:...", as OpenSSH writes it: what the key is known by. */
+    fingerprint:  string;
+    /** The authorized_keys line it was given as, its options in front. */
+    line:         string;
+    label?:       string;
+    created:      string;
+    createdBy?:   string;
+    isDisabled?:  boolean;
+}
 
 /**
  * What a charging station needs in order to be let in with a one-time token.
@@ -338,6 +378,8 @@ export interface StationLogin {
     hasPassword:  boolean;
     hasTOTP:      boolean;
     totp?:        TOTPSettings;
+    hasSSHKey?:   boolean;
+    sshKeys?:     StationSSHKey[];
     note?:        string;
 }
 
@@ -388,6 +430,15 @@ export interface TOTPUpdate {
     note?:             string;
 }
 
+
+/**
+ * An SSH key's fingerprint as it goes into a URL: without "SHA256:", and in
+ * the URL-safe Base64 alphabet, where '/' would be read as a path - as the
+ * controller reads it back.
+ */
+export function fingerprintInURL(fingerprint: string): string {
+    return fingerprint.replace(/^SHA256:/, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
 
 /** The routes every node has, typed with what a local controller says its own of them are. */
 const node = nodeAPI<{ me: Me; status: Status; configuration: Configuration; kind: CertificateKind; store: CertificateStore }>();
@@ -518,7 +569,21 @@ export const api = {
                           request<StationLogins>('DELETE', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/totp`),
 
             removePassword: (id: string) =>
-                          request<StationLogins>('DELETE', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/password`)
+                          request<StationLogins>('DELETE', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/password`),
+
+            /**
+             * Give a station an SSH key for OCPP over SSH - one line of an
+             * authorized_keys file - adding the station where it is not listed
+             * yet. A public key: nothing secret goes either way.
+             */
+            addSSHKey: (id: string, line: string, label: string, group: string, note: string) =>
+                          request<{ id: string; fingerprint: string; stations: StationLogins }>(
+                              'POST', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/sshKeys`, { line, label, group, note }),
+
+            /** Take a key away; a session it opened ends. */
+            removeSSHKey: (id: string, fingerprint: string) =>
+                          request<StationLogins>('DELETE',
+                              `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/sshKeys/${fingerprintInURL(fingerprint)}`)
 
         },
 

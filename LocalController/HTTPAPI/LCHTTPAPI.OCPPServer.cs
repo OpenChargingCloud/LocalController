@@ -90,6 +90,9 @@ namespace cloud.charging.open.LocalController
             AddHandler(root + "stations/{id}/totp",     DeleteStationTOTP,      HTTPMethod.DELETE);
             AddHandler(root + "stations/{id}/password", DeleteStationPassword,  HTTPMethod.DELETE);
 
+            AddHandler(root + "stations/{id}/sshKeys",               PostStationSSHKey,    HTTPMethod.POST);
+            AddHandler(root + "stations/{id}/sshKeys/{fingerprint}", DeleteStationSSHKey,  HTTPMethod.DELETE);
+
         }
 
         #endregion
@@ -848,6 +851,88 @@ namespace cloud.charging.open.LocalController
                                                   "password"));
 
         /// <summary>
+        /// POST .../stations/{id}/sshKeys with {"line", "label", "group",
+        /// "note"}: give a charging station an SSH key for OCPP over SSH,
+        /// adding the station where it is not listed yet.
+        /// </summary>
+        /// <remarks>
+        /// The line is a public key, as one line of an authorized_keys file;
+        /// nothing about it is secret, and the answer is the whole list as
+        /// every other change here answers.
+        /// </remarks>
+        private Task<HTTPResponse> PostStationSSHKey(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out var user, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryGetId(Request, out var id, out var badRequest))
+                return Task.FromResult(badRequest);
+
+            if (!TryParseJSONObject(Request, out var json, out var errorResponse))
+                return Task.FromResult(errorResponse);
+
+            if (!Controller.TryAddStationSSHKey(
+                     id,
+                     json.Value<String>("line"),
+                     json.Value<String>("label"),
+                     json.Value<String>("group"),
+                     json.Value<String>("note"),
+                     user.Id.ToString(),
+                     out var key,
+                     out var error,
+                     out var notSaved))
+            {
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, error, notSaved));
+            }
+
+            Log.Notice($"'{user.Id}' gave the charging station '{id}' the SSH key {key}.", "ocpp", "station", "auth", "ssh", "web");
+
+            return Task.FromResult(
+                       JSONResponse(Request, HTTPStatusCode.OK, new JObject(
+                           new JProperty("id",           id),
+                           new JProperty("fingerprint",  key.Fingerprint),
+                           new JProperty("stations",     Controller.StationLogins.ToJSON())
+                       ))
+                   );
+
+        }
+
+        /// <summary>
+        /// DELETE .../stations/{id}/sshKeys/{fingerprint}: take an SSH key away
+        /// from a charging station. A session it opened ends.
+        /// </summary>
+        /// <remarks>
+        /// The fingerprint as OpenSSH writes it, "SHA256:...", escaped - or
+        /// without its "SHA256:" and in the URL-safe Base64 alphabet, as the
+        /// page sends it.
+        /// </remarks>
+        private Task<HTTPResponse> DeleteStationSSHKey(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out var user, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryGetId(Request, out var id, out var badRequest))
+                return Task.FromResult(badRequest);
+
+            if (Request.ParsedURLParameters.ElementAtOrDefault(1)?.Trim() is not { Length: > 0 } fingerprintText)
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, "The fingerprint of the key is required."));
+
+            var fingerprint = UserSSHKey.FingerprintFromURL(fingerprintText);
+
+            if (!Controller.StationLogins.TryRemoveSSHKey(id, fingerprint, out var error, out var notSaved))
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.NotFound, error, notSaved));
+
+            Log.Notice($"'{user.Id}' took the SSH key {fingerprint} of the charging station '{id}' away.", "ocpp", "station", "auth", "ssh", "web");
+
+            return Task.FromResult(
+                       JSONResponse(Request, HTTPStatusCode.OK, Controller.StationLogins.ToJSON())
+                   );
+
+        }
+
+        /// <summary>
         /// What the two routes above have in common.
         /// </summary>
         private HTTPResponse TakeCredentialAway(HTTPRequest       Request,
@@ -976,7 +1061,7 @@ namespace cloud.charging.open.LocalController
                     if (method is null)
                         return ErrorJSON(Request, HTTPStatusCode.BadRequest,
                                          $"'{token}' is not a way of signing in that this local controller knows; " +
-                                          "there are basic, totp and certificate.");
+                                          "there are basic, totp, certificate and sshkey.");
 
                     methods.Add(method.Value);
 

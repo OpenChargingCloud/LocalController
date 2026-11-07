@@ -47,8 +47,8 @@ CSMS and the charging station port on top.
 | CSMS connection | where the controller reports to, how it dials, and what it signs in with | `csms:edit` |
 | Certificate store | the TLS roots of the servers the controller connects to, and their certificates - certificates alone, no private key | `certificates:edit` |
 | Identities | who the controller is as a client, each with its private key: the TLS identity it signs in to the CSMS with | `certificates:edit` |
-| Charging stations | the server the charging stations connect to: its port, the security profiles it accepts, the names it is reachable as, what it logs | `stations:edit` |
-| Logins and groups | which charging stations may sign in, with what, and what their group allows them | `stations:edit` |
+| Charging stations | the server the charging stations connect to: its port, the security profiles it accepts, the names it is reachable as, what it logs, and whether they may connect over SSH as well | `stations:edit` |
+| Logins and groups | which charging stations may sign in, with what - a password, a one-time token, an SSH key - and what their group allows them | `stations:edit` |
 | Server certificates | the keys this controller presents, and the certificates that answer them | `certificates:edit` |
 | Accepted chains | which certificate authorities a charging station may be vouched for by | `certificates:edit` |
 | Logs | nothing - it reads | anybody signed in |
@@ -91,6 +91,23 @@ trusts or to a TLS root of the store kept for every use. What it was believed
 with is remembered in `known-servers.json`, and another certificate than before
 is said. A CSMS reads who is dialling from the last segment of the address, as
 OCPP has every client say it: `wss://csms.example.org/ocpp/lc001`.
+
+The charging stations may speak OCPP over SSH as well, where `ssh` in the
+`ocppServer` section says so - `"ssh": { "enabled": true }`, switched off
+unless somebody says otherwise, and on and off without a restart. There is no
+port of its own: a station signs in to the controller's SSH server - the one
+of the command line, the `ssh` section's port - under its identification, with
+an SSH key it was given under Logins and groups, and asks for the subsystem
+`ocpp@open.charging.cloud`; it pins the controller's host key as it would a
+certificate. A key is a line of an `authorized_keys` file, so `from=` and
+`expiry-time=` in front of it hold, and one key is one charging station. It
+lets the station in where the station and its group are switched on and the
+group accepts SSH keys (`sshkey`) - no security profile is asked, as SSH is
+none - and the station gets OCPP and nothing else: no command line, no
+command, no SFTP. A key taken away, a station or its group switched off, ends
+the session it opened at once. Which OCPP versions are offered is the
+WebSocket port's, unless `subprotocols` beside `enabled` says otherwise;
+`maxMessageSize` and `pingEverySeconds` there too wait for the next start.
 
 
 ## Running it

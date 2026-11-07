@@ -93,6 +93,8 @@ export const ocppServerPage: Page = {
 
                     </section>
 
+                    ${sshCard(configuration)}
+
                     <section class="card">
 
                         <h2><i class="fa-solid fa-network-wired"></i> Socket</h2>
@@ -353,6 +355,70 @@ export const ocppServerPage: Page = {
                         </div>
 
                     </form>
+
+                </section>
+            `;
+
+        }
+
+
+        // OCPP over SSH: on this controller's SSH server, beside the socket
+        // below, and switched on and off without a restart.
+        function sshCard(configuration: OCPPServerConfiguration): TemplateResult | typeof nothing {
+
+            const ssh = configuration.ssh;
+
+            if (ssh === undefined)
+                return nothing;
+
+            return html`
+                <section class="card" id="ssh-card">
+
+                    <h2><i class="fa-solid fa-terminal"></i> OCPP over SSH</h2>
+
+                    <label class="switch">
+                        <input type="checkbox" id="ssh-enabled"
+                               .checked=${live(ssh.enabled)}
+                               ?disabled=${!mayChange}
+                               @change=${(event: Event) => void save({ ssh: { enabled: (event.target as HTMLInputElement).checked } }, 'ssh', null)} />
+                        <span>${ssh.enabled ? 'switched on' : 'switched off'}</span>
+                    </label>
+
+                    ${ssh.enabled && !ssh.state.sshServer ? html`
+                        <p class="warn" id="ssh-no-server">
+                            The SSH server of this local controller is off, so no charging station can reach it over
+                            SSH. Switch SSH on under Configuration.
+                        </p>
+                    ` : nothing}
+
+                    <dl class="kv">
+                        <dt>Served</dt>
+                        <dd class="${ssh.state.served ? 'ok' : 'muted'}">${ssh.state.served ? 'yes' : 'no'}</dd>
+
+                        ${ssh.state.url === null ? nothing : html`
+                            <dt>Stations connect to</dt>
+                            <dd><code>${ssh.state.url}</code>, subsystem <code>${ssh.subsystem}</code></dd>
+                        `}
+
+                        ${ssh.state.hostKey === null ? nothing : html`
+                            <dt>Host key</dt>
+                            <dd><code id="ssh-host-key">${ssh.state.hostKey}</code></dd>
+                        `}
+
+                        <dt>Connected over SSH</dt>
+                        <dd>${ssh.state.connections}</dd>
+
+                        <dt>Stations with an SSH key</dt>
+                        <dd>${ssh.state.stationsWithAKey}</dd>
+                    </dl>
+
+                    <p class="hint">
+                        A charging station signs in to the SSH server under its identification with an SSH key it was
+                        given under Logins and groups, and gets OCPP and nothing else. It pins the host key above,
+                        as it would a certificate. Switching this off ends every OCPP session over SSH.
+                    </p>
+
+                    <span id="ssh-error" class="form-error" role="alert"></span>
 
                 </section>
             `;

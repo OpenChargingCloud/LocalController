@@ -29,6 +29,8 @@ using org.GraphDefined.Vanaheimr.Hermod.WebSocket;
 
 using cloud.charging.open.protocols.WWCP.Node;
 using cloud.charging.open.protocols.WWCP.Node.Logging;
+using cloud.charging.open.protocols.WWCP.Node.SecureShell;
+using cloud.charging.open.protocols.OCPP.SSH;
 
 using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.LocalController.OCPP;
@@ -60,6 +62,13 @@ namespace cloud.charging.open.LocalController
     /// whether a client certificate is asked for - is decided when the server
     /// is built, and changing it waits for the next start. Which of the two a
     /// change was is reported back rather than left to be discovered.
+    ///
+    /// <b>And over SSH, where somebody switches it on.</b> The charging
+    /// stations may speak OCPP over the SSH server of this controller as well,
+    /// as the subsystem "ocpp@open.charging.cloud", signing in with an SSH key
+    /// of their own - see <see cref="OCPPServerSSH"/> and
+    /// <see cref="StationSSHSignIns"/>. That is served while the station
+    /// server is, and switched on and off without a restart.
     /// </remarks>
     public partial class LocalController
     {
@@ -134,6 +143,28 @@ namespace cloud.charging.open.LocalController
         /// </remarks>
         private const String StationIdKey = "localController.chargingStation";
 
+        /// <summary>
+        /// The server of OCPP over SSH: built with the station server, and
+        /// handed to the node's SSH server while it is served.
+        /// </summary>
+        private OCPPSshServer?                             ocppSshServer;
+
+        /// <summary>
+        /// The charging stations, as logins of the node's SSH server.
+        /// </summary>
+        private StationSSHSignIns?                         stationSSHSignIns;
+
+        /// <summary>
+        /// Whether OCPP over SSH is served right now.
+        /// </summary>
+        private volatile Boolean                           ocppOverSSHServed;
+
+        /// <summary>
+        /// What OCPP over SSH is called in what the SSH server says: who, the
+        /// SSH page, the log.
+        /// </summary>
+        public const String OCPPOverSSHLabel = "OCPP";
+
         #endregion
 
         #region Properties
@@ -194,6 +225,32 @@ namespace cloud.charging.open.LocalController
             => $"{(ocppServerTLS ? "wss" : "ws")}://" +
                $"{(ocppServerSettings.ReachableAs is { Count: > 0 } names ? names[0] : ocppServerSettings.Address?.ToString() ?? "0.0.0.0")}:" +
                $"{ocppServerSettings.TCPPort ?? OCPPServerConfiguration.DefaultTCPPort}";
+
+        /// <summary>
+        /// The server of OCPP over SSH, or null when this controller was built
+        /// without a station server.
+        /// </summary>
+        public OCPPSshServer?  StationSSHServer
+            => ocppSshServer;
+
+        /// <summary>
+        /// Whether the charging stations may connect over SSH right now: the
+        /// station server is running, OCPP over SSH is switched on, and the
+        /// node's SSH server serves it.
+        /// </summary>
+        public Boolean OCPPOverSSHServed
+            => ocppOverSSHServed;
+
+        /// <summary>
+        /// Where the charging stations are told to connect over SSH - the SSH
+        /// server's port under the name of the station server - or null where
+        /// there is no SSH server.
+        /// </summary>
+        public String? OCPPServerSSHURL
+
+            => SSHEnabled && SSHPort is IPPort sshPort
+                   ? $"ssh://{(ocppServerSettings.ReachableAs is { Count: > 0 } names ? names[0] : ocppServerSettings.Address?.ToString() ?? "0.0.0.0")}:{sshPort}"
+                   : null;
 
         #endregion
 
@@ -257,8 +314,15 @@ namespace cloud.charging.open.LocalController
                 throw new InvalidOperationException($"{loginsError} Repair or remove it and start again.");
 
             StationLogins.OnChanged += () => {
+
                 if (ocppWebSocketServer is not null)
                     ApplyStationLogins(ocppWebSocketServer);
+
+                // Over SSH, a station whose key was taken away or that was
+                // switched off is signed out now rather than at the next
+                // round of the node's own rechecks.
+                RecheckSSHSessions();
+
             };
 
             #endregion
@@ -311,6 +375,35 @@ namespace cloud.charging.open.LocalController
 
             ApplyStationLogins(ocppWebSocketServer);
             WireOCPPServerLogging(ocppWebSocketServer);
+
+            #endregion
+
+            #region OCPP over SSH, on the node's SSH server
+
+            // Built here, as the WebSocket server is, with what it is
+            // configured as at the start; served or not while running.
+            ocppSshServer = lc01.AttachOCPPSshSubsystem(
+                                Subsystem:       OCPPSshServer.OCPPSubsystem,
+                                Subprotocols:    settings.SSH?.Subprotocols ?? settings.Subprotocols,
+                                MaxMessageSize:  settings.SSH?.MaxMessageSize ?? OCPPServerSSH.DefaultMaxMessageSize,
+                                PingEvery:       settings.SSH?.PingEvery      ?? OCPPServerSSH.DefaultPingEvery
+                            );
+
+            WireOCPPOverSSHLogging(ocppSshServer);
+
+            stationSSHSignIns = new StationSSHSignIns(
+                                    StationLogins,
+                                    OCPPSshServer.OCPPSubsystem,
+                                    () => ocppOverSSHServed,
+                                    TimeProvider
+                                );
+
+            stationSSHSignIns.OnNotice += (level, message) => {
+                if (ocppServerSettings.Logging?.Authentication != false)
+                    Log.Log(level, message, "ocpp", "station", "auth", "ssh");
+            };
+
+            AddSSHSignIns(stationSSHSignIns);
 
             #endregion
 
@@ -446,6 +539,9 @@ namespace cloud.charging.open.LocalController
                 "ocpp", "station"
             );
 
+            if (settings.SSH?.Enabled == true)
+                ServeOCPPOverSSH();
+
             #region What is about to run out, now and every day after this
 
             CheckCertificates();
@@ -496,9 +592,136 @@ namespace cloud.charging.open.LocalController
             certificateCheckTimer?.Dispose();
             certificateCheckTimer = null;
 
+            StopServingOCPPOverSSH("the station server stopped");
+
             await ocppWebSocketServer.Shutdown("The local controller is shutting down.");
 
             Log.Info("The charging station server has stopped listening.", "ocpp", "station");
+
+        }
+
+        #endregion
+
+        #region TryAddStationSSHKey(Id, Line, Label, GroupId, Note, CreatedBy, out Key, out Error, out NotSaved)
+
+        /// <summary>
+        /// Give a charging station an SSH key for OCPP over SSH - adding the
+        /// station where it is not listed yet.
+        /// </summary>
+        /// <remarks>
+        /// Refused where an account of this controller has the station's name:
+        /// both would sign in to the same SSH server under it, and a name that
+        /// is both is let in as neither. Asked here rather than in the store,
+        /// which knows the stations and not the accounts.
+        /// </remarks>
+        /// <param name="Id">What the charging station calls itself in OCPP, and signs in to SSH as.</param>
+        /// <param name="Line">Its public key, as one line of an authorized_keys file.</param>
+        /// <param name="Label">What the key is called, if anything.</param>
+        /// <param name="GroupId">The group it should belong to, or null for the one it is in already.</param>
+        /// <param name="Note">What this station is, for whoever reads the list later.</param>
+        /// <param name="CreatedBy">Who added the key, if anybody said.</param>
+        /// <param name="Key">The key, as it was added.</param>
+        /// <param name="Error">Why it was refused.</param>
+        /// <param name="NotSaved">True where the file could not be written.</param>
+        public Boolean TryAddStationSSHKey(String                                Id,
+                                           String?                               Line,
+                                           String?                               Label,
+                                           String?                               GroupId,
+                                           String?                               Note,
+                                           String?                               CreatedBy,
+                                           [NotNullWhen(true)]  out UserSSHKey?  Key,
+                                           [NotNullWhen(false)] out String?      Error,
+                                           out Boolean                           NotSaved)
+        {
+
+            Key       = null;
+            NotSaved  = false;
+
+            var id = Id?.Trim() ?? "";
+
+            if (User_Id.TryParse(id) is User_Id userId &&
+                ExtAPI.TryGetUser(userId, out var user) &&
+                user is not null)
+            {
+                Error = $"'{id}' is an account of this local controller. A charging station of the same name could not sign in over SSH: " +
+                         "both would sign in under one name, and a name that is both is let in as neither.";
+                return false;
+            }
+
+            return StationLogins.TryAddSSHKey(id, Line, Label, GroupId, Note, CreatedBy, out Key, out Error, out NotSaved);
+
+        }
+
+        #endregion
+
+        #region (private) ServeOCPPOverSSH() / StopServingOCPPOverSSH(Why)
+
+        /// <summary>
+        /// Serve OCPP over SSH from now on: the subsystem on the node's SSH
+        /// server, and the stations with an SSH key let in to it.
+        /// </summary>
+        /// <remarks>
+        /// Said out loud where it cannot work: OCPP over SSH switched on with
+        /// the node's SSH server off is a door painted on a wall.
+        /// </remarks>
+        private void ServeOCPPOverSSH()
+        {
+
+            if (ocppSshServer is null || ocppOverSSHServed)
+                return;
+
+            // Before the subsystem is there, so that a station asking for it
+            // the moment it is finds itself let in.
+            ocppOverSSHServed = true;
+
+            try
+            {
+                AddSSHSubsystem(new SSHSubsystem(OCPPSshServer.OCPPSubsystem, OCPPOverSSHLabel, ocppSshServer.Handler));
+            }
+            catch (Exception e)
+            {
+
+                ocppOverSSHServed = false;
+
+                Log.Critical($"OCPP over SSH could not be served: {e.Message}", "ocpp", "station", "ssh");
+                return;
+
+            }
+
+            var stations = StationLogins.Logins.Count(login => login.Enabled && login.HasSSHKey);
+
+            if (!SSHEnabled)
+                Log.Warning(
+                    "OCPP over SSH is switched on, but the SSH server of this local controller is off - so no charging station can reach it " +
+                    "over SSH. Switch SSH on under Configuration.",
+                    "ocpp", "station", "ssh"
+                );
+
+            else
+                Log.Notice(
+                    $"The charging stations may connect over SSH as well: {OCPPServerSSHURL}, subsystem {OCPPSshServer.OCPPSubsystem}, " +
+                    $"host key {SSHHostKey ?? "not known yet"} ({stations} station(s) with an SSH key).",
+                    "ocpp", "station", "ssh"
+                );
+
+        }
+
+        /// <summary>
+        /// Serve OCPP over SSH no longer: the subsystem goes, and every
+        /// session of it ends.
+        /// </summary>
+        /// <param name="Why">Why, for the log.</param>
+        private void StopServingOCPPOverSSH(String Why)
+        {
+
+            if (!ocppOverSSHServed)
+                return;
+
+            ocppOverSSHServed = false;
+
+            RemoveSSHSubsystem(OCPPSshServer.OCPPSubsystem);
+
+            Log.Info($"OCPP over SSH is no longer served: {Why}.", "ocpp", "station", "ssh");
 
         }
 
@@ -936,14 +1159,14 @@ namespace cloud.charging.open.LocalController
 
             Server.OnJSONMessageReceived += (timestamp, server, connection, messageTimestamp, eventTrackingId, sourceNodeId, message, cancellationToken) => {
 
-                LogOCPPMessage("<-", connection, message);
+                LogOCPPMessage("<-", StationOn(connection), message);
                 return Task.CompletedTask;
 
             };
 
             Server.OnJSONMessageSent += (timestamp, server, connection, messageTimestamp, eventTrackingId, message, sentStatus, cancellationToken) => {
 
-                LogOCPPMessage("->", connection, message);
+                LogOCPPMessage("->", StationOn(connection), message);
                 return Task.CompletedTask;
 
             };
@@ -967,6 +1190,65 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
+        #region (private) WireOCPPOverSSHLogging(Server)
+
+        /// <summary>
+        /// What of OCPP over SSH ends up in the event log: the same switches as
+        /// the WebSocket port's, read inside the handlers for the same reason.
+        /// </summary>
+        /// <remarks>
+        /// Who signed in, and who was refused at the door, the node's SSH
+        /// server says itself; what is said here is the station connecting,
+        /// which is a step later - after the HELLO that says which OCPP version
+        /// it speaks - and going away.
+        /// </remarks>
+        private void WireOCPPOverSSHLogging(OCPPSshServer Server)
+        {
+
+            Server.OnNetworkingNodeConnectionAccepted += (timestamp, transport, connection, networkingNodeId, networkingMode, eventTrackingId, cancellationToken) => {
+
+                if (ocppServerSettings.Logging?.Connections != false)
+                    Log.Notice(
+                        $"The charging station '{networkingNodeId?.ToString() ?? connection.RemoteSocket.ToString()}' is connected over SSH from {connection.RemoteSocket}" +
+                        $" ({connection.Subprotocol ?? "no subprotocol"}).",
+                        "ocpp", "station", "ssh"
+                    );
+
+                return Task.CompletedTask;
+
+            };
+
+            Server.OnNetworkingNodeConnectionClosed += (timestamp, transport, connection, networkingNodeId, close, cancellationToken) => {
+
+                if (ocppServerSettings.Logging?.Connections != false)
+                    Log.Notice(
+                        $"The charging station '{networkingNodeId?.ToString() ?? connection.RemoteSocket.ToString()}' went away over SSH" +
+                        $" ({(close.ByPeer ? "it closed" : "closed here")}{(close.Code.HasValue ? $", {close.Code}" : "")}{(close.Reason.IsNullOrEmpty() ? "" : $": {close.Reason}")}).",
+                        "ocpp", "station", "ssh"
+                    );
+
+                return Task.CompletedTask;
+
+            };
+
+            Server.OnJSONMessageReceived += (timestamp, transport, connection, messageTimestamp, eventTrackingId, sourceNodeId, message, cancellationToken) => {
+
+                LogOCPPMessage("<-", StationOn(connection), message);
+                return Task.CompletedTask;
+
+            };
+
+            Server.OnJSONMessageSent += (timestamp, transport, connection, messageTimestamp, eventTrackingId, message, sentStatus, cancellationToken) => {
+
+                LogOCPPMessage("->", StationOn(connection), message);
+                return Task.CompletedTask;
+
+            };
+
+        }
+
+        #endregion
+
         #region (private static) StationOn(Connection)
 
         /// <summary>
@@ -976,6 +1258,16 @@ namespace cloud.charging.open.LocalController
         private static String StationOn(WebSocketServerConnection Connection)
 
             => Connection.TryGetCustomData(StationIdKey) as String ?? Connection.RemoteSocket.ToString();
+
+        /// <summary>
+        /// Which charging station a connection over SSH is: the networking
+        /// node its HELLO was welcomed as - or where it comes from.
+        /// </summary>
+        private static String StationOn(org.GraphDefined.Vanaheimr.Hermod.Messaging.IMessageConnection Connection)
+
+            => Connection is WebSocketServerConnection webSocket
+                   ? StationOn(webSocket)
+                   : cloud.charging.open.protocols.WWCP.NetworkingNode.WWCPConnectionExtensions.NetworkingNodeIdOf(Connection)?.ToString() ?? Connection.RemoteSocket.ToString();
 
         #endregion
 
@@ -996,9 +1288,9 @@ namespace cloud.charging.open.LocalController
         /// action, and then what it carries. So the first three can be logged
         /// without the fourth, which is the whole point of having two switches.
         /// </remarks>
-        private void LogOCPPMessage(String                     Direction,
-                                    WebSocketServerConnection  Connection,
-                                    JArray                     Message)
+        private void LogOCPPMessage(String  Direction,
+                                    String  Station,
+                                    JArray  Message)
         {
 
             var logging = ocppServerSettings.Logging;
@@ -1008,7 +1300,7 @@ namespace cloud.charging.open.LocalController
 
             var action  = Message.Count > 2 ? Message[2]?.Value<String>() : null;
             var id      = Message.Count > 1 ? Message[1]?.Value<String>() : null;
-            var station = StationOn(Connection);
+            var station = Station;
 
             if (logging.PayloadsAt(TimeProvider.GetUtcNow()))
                 Log.Log(
@@ -1053,6 +1345,24 @@ namespace cloud.charging.open.LocalController
                 new JProperty("maxConnections",              settings.MaxConnections ?? OCPPServerConfiguration.DefaultMaxConnections),
                 new JProperty("pingEverySeconds",            (settings.PingEvery ?? OCPPServerConfiguration.DefaultPingEvery).TotalSeconds),
 
+                new JProperty("ssh",                         new JObject(
+                    new JProperty("enabled",                 settings.SSH?.Enabled == true),
+                    new JProperty("subprotocols",            settings.SSH?.Subprotocols is IReadOnlyList<String> sshSubprotocols
+                                                                 ? new JArray(sshSubprotocols)
+                                                                 : null),
+                    new JProperty("maxMessageSize",          settings.SSH?.MaxMessageSize ?? OCPPServerSSH.DefaultMaxMessageSize),
+                    new JProperty("pingEverySeconds",        (settings.SSH?.PingEvery ?? OCPPServerSSH.DefaultPingEvery).TotalSeconds),
+                    new JProperty("subsystem",               OCPPSshServer.OCPPSubsystem),
+                    new JProperty("state",                   new JObject(
+                        new JProperty("served",              ocppOverSSHServed),
+                        new JProperty("sshServer",           SSHEnabled),
+                        new JProperty("url",                 OCPPServerSSHURL),
+                        new JProperty("hostKey",             SSHHostKey),
+                        new JProperty("connections",         ocppSshServer?.ConnectedNetworkingNodeIds.Count() ?? 0),
+                        new JProperty("stationsWithAKey",    StationLogins.Logins.Count(login => login.Enabled && login.HasSSHKey))
+                    ))
+                )),
+
                 new JProperty("logging",                     new JObject(
                     new JProperty("connections",             settings.Logging?.Connections    != false),
                     new JProperty("authentication",          settings.Logging?.Authentication != false),
@@ -1083,6 +1393,8 @@ namespace cloud.charging.open.LocalController
                     new JProperty("tlsVersions",             new JArray("1.2", "1.3")),
                     new JProperty("maxConnections",          OCPPServerConfiguration.MaxMaxConnections),
                     new JProperty("maxReachableAs",          OCPPServerConfiguration.MaxReachableAs),
+                    new JProperty("minMaxMessageSize",       OCPPServerSSH.MinMaxMessageSize),
+                    new JProperty("maxMaxMessageSize",       OCPPServerSSH.MaxMaxMessageSize),
                     new JProperty("suggestedPayloadWindowSeconds", OCPPServerLogging.SuggestedPayloadWindow.TotalSeconds)
                 )),
 
@@ -1175,6 +1487,20 @@ namespace cloud.charging.open.LocalController
 
                     else
                         StopOCPPServer(). GetAwaiter().GetResult();
+
+                }
+
+                // OCPP over SSH on and off while the station server runs: the
+                // subsystem comes and goes, and its sessions end with it.
+                else if (ocppServerStarted &&
+                         before.SSH?.Enabled != ocppServerSettings.SSH?.Enabled)
+                {
+
+                    if (ocppServerSettings.SSH?.Enabled == true)
+                        ServeOCPPOverSSH();
+
+                    else
+                        StopServingOCPPOverSSH("it was switched off");
 
                 }
 

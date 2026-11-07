@@ -328,6 +328,15 @@ namespace cloud.charging.open.LocalController.OCPP
                         return false;
                     }
 
+                    // One key is one charging station, written by hand or not:
+                    // a key two stations share lets either sign in as the other.
+                    foreach (var key in login.Keys)
+                        if (logins.Values.FirstOrDefault(other => other.Keys.Any(known => known.Fingerprint == key.Fingerprint)) is ChargingStationLogin holder)
+                        {
+                            Error = $"'{Path}': the SSH key {key.Fingerprint} is listed for the charging stations '{holder.Id}' and '{login.Id}'; one key is one charging station.";
+                            return false;
+                        }
+
                     logins[login.Id] = login;
 
                 }
@@ -817,6 +826,235 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
+        #region TryAddSSHKey(Id, Line, Label, GroupId, Note, CreatedBy, out Key, out Error [, out NotSaved])
+
+        /// <summary>
+        /// Add a charging station, or give one that is already here an SSH key
+        /// to sign in with for OCPP over SSH.
+        /// </summary>
+        /// <param name="Id">What the charging station calls itself in OCPP - and signs in to SSH as.</param>
+        /// <param name="Line">Its public key, as one line of an authorized_keys file: "ssh-ed25519 AAAA... comment", options such as from= in front where wanted.</param>
+        /// <param name="Label">What the key is called, if anything.</param>
+        /// <param name="GroupId">The group it should belong to, or null for the one it is in already.</param>
+        /// <param name="Note">What this station is, for whoever reads the list later.</param>
+        /// <param name="CreatedBy">Who added the key, if anybody said.</param>
+        /// <param name="Key">The key, as it was added.</param>
+        public Boolean TryAddSSHKey(String                                Id,
+                                    String?                               Line,
+                                    String?                               Label,
+                                    String?                               GroupId,
+                                    String?                               Note,
+                                    String?                               CreatedBy,
+                                    [NotNullWhen(true)]  out UserSSHKey?  Key,
+                                    [NotNullWhen(false)] out String?      Error)
+
+            => TryAddSSHKey(Id, Line, Label, GroupId, Note, CreatedBy, out Key, out Error, out _);
+
+        /// <summary>
+        /// Add a charging station, or give one that is already here an SSH key
+        /// - and say whether a refusal was the file's rather than the change's.
+        /// </summary>
+        /// <remarks>
+        /// <b>One key is one charging station.</b> A key that already lets
+        /// another station in is refused: the station signs in under its own
+        /// name, and a key two stations share is a key either can use to be
+        /// the other.
+        ///
+        /// <b>Its own key, not an authority.</b> A cert-authority line vouches
+        /// for certificates rather than signing in itself; that is how a whole
+        /// fleet of stations would be let in, and it is not what this is.
+        /// </remarks>
+        /// <param name="NotSaved">True where the file could not be written: see <see cref="TryRemove(String, out String?, out Boolean)"/>.</param>
+        public Boolean TryAddSSHKey(String                                Id,
+                                    String?                               Line,
+                                    String?                               Label,
+                                    String?                               GroupId,
+                                    String?                               Note,
+                                    String?                               CreatedBy,
+                                    [NotNullWhen(true)]  out UserSSHKey?  Key,
+                                    [NotNullWhen(false)] out String?      Error,
+                                    out Boolean                           NotSaved)
+        {
+
+            Key       = null;
+            NotSaved  = false;
+
+            if (!TryCheckIdAndNote(Id, Note, out var id, out var note, out Error))
+                return false;
+
+            if (Line is null || Line.Trim().Length == 0)
+            {
+                Error = "An SSH public key is required, as one line of an authorized_keys file: \"ssh-ed25519 AAAA... comment\".";
+                return false;
+            }
+
+            if (!UserSSHKey.TryCreate(Line, Label, TimeProvider.GetUtcNow(), CreatedBy, out var key, out var refused))
+            {
+                Error = refused;
+                return false;
+            }
+
+            if (key.Key.IsCertAuthority)
+            {
+                Error = "That is a cert-authority line, which vouches for SSH certificates rather than signing in itself. " +
+                        "A charging station signs in with a key of its own: give its public key.";
+                return false;
+            }
+
+            lock (updateLock)
+            {
+
+                var existing = logins.GetValueOrDefault(id);
+
+                if (existing is null && logins.Count >= MaxStations)
+                {
+                    Error = $"At most {MaxStations} charging stations may be listed here.";
+                    return false;
+                }
+
+                var groupId = GroupId?.Trim().ToLowerInvariant() is { Length: > 0 } wanted
+                                  ? wanted
+                                  : existing?.GroupId ?? LoginGroup.DefaultId;
+
+                if (!groups.ContainsKey(groupId))
+                {
+                    Error = $"This local controller has never heard of a login group called '{groupId}'.";
+                    return false;
+                }
+
+                if (logins.Values.FirstOrDefault(login => login.Keys.Any(known => known.Fingerprint == key.Fingerprint)) is ChargingStationLogin holder)
+                {
+                    Error = holder.Id == id
+                                ? $"The charging station '{id}' has the SSH key {key.Fingerprint} already."
+                                : $"The SSH key {key.Fingerprint} already lets the charging station '{holder.Id}' in. " +
+                                   "One key is one charging station: give this one a key of its own.";
+                    return false;
+                }
+
+                if (existing is not null && existing.Keys.Count >= ChargingStationLogin.MaxSSHKeys)
+                {
+                    Error = $"A charging station may have at most {ChargingStationLogin.MaxSSHKeys} SSH keys; take an old one away first.";
+                    return false;
+                }
+
+                logins[id] = (existing ?? new ChargingStationLogin(
+                                              id,
+                                              groupId,
+                                              null,
+                                              null,
+                                              true,
+                                              TimeProvider.GetUtcNow(),
+                                              null
+                                          )) with {
+                                 GroupId  = groupId,
+                                 Note     = note.Length > 0 ? note : existing?.Note,
+                                 SSHKeys  = [ .. existing?.Keys ?? [], key ]
+                             };
+
+                if (!TrySave(out Error))
+                {
+
+                    NotSaved = true;
+
+                    if (existing is not null)
+                        logins[id] = existing;
+                    else
+                        logins.Remove(id);
+
+                    return false;
+
+                }
+
+                OnNotice?.Invoke(
+                    LogLevel.Notice,
+                    existing is not null
+                        ? $"The charging station '{id}' may now sign in with the SSH key {key}."
+                        : $"The charging station '{id}' may now sign in to this local controller, with the SSH key {key}."
+                );
+
+            }
+
+            OnChanged?.Invoke();
+
+            Key = key;
+            return true;
+
+        }
+
+        #endregion
+
+        #region TryRemoveSSHKey(Id, Fingerprint, out Error [, out NotSaved])
+
+        /// <summary>
+        /// Take an SSH key away from a charging station, leaving everything
+        /// else about it alone.
+        /// </summary>
+        /// <param name="Id">The charging station.</param>
+        /// <param name="Fingerprint">The key's SHA-256 fingerprint, "SHA256:..." as OpenSSH writes it.</param>
+        public Boolean TryRemoveSSHKey(String                            Id,
+                                       String                            Fingerprint,
+                                       [NotNullWhen(false)] out String?  Error)
+
+            => TryRemoveSSHKey(Id, Fingerprint, out Error, out _);
+
+        /// <summary>
+        /// Take an SSH key away from a charging station - and say whether a
+        /// refusal was the file's rather than the change's.
+        /// </summary>
+        /// <remarks>
+        /// A session the key opened ends: whoever serves OCPP over SSH is told
+        /// through <see cref="OnChanged"/>, and asks every open session again.
+        /// </remarks>
+        /// <param name="NotSaved">True where the file could not be written: see <see cref="TryRemove(String, out String?, out Boolean)"/>.</param>
+        public Boolean TryRemoveSSHKey(String                            Id,
+                                       String                            Fingerprint,
+                                       [NotNullWhen(false)] out String?  Error,
+                                       out Boolean                       NotSaved)
+        {
+
+            Error     = null;
+            NotSaved  = false;
+
+            lock (updateLock)
+            {
+
+                if (!logins.TryGetValue(Id, out var login))
+                {
+                    Error = $"This local controller has never heard of a charging station called '{Id}'.";
+                    return false;
+                }
+
+                var key = login.Keys.FirstOrDefault(known => known.Fingerprint == Fingerprint);
+
+                if (key is null)
+                {
+                    Error = $"The charging station '{Id}' has no SSH key {Fingerprint}.";
+                    return false;
+                }
+
+                var rest = login.Keys.Where(known => !ReferenceEquals(known, key)).ToArray();
+
+                logins[Id] = login with { SSHKeys = rest.Length > 0 ? rest : null };
+
+                if (!TrySave(out Error))
+                {
+                    NotSaved    = true;
+                    logins[Id]  = login;
+                    return false;
+                }
+
+                OnNotice?.Invoke(LogLevel.Notice, $"The charging station '{Id}' can no longer sign in with the SSH key {key}.");
+
+            }
+
+            OnChanged?.Invoke();
+
+            return true;
+
+        }
+
+        #endregion
+
         #region TrySetEnabled(Id, Enabled, out Error [, out NotSaved])
 
         /// <summary>
@@ -1018,6 +1256,44 @@ namespace cloud.charging.open.LocalController.OCPP
             }
 
             return settings.Matches(Token, TimeProvider.GetUtcNow());
+
+        }
+
+        #endregion
+
+        #region FindSSHKey(Id, PublicKeyBlob, At)
+
+        /// <summary>
+        /// The charging station of this identification and its key a client
+        /// offers, where the two may sign in at the given time: the station
+        /// switched on, and the key one of its own, switched on and valid.
+        /// Null where they may not.
+        /// </summary>
+        /// <remarks>
+        /// What the group allows is decided by the caller, as for
+        /// <see cref="Verify"/>. No hashing to equalise here: a public key
+        /// proves itself by a signature the SSH server checks, and nothing
+        /// about this lookup takes longer for a station that exists.
+        /// </remarks>
+        /// <param name="Id">What the station signs in as.</param>
+        /// <param name="PublicKeyBlob">The public key blob the client offers.</param>
+        /// <param name="At">When the client signs in.</param>
+        public (ChargingStationLogin Login, UserSSHKey Key)? FindSSHKey(String              Id,
+                                                                         ReadOnlySpan<Byte>  PublicKeyBlob,
+                                                                         DateTimeOffset      At)
+        {
+
+            ChargingStationLogin? login;
+
+            lock (updateLock)
+                login = logins.GetValueOrDefault(Id);
+
+            if (login is null || !login.Enabled)
+                return null;
+
+            return login.FindSSHKey(PublicKeyBlob, At) is UserSSHKey key
+                       ? (login, key)
+                       : null;
 
         }
 
