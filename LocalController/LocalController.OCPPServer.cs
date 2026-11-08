@@ -243,13 +243,22 @@ namespace cloud.charging.open.LocalController
 
         /// <summary>
         /// Where the charging stations are told to connect over SSH - the SSH
-        /// server's port under the name of the station server - or null where
-        /// there is no SSH server.
+        /// server's port under the name the stations know this controller by,
+        /// or where the SSH server listens where no name is given - or null
+        /// where there is no SSH server.
         /// </summary>
+        /// <remarks>
+        /// Not the station server's address: the SSH server listens where the
+        /// web interface does, the loopback unless --any says otherwise, and a
+        /// station server on every address would otherwise send the stations
+        /// to an "ssh://0.0.0.0" nothing answers them on.
+        /// </remarks>
         public String? OCPPServerSSHURL
 
-            => SSHEnabled && SSHPort is IPPort sshPort
-                   ? $"ssh://{(ocppServerSettings.ReachableAs is { Count: > 0 } names ? names[0] : ocppServerSettings.Address?.ToString() ?? "0.0.0.0")}:{sshPort}"
+            => SSHURL is String sshURL && SSHPort is IPPort sshPort
+                   ? ocppServerSettings.ReachableAs is { Count: > 0 } names
+                         ? $"ssh://{names[0]}:{sshPort}"
+                         : sshURL
                    : null;
 
         #endregion

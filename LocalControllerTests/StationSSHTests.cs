@@ -603,6 +603,39 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region WhereTheStationsConnect_IsWhereTheSSHServerListens()
+
+        /// <summary>
+        /// The URL the stations are told is the SSH server's own address - not
+        /// the station server's, which may listen where SSH does not - unless a
+        /// name the stations know the controller by is given.
+        /// </summary>
+        [Test]
+        public void WhereTheStationsConnect_IsWhereTheSSHServerListens()
+        {
+
+            Assert.That(Controller.SSHURL,           Is.Not.Null);
+            Assert.That(Controller.OCPPServerSSHURL, Is.EqualTo(Controller.SSHURL));
+
+            // Every address for the station server, from its next start: SSH
+            // still listens where it did.
+            Assert.That(Controller.TryUpdateOCPPServerConfiguration(JObject.Parse("""{ "address": "0.0.0.0" }"""), out var error),
+                        Is.True, error);
+
+            Assert.That(Controller.OCPPServerSSHURL, Is.EqualTo(Controller.SSHURL), "the station server's address is not where SSH listens");
+
+            Assert.That(Controller.TryUpdateOCPPServerConfiguration(JObject.Parse("""{ "reachableAs": [ "lc.example.org" ] }"""), out error),
+                        Is.True, error);
+
+            var named = $"ssh://lc.example.org:{Controller.SSHPort}";
+
+            Assert.That(Controller.OCPPServerSSHURL,                                                     Is.EqualTo(named));
+            Assert.That(Controller.OCPPServerConfigurationJSON()["ssh"]?["state"]?["url"]?.Value<String>(), Is.EqualTo(named));
+
+        }
+
+        #endregion
+
         #region TheSettings_SayWhatIsWrong_AndWhatWaitsForARestart()
 
         [Test]
