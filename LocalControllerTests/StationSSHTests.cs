@@ -555,8 +555,9 @@ namespace cloud.charging.open.LocalController.Tests
         #region TheStore_HoldsAFileWrittenByHand_ToWhatItSays()
 
         /// <summary>
-        /// A key switched off or run out in the file lets nobody in, and a file
-        /// that gives one key to two stations is not read at all.
+        /// A key switched off or run out in the file lets nobody in, nor does
+        /// the key of a station the file switches off, and a file that gives
+        /// one key to two stations is not read at all.
         /// </summary>
         [Test]
         public void TheStore_HoldsAFileWrittenByHand_ToWhatItSays()
@@ -573,10 +574,14 @@ namespace cloud.charging.open.LocalController.Tests
                 return json;
             }
 
+            var cs003Key = SshHostKey.GenerateEd25519();
+
             File.WriteAllText(file, new JObject(
                 new JProperty("stations", new JArray(
                     new JObject(new JProperty("id", "cs001"), new JProperty("sshKeys", new JArray(KeyOf(cs001Key, Disabled: true)))),
-                    new JObject(new JProperty("id", "cs002"), new JProperty("sshKeys", new JArray(KeyOf(cs002Key, "expiry-time=\"20200101\""))))
+                    new JObject(new JProperty("id", "cs002"), new JProperty("sshKeys", new JArray(KeyOf(cs002Key, "expiry-time=\"20200101\"")))),
+                    new JObject(new JProperty("id", "cs003"), new JProperty("enabled", false), new JProperty("sshKeys", new JArray(KeyOf(cs003Key)))),
+                    new JObject(new JProperty("id", "cs004"), new JProperty("sshKeys", new JArray(KeyOf(strangerKey))))
                 ))
             ).ToString());
 
@@ -585,8 +590,10 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.That(store.TryLoad(out var error), Is.True, error);
 
             Assert.Multiple(() => {
-                Assert.That(store.FindSSHKey("cs001", cs001Key.PublicKeyBlob, DateTimeOffset.UtcNow), Is.Null, "A key switched off let its station in.");
-                Assert.That(store.FindSSHKey("cs002", cs002Key.PublicKeyBlob, DateTimeOffset.UtcNow), Is.Null, "A key that ran out let its station in.");
+                Assert.That(store.FindSSHKey("cs001", cs001Key.PublicKeyBlob,    DateTimeOffset.UtcNow), Is.Null,     "A key switched off let its station in.");
+                Assert.That(store.FindSSHKey("cs002", cs002Key.PublicKeyBlob,    DateTimeOffset.UtcNow), Is.Null,     "A key that ran out let its station in.");
+                Assert.That(store.FindSSHKey("cs003", cs003Key.PublicKeyBlob,    DateTimeOffset.UtcNow), Is.Null,     "A station switched off was let in by its key.");
+                Assert.That(store.FindSSHKey("cs004", strangerKey.PublicKeyBlob, DateTimeOffset.UtcNow), Is.Not.Null, "A key as written by hand let nobody in.");
             });
 
             File.WriteAllText(file, new JObject(
