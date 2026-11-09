@@ -209,7 +209,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(lc.Roles,             Is.EqualTo(new[] { "viewer", "cpo", WWCPNode.AdminRole }));
-                Assert.That(lc.Access.Resources,  Is.EqualTo(new[] { "configuration", "dns", "nts", "certificates", "ssh", "log", "csms", "stations" }));
+                Assert.That(lc.Access.Resources,  Is.EqualTo(new[] { "configuration", "dns", "nts", "certificates", "ssh", "log", "csms", "stations", "openadr" }));
             });
 
         }
@@ -233,6 +233,8 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("viewer",       "dns:run",             false)]
         [TestCase("viewer",       "csms:edit",           false)]
         [TestCase("viewer",       "stations:edit",       false)]
+        [TestCase("viewer",       "openadr:read",        true)]
+        [TestCase("viewer",       "openadr:edit",        false)]
         [TestCase("viewer",       "certificates:edit",   false)]
 
         [TestCase("cpo",          "certificates:read",   true)]
@@ -242,6 +244,7 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("cpo",          "nts:run",             true)]
         [TestCase("cpo",          "csms:edit",           true)]
         [TestCase("cpo",          "stations:edit",       true)]
+        [TestCase("cpo",          "openadr:edit",        true)]
         [TestCase("cpo",          "certificates:edit",   false)]
         [TestCase("cpo",          "configuration:edit",  false)]
 
@@ -386,6 +389,11 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("PUT",     "api/v1/configuration/csms",                                "csms:edit")]
         [TestCase("PUT",     "api/v1/configuration/csms/credentials",                    "csms:edit")]
         [TestCase("DELETE",  "api/v1/configuration/csms/credentials",                    "csms:edit")]
+        [TestCase("GET",     "api/v1/configuration/openADR",                             "openadr:read")]
+        [TestCase("PUT",     "api/v1/configuration/openADR",                             "openadr:edit")]
+        [TestCase("PUT",     "api/v1/configuration/openADR/credentials",                 "openadr:edit")]
+        [TestCase("DELETE",  "api/v1/configuration/openADR/credentials",                 "openadr:edit")]
+        [TestCase("POST",    "api/v1/configuration/openADR/poll",                        "openadr:run")]
         [TestCase("GET",     "api/v1/configuration/ocpp-server",                         "stations:read")]
         [TestCase("PUT",     "api/v1/configuration/ocpp-server",                         "stations:edit")]
         [TestCase("GET",     "api/v1/configuration/ocpp-server/stations",                "stations:read")]
@@ -420,7 +428,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var roles = new JObject();
 
-            foreach (var resource in new[] { "configuration", "dns", "nts", "certificates", "ssh", "log", "csms", "stations" })
+            foreach (var resource in new[] { "configuration", "dns", "nts", "certificates", "ssh", "log", "csms", "stations", "openadr" })
                 foreach (var operation in new[] { "read", "edit", "run" })
                     roles.Add($"r-{resource}-{operation}", new JArray($"{resource}:{operation}"));
 

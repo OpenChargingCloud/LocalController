@@ -89,6 +89,9 @@ namespace cloud.charging.open.LocalController
             RegisterOCPPServerRoutes();
             RegisterCSMSRoutes();
 
+            // And the grid operator's VTN; see LCHTTPAPI.OpenADR.cs.
+            RegisterOpenADRRoutes();
+
         }
 
         #endregion

@@ -24,7 +24,7 @@ export * from '@node/api/client';
  * What a role may be allowed to touch on this local controller: what every
  * node has, and what a local controller adds to it.
  */
-export type Resource = NodeResource | 'csms' | 'stations';
+export type Resource = NodeResource | 'csms' | 'stations' | 'openadr';
 
 /** What somebody signed in to this local controller may do: an operation on a resource, written "dns:edit". */
 export type Permission = `${Resource}:${Operation}`;

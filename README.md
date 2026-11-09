@@ -109,6 +109,32 @@ the session it opened at once. Which OCPP versions are offered is the
 WebSocket port's, unless `subprotocols` beside `enabled` says otherwise;
 `maxMessageSize` and `pingEverySeconds` there too wait for the next start.
 
+The grid operator the charging pool is connected behind may limit it over
+OpenADR 3: the controller is then a VEN of the grid operator's VTN, as the
+`openADR` section says - `"openADR": { "enabled": true, "vtnURL":
+"https://grid.example/openadr3/", "clientID": "lc-paradies" }`, switched off
+unless somebody says otherwise. The client ID is the VEN name the grid operator
+gave this controller; the client secret beside it is kept in
+`openadr-credentials.json` beside the configuration, written for its owner
+alone as the CSMS credentials are, and never in the configuration file. The
+controller signs in with the client credentials grant of OAuth 2.0 at the token
+URL the VTN names (`auth/server`, or `auth/token` below it), keeps the bearer
+token for most of its life and renews it five minutes before it ends, or at
+once when the VTN says 401 to it. Every `pollEvery` seconds - 30 by default -
+it asks for the events meant for it: each interval of an event is a limit,
+`IMPORT_CAPACITY_LIMIT` for what the pool may draw from the grid and
+`EXPORT_CAPACITY_LIMIT` for what it may feed in, in kW, and of those in force
+the lowest of each kind holds. They are logged as they come and go, shown by
+the JSON API and the command line, and not yet passed on to the charging
+stations. On every event the controller sends one report, saying what it took
+from it; which ones it has reported on is asked of the VTN after a start, so
+none is reported on twice. The VTN's certificate is judged as the CSMS's is. A
+VTN that cannot be reached is said once, and the limits read last stay until
+they are over. There is no page for it yet: `GET`/`PUT
+/api/v1/configuration/openADR`, `PUT`/`DELETE .../openADR/credentials` with
+`{ "clientSecret" }`, and `POST .../openADR/poll` - `openadr:read`,
+`openadr:edit` and `openadr:run`.
+
 
 ## Running it
 
@@ -519,13 +545,14 @@ operation on a resource - written `dns:edit`. That is the model of every node,
 described in [WWCP_Node](https://github.com/OpenChargingCloud/WWCP_Node) under
 "Who may sign in"; the operations are `read`, `edit` and `run`, and the
 resources are the node's `configuration`, `dns`, `nts` and `certificates` and
-the two a local controller adds: `csms`, the line up to the CSMS, and
-`stations`, the charging stations and which of them may sign in.
+the three a local controller adds: `csms`, the line up to the CSMS,
+`stations`, the charging stations and which of them may sign in, and
+`openadr`, the grid operator's VTN it reads its limits from.
 
 | Role | May |
 |------|-----|
 | `viewer` | read everything: `*:read` |
-| `cpo` | that, and run the site: change the name and time servers and ask them (`dns` and `nts`, `edit` and `run`), and change the line up to the CSMS and the charging stations (`csms:edit`, `stations:edit`) |
+| `cpo` | that, and run the site: change the name and time servers and ask them (`dns` and `nts`, `edit` and `run`), change the line up to the CSMS and the charging stations (`csms:edit`, `stations:edit`), and the grid operator's VTN and ask it (`openadr:edit`, `openadr:run`) |
 | `systemadmin` | everything this controller can be told, the certificates included |
 
 The viewer and the administrators are the node's, the CPO is the local

@@ -51,9 +51,11 @@ namespace cloud.charging.open.LocalController.Configuration
     /// <param name="OCPP">Who this local controller says it is when it speaks OCPP.</param>
     /// <param name="OCPPServer">The server the charging stations below it connect to.</param>
     /// <param name="CSMS">The charging station management system above it, and how it is dialled.</param>
+    /// <param name="OpenADR">The OpenADR 3 VTN of the grid operator it is connected behind, and how it is asked for limits.</param>
     public sealed record ControllerConfiguration(OCPPConfiguration?        OCPP         = null,
                                                  OCPPServerConfiguration?  OCPPServer   = null,
-                                                 CSMSConfiguration?        CSMS         = null)
+                                                 CSMSConfiguration?        CSMS         = null,
+                                                 OpenADRConfiguration?     OpenADR      = null)
     {
 
         #region Properties
@@ -62,7 +64,7 @@ namespace cloud.charging.open.LocalController.Configuration
         /// Whether this document says anything at all.
         /// </summary>
         public Boolean IsEmpty
-            => OCPP is null && OCPPServer is null && CSMS is null;
+            => OCPP is null && OCPPServer is null && CSMS is null && OpenADR is null;
 
         #endregion
 
@@ -152,7 +154,27 @@ namespace cloud.charging.open.LocalController.Configuration
 
             #endregion
 
-            Configuration = new ControllerConfiguration(ocpp, ocppServer, csms);
+            #region OpenADR
+
+            OpenADRConfiguration? openADR = null;
+
+            if (JSON[OpenADRConfiguration.SectionName] is JToken openADRToken && openADRToken.Type != JTokenType.Null)
+            {
+
+                if (openADRToken is not JObject openADRJSON)
+                {
+                    Error = $"'{OpenADRConfiguration.SectionName}' must be a JSON object.";
+                    return false;
+                }
+
+                if (!OpenADRConfiguration.TryParse(openADRJSON, out openADR, out Error))
+                    return false;
+
+            }
+
+            #endregion
+
+            Configuration = new ControllerConfiguration(ocpp, ocppServer, csms, openADR);
             return true;
 
         }
@@ -178,6 +200,9 @@ namespace cloud.charging.open.LocalController.Configuration
             if (CSMS is not null)
                 json.Add(CSMSConfiguration.SectionName, CSMS.ToJSON());
 
+            if (OpenADR is not null)
+                json.Add(OpenADRConfiguration.SectionName, OpenADR.ToJSON());
+
             return json;
 
         }
@@ -193,7 +218,8 @@ namespace cloud.charging.open.LocalController.Configuration
                    : String.Join(", ",
                          new[] {
                              OCPP       is not null ? OCPP.ToString()        : null,
-                             OCPPServer is not null ? OCPPServer.ToString()  : null
+                             OCPPServer is not null ? OCPPServer.ToString()  : null,
+                             OpenADR    is not null ? OpenADR.ToString()     : null
                          }.Where(section => section is not null));
 
         #endregion

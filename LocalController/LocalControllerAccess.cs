@@ -68,9 +68,16 @@ namespace cloud.charging.open.LocalController
         public const String  Stations  = "stations";
 
         /// <summary>
-        /// Both.
+        /// The grid operator's OpenADR 3 VTN this controller reads its limits
+        /// from: where it is, the client ID and secret it signs in with, and
+        /// asking it now.
         /// </summary>
-        public static readonly IReadOnlyList<String>  Resources = [ CSMS, Stations ];
+        public const String  OpenADR   = "openadr";
+
+        /// <summary>
+        /// All three.
+        /// </summary>
+        public static readonly IReadOnlyList<String>  Resources = [ CSMS, Stations, OpenADR ];
 
         #endregion
 
@@ -79,8 +86,8 @@ namespace cloud.charging.open.LocalController
         /// <summary>
         /// Whoever runs the site: may point this controller at other name and
         /// time servers and ask whether they work, may change the line up to
-        /// the CSMS, and adds and takes out charging stations - but may not
-        /// touch the certificates.
+        /// the CSMS and the grid operator's VTN, and adds and takes out charging
+        /// stations - but may not touch the certificates.
         /// </summary>
         /// <remarks>
         /// Day-to-day operation. A local controller in a car park is reached by
@@ -95,8 +102,10 @@ namespace cloud.charging.open.LocalController
                                                      Permission.Edit(NodeResources.NTS),
                                                      Permission.Run (NodeResources.NTS),
                                                      Permission.Edit(CSMS),
-                                                     Permission.Edit(Stations) ],
-                                                   "runs the site: its name and time servers, the line up to the CSMS and the charging stations");
+                                                     Permission.Edit(Stations),
+                                                     Permission.Edit(OpenADR),
+                                                     Permission.Run (OpenADR) ],
+                                                   "runs the site: its name and time servers, the line up to the CSMS, the grid operator's VTN and the charging stations");
 
         /// <summary>
         /// The one role a local controller adds to the node's.

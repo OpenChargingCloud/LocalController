@@ -348,6 +348,9 @@ namespace cloud.charging.open.LocalController
             // same reason: Start() does.
             BuildCSMSConnection(configuration.CSMS);
 
+            // And the grid operator's VTN. Nothing is asked yet: Start() does.
+            BuildOpenADRConnection(configuration.OpenADR);
+
             #endregion
 
         }
@@ -386,6 +389,10 @@ namespace cloud.charging.open.LocalController
 
             Log.Info($"The JSON API is at {APIURL}v1/status", "web", "http");
 
+            // Asked in the background, so that a grid operator that does not
+            // answer holds up nothing - neither the start nor the CSMS.
+            StartOpenADR();
+
             // After the port below and the web interface, so that a controller
             // whose backend is unreachable is still a controller its charging
             // stations can reach - and one whoever is watching the Logs page
@@ -411,6 +418,8 @@ namespace cloud.charging.open.LocalController
         /// </remarks>
         protected override async Task OnStopping()
         {
+
+            await StopOpenADR();
 
             await DisconnectCSMS();
 
