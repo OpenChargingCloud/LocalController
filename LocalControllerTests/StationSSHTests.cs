@@ -26,6 +26,9 @@ using NUnit.Framework;
 using org.GraphDefined.Vanaheimr.Hermod.SSH;
 using org.GraphDefined.Vanaheimr.Hermod.SSH.Client;
 
+using org.GraphDefined.Vanaheimr.Illias;
+
+using cloud.charging.open.protocols.WWCP.NetworkingNode;
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 using cloud.charging.open.LocalController.OCPP;
@@ -181,6 +184,77 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+
+        #region AKeyTheCSMSInstalls_LetsTheStationIn_UntilTheCSMSDeletesIt()
+
+        [Test]
+        public async Task AKeyTheCSMSInstalls_LetsTheStationIn_UntilTheCSMSDeletesIt()
+        {
+
+            // As the CSMS asks it, over the controller's uplink.
+            async Task<JObject> Ask(String Action, JObject Payload)
+            {
+
+                var method    = Controller.Node.OCPP.IN.GetType().GetMethod($"Receive_{Action}")!;
+                var task      = (Task) method.Invoke(Controller.Node.OCPP.IN, [
+                                    DateTimeOffset.UtcNow,
+                                    null!,
+                                    SourceRouting.To(Controller.Node.Id),
+                                    NetworkPath.From(NetworkingNode_Id.Parse("csms01")),
+                                    EventTracking_Id.New,
+                                    cloud.charging.open.protocols.WWCP.Request_Id.NewRandom(),
+                                    Payload,
+                                    CancellationToken.None
+                                ])!;
+
+                await task;
+
+                var response  = task.GetType().GetProperty("Result")!.GetValue(task)!;
+                var message   = response.GetType().GetProperty("JSONResponseMessage")!.GetValue(response)!;
+
+                return (JObject) message.GetType().GetProperty("Payload")!.GetValue(message)!;
+
+            }
+
+            var installed = await Ask("InstallSSHKey", new JObject(new JProperty("networkingNodeId", "cs001"),
+                                                                   new JProperty("purpose",          "OCPP"),
+                                                                   new JProperty("publicKey",        LineOf(cs001Key))));
+
+            var nts       = await Ask("InstallSSHKey", new JObject(new JProperty("networkingNodeId", "cs001"),
+                                                                   new JProperty("purpose",          "NTS"),
+                                                                   new JProperty("publicKey",        LineOf(cs002Key))));
+
+            var taken     = await Ask("InstallSSHKey", new JObject(new JProperty("networkingNodeId", "cs002"),
+                                                                   new JProperty("purpose",          "OCPP"),
+                                                                   new JProperty("publicKey",        LineOf(cs001Key))));
+
+            Assert.Multiple(() => {
+                Assert.That(installed.Value<String>("status"),                        Is.EqualTo("Accepted"), installed.ToString());
+                Assert.That(installed["hostKeys"]!.Values<String>(),                  Is.EqualTo(new[] { Controller.SSHHostKey!.Split(' ')[1] }));
+                Assert.That(nts["statusInfo"]!.Value<String>("reasonCode"),           Is.EqualTo("NotSupported"));
+                Assert.That(taken["statusInfo"]!.Value<String>("reasonCode"),         Is.EqualTo("KeyOfOtherStation"));
+            });
+
+            var (connection, why) = await Connect("cs001", cs001Key);
+            Assert.That(connection, Is.Not.Null, why);
+            await connection!.Close(org.GraphDefined.Vanaheimr.Hermod.Messaging.MessageCloseCode.NormalClosure, "done");
+
+            var listed    = await Ask("GetInstalledSSHKeys", new JObject(new JProperty("networkingNodeId", "cs001")));
+            var deleted   = await Ask("DeleteSSHKey",        new JObject(new JProperty("networkingNodeId", "cs001"), new JProperty("keyFingerprint", FingerprintOf(cs001Key))));
+            var again     = await Ask("DeleteSSHKey",        new JObject(new JProperty("networkingNodeId", "cs001"), new JProperty("keyFingerprint", FingerprintOf(cs001Key))));
+
+            Assert.Multiple(() => {
+                Assert.That(listed["keys"]!.Select(key => key.Value<String>("keyFingerprint")), Is.EqualTo(new[] { FingerprintOf(cs001Key) }));
+                Assert.That(deleted.Value<String>("status"),                                     Is.EqualTo("Accepted"));
+                Assert.That(again["statusInfo"]!.Value<String>("reasonCode"),                    Is.EqualTo("NotFound"));
+            });
+
+            var (refused, _) = await Connect("cs001", cs001Key);
+            Assert.That(refused, Is.Null, "A key the CSMS deleted still let the station in.");
+
+        }
+
+        #endregion
 
         #region AStationWithItsKey_ConnectsOverSSH_AndIsAStationOfTheController()
 

@@ -330,6 +330,8 @@ namespace cloud.charging.open.LocalController
 
             lc01 = BuildOCPPNode(this.OCPP);
 
+            AttachSSHKeyMessages(lc01);
+
             // "this." and not for tidiness: the parameters of this constructor
             // shadow the properties of the same name, and the "Log" parameter
             // is null whenever the caller did not bring an event log of its own.
