@@ -41,6 +41,11 @@ namespace cloud.charging.open.LocalController.OCPP
     /// over SSH is a transport of its own, encrypted and authenticated by SSH,
     /// so a group's security profiles are not asked of a station that signs in
     /// with one - only whether the group accepts SSH keys.
+    ///
+    /// A key pin is a TLS client key, so it comes in on security profile 3 like
+    /// a certificate - and is a way in of its own all the same, because it
+    /// vouches for one key of one station rather than for whatever a
+    /// certificate authority signed (EVQI Transport, key pins, 5.8).
     /// </remarks>
     public enum AuthMethod
     {
@@ -66,7 +71,15 @@ namespace cloud.charging.open.LocalController.OCPP
         /// station signs in to this controller's SSH server under its
         /// identification.
         /// </summary>
-        SSHKey
+        SSHKey,
+
+        /// <summary>
+        /// The key pin of the key of a TLS client certificate: SHA-256 over its
+        /// SubjectPublicKeyInfo, listed for the station. Chain, name and dates
+        /// of the certificate are not looked at, and its common name names
+        /// nobody - the station is the one the pin is listed for.
+        /// </summary>
+        KeyPin
 
     }
 
@@ -87,6 +100,7 @@ namespace cloud.charging.open.LocalController.OCPP
                    AuthMethod.TOTP         => "totp",
                    AuthMethod.Certificate  => "certificate",
                    AuthMethod.SSHKey       => "sshkey",
+                   AuthMethod.KeyPin       => "keypin",
                    _                       => Method.ToString().ToLowerInvariant()
                };
 
@@ -100,6 +114,7 @@ namespace cloud.charging.open.LocalController.OCPP
                    "totp"         => AuthMethod.TOTP,
                    "certificate"  => AuthMethod.Certificate,
                    "sshkey"       => AuthMethod.SSHKey,
+                   "keypin"       => AuthMethod.KeyPin,
                    _              => null
                };
 
@@ -204,13 +219,17 @@ namespace cloud.charging.open.LocalController.OCPP
         /// OCPP over SSH on. A default group that a file written before SSH
         /// keys existed holds is that file's, and stays without them until
         /// somebody adds them - the file said what it accepts.
+        ///
+        /// Key pins the same way: a pin does nothing until somebody lists one
+        /// for a station, and a default group written before key pins existed
+        /// stays without them until somebody adds them.
         /// </remarks>
         public static LoginGroup Default(DateTimeOffset Now)
 
             => new (DefaultId,
                     "Default",
                     true,
-                    new HashSet<AuthMethod> { AuthMethod.Basic, AuthMethod.TOTP, AuthMethod.Certificate, AuthMethod.SSHKey },
+                    new HashSet<AuthMethod> { AuthMethod.Basic, AuthMethod.TOTP, AuthMethod.Certificate, AuthMethod.SSHKey, AuthMethod.KeyPin },
                     new HashSet<Byte>       { 1, 2, 3 },
                     Now,
                     null);

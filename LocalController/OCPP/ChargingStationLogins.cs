@@ -112,6 +112,12 @@ namespace cloud.charging.open.LocalController.OCPP
         private readonly Dictionary<String, ChargingStationLogin>  logins      = [];
         private readonly Dictionary<String, LoginGroup>            groups      = [];
 
+        /// <summary>
+        /// Every key pin that was listed for a station at any time since this
+        /// store was made - see <see cref="WasEverListed"/>.
+        /// </summary>
+        private readonly HashSet<KeyPin>                           pinsEverListed  = [];
+
         #endregion
 
         #region Properties
@@ -337,11 +343,25 @@ namespace cloud.charging.open.LocalController.OCPP
                             return false;
                         }
 
+                    // The same for a key pin, and for a sharper reason: the pin
+                    // is the whole of who the station is, so a pin two stations
+                    // share would let the one connect as the other on its path.
+                    foreach (var keyPin in login.Pins)
+                        if (logins.Values.FirstOrDefault(other => other.FindKeyPin(keyPin.Pin) is not null) is ChargingStationLogin holder)
+                        {
+                            Error = $"'{Path}': the key pin {keyPin.Pin} is listed for the charging stations '{holder.Id}' and '{login.Id}'; one key is one charging station.";
+                            return false;
+                        }
+
                     logins[login.Id] = login;
 
                 }
 
                 #endregion
+
+                foreach (var login in logins.Values)
+                    foreach (var keyPin in login.Pins)
+                        pinsEverListed.Add(keyPin.Pin);
 
             }
 
@@ -1055,6 +1075,225 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
+        #region TryAddKeyPin(Id, Pin, Label, GroupId, Note, AddedBy, out KeyPin, out Error [, out NotSaved])
+
+        /// <summary>
+        /// Add a charging station, or give one that is already here the key pin
+        /// of a TLS client key to sign in with.
+        /// </summary>
+        /// <param name="Id">What the charging station calls itself in OCPP - the last segment of the URL it connects to.</param>
+        /// <param name="Pin">The key pin: 64 hexadecimal digits, with or without colons, or "sha256//" and base64.</param>
+        /// <param name="Label">What the key is called, if anything.</param>
+        /// <param name="GroupId">The group it should belong to, or null for the one it is in already.</param>
+        /// <param name="Note">What this station is, for whoever reads the list later.</param>
+        /// <param name="AddedBy">Who listed the pin, if anybody said.</param>
+        /// <param name="KeyPin">The key pin, as it was listed.</param>
+        public Boolean TryAddKeyPin(String                                   Id,
+                                    String?                                  Pin,
+                                    String?                                  Label,
+                                    String?                                  GroupId,
+                                    String?                                  Note,
+                                    String?                                  AddedBy,
+                                    [NotNullWhen(true)]  out StationKeyPin?  KeyPin,
+                                    [NotNullWhen(false)] out String?         Error)
+
+            => TryAddKeyPin(Id, Pin, Label, GroupId, Note, AddedBy, out KeyPin, out Error, out _);
+
+        /// <summary>
+        /// Add a charging station, or give one that is already here a key pin -
+        /// and say whether a refusal was the file's rather than the change's.
+        /// </summary>
+        /// <remarks>
+        /// <b>One key is one charging station.</b> A key pin that already lets
+        /// another station in is refused. With a key pin that is not a matter of
+        /// tidiness: a certificate accepted by its key pin names nobody, and the
+        /// station it is let in as is the one its pin is listed for - so a pin
+        /// two stations shared would let either be the other.
+        /// </remarks>
+        /// <param name="NotSaved">True where the file could not be written: see <see cref="TryRemove(String, out String?, out Boolean)"/>.</param>
+        public Boolean TryAddKeyPin(String                                   Id,
+                                    String?                                  Pin,
+                                    String?                                  Label,
+                                    String?                                  GroupId,
+                                    String?                                  Note,
+                                    String?                                  AddedBy,
+                                    [NotNullWhen(true)]  out StationKeyPin?  KeyPin,
+                                    [NotNullWhen(false)] out String?         Error,
+                                    out Boolean                              NotSaved)
+        {
+
+            KeyPin    = null;
+            NotSaved  = false;
+
+            if (!TryCheckIdAndNote(Id, Note, out var id, out var note, out Error))
+                return false;
+
+            if (!StationKeyPin.TryCreate(Pin, Label, TimeProvider.GetUtcNow(), AddedBy, out var keyPin, out Error))
+                return false;
+
+            lock (updateLock)
+            {
+
+                var existing = logins.GetValueOrDefault(id);
+
+                if (existing is null && logins.Count >= MaxStations)
+                {
+                    Error = $"At most {MaxStations} charging stations may be listed here.";
+                    return false;
+                }
+
+                var groupId = GroupId?.Trim().ToLowerInvariant() is { Length: > 0 } wanted
+                                  ? wanted
+                                  : existing?.GroupId ?? LoginGroup.DefaultId;
+
+                if (!groups.ContainsKey(groupId))
+                {
+                    Error = $"This local controller has never heard of a login group called '{groupId}'.";
+                    return false;
+                }
+
+                if (logins.Values.FirstOrDefault(login => login.FindKeyPin(keyPin.Pin) is not null) is ChargingStationLogin holder)
+                {
+                    Error = holder.Id == id
+                                ? $"The charging station '{id}' has the key pin {keyPin.Pin} already."
+                                : $"The key pin {keyPin.Pin} already lets the charging station '{holder.Id}' in. " +
+                                   "One key is one charging station: give this one a key of its own.";
+                    return false;
+                }
+
+                if (existing is not null && existing.Pins.Count >= ChargingStationLogin.MaxKeyPins)
+                {
+                    Error = $"A charging station may have at most {ChargingStationLogin.MaxKeyPins} key pins; take an old one away first.";
+                    return false;
+                }
+
+                logins[id] = (existing ?? new ChargingStationLogin(
+                                              id,
+                                              groupId,
+                                              null,
+                                              null,
+                                              true,
+                                              TimeProvider.GetUtcNow(),
+                                              null
+                                          )) with {
+                                 GroupId  = groupId,
+                                 Note     = note.Length > 0 ? note : existing?.Note,
+                                 KeyPins  = [ .. existing?.Pins ?? [], keyPin ]
+                             };
+
+                if (!TrySave(out Error))
+                {
+
+                    NotSaved = true;
+
+                    if (existing is not null)
+                        logins[id] = existing;
+                    else
+                        logins.Remove(id);
+
+                    return false;
+
+                }
+
+                pinsEverListed.Add(keyPin.Pin);
+
+                OnNotice?.Invoke(
+                    LogLevel.Notice,
+                    existing is not null
+                        ? $"The charging station '{id}' may now sign in with the key pin {keyPin}."
+                        : $"The charging station '{id}' may now sign in to this local controller, with the key pin {keyPin}."
+                );
+
+            }
+
+            OnChanged?.Invoke();
+
+            KeyPin = keyPin;
+            return true;
+
+        }
+
+        #endregion
+
+        #region TryRemoveKeyPin(Id, Pin, out Error [, out NotSaved])
+
+        /// <summary>
+        /// Take a key pin away from a charging station, leaving everything else
+        /// about it alone.
+        /// </summary>
+        /// <param name="Id">The charging station.</param>
+        /// <param name="Pin">The key pin, in any of the notations <see cref="StationKeyPin.TryCreate"/> reads.</param>
+        public Boolean TryRemoveKeyPin(String                            Id,
+                                       String                            Pin,
+                                       [NotNullWhen(false)] out String?  Error)
+
+            => TryRemoveKeyPin(Id, Pin, out Error, out _);
+
+        /// <summary>
+        /// Take a key pin away from a charging station - and say whether a
+        /// refusal was the file's rather than the change's.
+        /// </summary>
+        /// <remarks>
+        /// A connection the pin let in stays open, as one a password let in
+        /// does when the password is taken away: what is decided at the door is
+        /// decided at the door. The next one is refused.
+        /// </remarks>
+        /// <param name="NotSaved">True where the file could not be written: see <see cref="TryRemove(String, out String?, out Boolean)"/>.</param>
+        public Boolean TryRemoveKeyPin(String                            Id,
+                                       String                            Pin,
+                                       [NotNullWhen(false)] out String?  Error,
+                                       out Boolean                       NotSaved)
+        {
+
+            Error     = null;
+            NotSaved  = false;
+
+            if (!org.GraphDefined.Vanaheimr.Hermod.KeyPin.TryParse(Pin, out var pin))
+            {
+                Error = $"'{Pin}' is not a key pin.";
+                return false;
+            }
+
+            lock (updateLock)
+            {
+
+                if (!logins.TryGetValue(Id, out var login))
+                {
+                    Error = $"This local controller has never heard of a charging station called '{Id}'.";
+                    return false;
+                }
+
+                var keyPin = login.FindKeyPin(pin);
+
+                if (keyPin is null)
+                {
+                    Error = $"The charging station '{Id}' has no key pin {pin}.";
+                    return false;
+                }
+
+                var rest = login.Pins.Where(known => !ReferenceEquals(known, keyPin)).ToArray();
+
+                logins[Id] = login with { KeyPins = rest.Length > 0 ? rest : null };
+
+                if (!TrySave(out Error))
+                {
+                    NotSaved    = true;
+                    logins[Id]  = login;
+                    return false;
+                }
+
+                OnNotice?.Invoke(LogLevel.Notice, $"The charging station '{Id}' can no longer sign in with the key pin {keyPin}.");
+
+            }
+
+            OnChanged?.Invoke();
+
+            return true;
+
+        }
+
+        #endregion
+
         #region TrySetEnabled(Id, Enabled, out Error [, out NotSaved])
 
         /// <summary>
@@ -1295,6 +1534,48 @@ namespace cloud.charging.open.LocalController.OCPP
                        ? (login, key)
                        : null;
 
+        }
+
+        #endregion
+
+        #region FindKeyPin(KeyPin) / WasEverListed(KeyPin)
+
+        /// <summary>
+        /// The charging station the given key pin is listed for, switched on or
+        /// not - or null where it is nobody's.
+        /// </summary>
+        /// <remarks>
+        /// Not narrowed to the stations that may sign in, unlike
+        /// <see cref="FindSSHKey"/>: a pin of a station that is switched off is
+        /// still that station's pin, and a certificate with its key is refused
+        /// as that station - not taken for a stranger's whose common name then
+        /// decides who it is. What the station and its group allow is the
+        /// caller's to ask.
+        /// </remarks>
+        /// <param name="KeyPin">The key pin of the key a client presented.</param>
+        public ChargingStationLogin? FindKeyPin(KeyPin KeyPin)
+        {
+            lock (updateLock)
+                return logins.Values.FirstOrDefault(login => login.FindKeyPin(KeyPin) is not null);
+        }
+
+        /// <summary>
+        /// Whether the given key pin was listed for a charging station at any
+        /// time since this store was made, whether or not it still is.
+        /// </summary>
+        /// <remarks>
+        /// For the moment between a TLS handshake and the WebSocket upgrade that
+        /// follows it, which the client decides the length of. A certificate let
+        /// through the handshake by its key pin skipped the accepted chains; if
+        /// the pin is taken away before the upgrade arrives, the certificate
+        /// must not be read as one that went through them. Whoever asks this
+        /// holds such a certificate against the chains once more.
+        /// </remarks>
+        /// <param name="KeyPin">A key pin.</param>
+        public Boolean WasEverListed(KeyPin KeyPin)
+        {
+            lock (updateLock)
+                return pinsEverListed.Contains(KeyPin);
         }
 
         #endregion

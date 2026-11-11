@@ -58,6 +58,22 @@ function controller({ method, path, body }: Asked): unknown {
         return held;
     }
 
+    const pins = /^\/configuration\/ocpp-server\/stations\/([^/]+)\/keyPins(?:\/([^/]+))?$/.exec(path);
+
+    if (pins && method === 'POST') {
+        const given  = body as { pin: string; label: string };
+        const keyPin = { pin: given.pin.replace(/:/g, '').toLowerCase(), label: given.label, added: '2026-11-11T00:00:00Z' };
+        held = { ...held, stations: held.stations.some(station => station.id === pins[1])
+                                        ? held.stations.map(station => station.id === pins[1] ? { ...station, hasKeyPin: true, keyPins: [ keyPin ] } : station)
+                                        : [ ...held.stations, { ...aStation(pins[1]!), hasPassword: false, hasKeyPin: true, keyPins: [ keyPin ] } ] };
+        return { id: pins[1], keyPin: keyPin.pin, stations: held };
+    }
+
+    if (pins && method === 'DELETE') {
+        held = { ...held, stations: held.stations.map(station => station.id === pins[1] ? { ...station, hasKeyPin: false, keyPins: [] } : station) };
+        return held;
+    }
+
     const one = /^\/configuration\/ocpp-server\/stations\/([^/]+)$/.exec(path);
 
     if (one && method === 'PUT') {
@@ -186,6 +202,44 @@ describe('the logins and groups', () => {
         await until(() => root.querySelector('.station-sshkey[data-id="cs003"]') === null, 'the key taken away was still drawn');
 
         assert.equal(asked.find(one => one.method === 'DELETE')?.path, '/configuration/ocpp-server/stations/cs003/sshKeys/ab-cd_ef');
+
+    });
+
+    it('let a station in by a key pin, say when its group does not take pins, and take the pin away by its 64 digits', async () => {
+
+        const root = await opened();
+        const pin  = '0a'.repeat(32);
+
+        field(root, '#keypin-form', 'id').value    = 'cs003';
+        field(root, '#keypin-form', 'pin').value   = '0A:'.repeat(31) + '0A';
+        field(root, '#keypin-form', 'label').value = 'bay 3';
+
+        submit(root, '#keypin-form');
+        await until(() => root.querySelector('.station-keypin[data-id="cs003"]') !== null, 'the key pin given was not drawn');
+
+        assert.deepEqual(asked.find(one => one.method === 'POST')?.body,
+                         { pin: '0A:'.repeat(31) + '0A', label: 'bay 3', group: '', note: '' });
+        assert.match(root.querySelector('.station-keypin[data-id="cs003"]')!.textContent!, new RegExp(`${pin} - bay 3`));
+        assert.equal(field(root, '#keypin-form', 'pin').value, '', 'the key pin given is still in the form');
+        assert.match(root.querySelector('.station-keypin[data-id="cs003"]')!.closest('td')!.textContent!, /key pin/);
+        assert.match(root.querySelector('.station-keypin[data-id="cs003"]')!.closest('td')!.textContent!, /does not accept key pins/,
+                     'a pin its group does not take was not said to be of no use');
+
+        root.querySelector<HTMLButtonElement>('.station-keypin-remove[data-id="cs003"]')!.click();
+        await until(() => root.querySelector('.station-keypin[data-id="cs003"]') === null, 'the key pin taken away was still drawn');
+
+        assert.equal(asked.find(one => one.method === 'DELETE')?.path, `/configuration/ocpp-server/stations/cs003/keyPins/${pin}`);
+
+    });
+
+    it('offer key pins among the ways in a group accepts', async () => {
+
+        const root = await opened();
+
+        root.querySelector<HTMLButtonElement>('.group-edit[data-id="field-test"]')!.click();
+        await until(() => root.querySelector('#group-form[data-id="field-test"]') !== null, 'the settings did not open');
+
+        assert.equal(field<HTMLInputElement>(root, '#group-form', 'keypin').checked, false, 'a group without key pins is drawn with them');
 
     });
 

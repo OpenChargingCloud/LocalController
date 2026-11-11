@@ -21,6 +21,7 @@ using System.Diagnostics.CodeAnalysis;
 
 using Newtonsoft.Json.Linq;
 
+using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 
 #endregion
@@ -44,7 +45,8 @@ namespace cloud.charging.open.LocalController.OCPP
     /// is a PBKDF2 hash and cannot be read back. The TOTP shared secret is the
     /// secret itself, because verifying a token means computing it. See
     /// <see cref="TOTPSettings"/>. The SSH keys are public keys, and nothing
-    /// about them is secret: they are written and shown alike.
+    /// about them is secret: they are written and shown alike. So are the key
+    /// pins, which are hashes of public keys.
     /// </remarks>
     /// <param name="Id">What the charging station calls itself in OCPP.</param>
     /// <param name="GroupId">The group that decides what it may do.</param>
@@ -54,14 +56,16 @@ namespace cloud.charging.open.LocalController.OCPP
     /// <param name="AddedAt">When it was added.</param>
     /// <param name="Note">What it is, for whoever reads the list later.</param>
     /// <param name="SSHKeys">The SSH public keys it signs in with for OCPP over SSH, as authorized_keys lines; null or none when it has none.</param>
-    public sealed record ChargingStationLogin(String                     Id,
-                                              String                     GroupId,
-                                              SecurePassword?            Password,
-                                              TOTPSettings?              TOTP,
-                                              Boolean                    Enabled,
-                                              DateTimeOffset             AddedAt,
-                                              String?                    Note,
-                                              IReadOnlyList<UserSSHKey>? SSHKeys = null)
+    /// <param name="KeyPins">The key pins of the TLS client keys it signs in with; null or none when it has none.</param>
+    public sealed record ChargingStationLogin(String                         Id,
+                                              String                         GroupId,
+                                              SecurePassword?                Password,
+                                              TOTPSettings?                  TOTP,
+                                              Boolean                        Enabled,
+                                              DateTimeOffset                 AddedAt,
+                                              String?                        Note,
+                                              IReadOnlyList<UserSSHKey>?     SSHKeys  = null,
+                                              IReadOnlyList<StationKeyPin>?  KeyPins  = null)
     {
 
         #region Data
@@ -71,6 +75,13 @@ namespace cloud.charging.open.LocalController.OCPP
         /// replacing it while it is being replaced - and some room.
         /// </summary>
         public const Int32 MaxSSHKeys = 8;
+
+        /// <summary>
+        /// How many key pins one charging station may have: its key, the one
+        /// replacing it, and room for a transition - the four a key-pinned
+        /// endpoint holds (EVQI Transport, key pins, 5.5).
+        /// </summary>
+        public const Int32 MaxKeyPins = KeyPinPolicy.MaxPins;
 
         #endregion
 
@@ -87,6 +98,21 @@ namespace cloud.charging.open.LocalController.OCPP
         /// </summary>
         public Boolean HasSSHKey
             => SSHKeys is { Count: > 0 };
+
+        /// <summary>
+        /// Its key pins, none rather than null.
+        /// </summary>
+        public IReadOnlyList<StationKeyPin> Pins
+            => KeyPins ?? [];
+
+        /// <summary>
+        /// Whether it is let in by the key pin of its TLS client key - and so
+        /// not by a certificate authority's word for it: a station listed with
+        /// key pins is one or the other, never both (EVQI Transport, key pins,
+        /// 5.4).
+        /// </summary>
+        public Boolean HasKeyPin
+            => KeyPins is { Count: > 0 };
 
         /// <summary>
         /// Whether a password has been set for this login.
@@ -124,6 +150,9 @@ namespace cloud.charging.open.LocalController.OCPP
                 if (HasSSHKey)
                     yield return AuthMethod.SSHKey;
 
+                if (HasKeyPin)
+                    yield return AuthMethod.KeyPin;
+
             }
         }
 
@@ -160,6 +189,22 @@ namespace cloud.charging.open.LocalController.OCPP
             return null;
 
         }
+
+        #endregion
+
+        #region FindKeyPin(KeyPin)
+
+        /// <summary>
+        /// This station's entry of the given key pin, or null where it has none.
+        /// </summary>
+        /// <remarks>
+        /// Whether the station is switched on, and what its group says, is not
+        /// asked here: see <see cref="ChargingStationLogins.FindKeyPin"/>.
+        /// </remarks>
+        /// <param name="KeyPin">The key pin of the key a client presented.</param>
+        public StationKeyPin? FindKeyPin(KeyPin KeyPin)
+
+            => Pins.FirstOrDefault(known => known.Pin == KeyPin);
 
         #endregion
 
@@ -277,6 +322,59 @@ namespace cloud.charging.open.LocalController.OCPP
 
             #endregion
 
+            #region Its key pins, when it has any
+
+            List<StationKeyPin>? keyPins = null;
+
+            if (JSON["keyPins"] is JToken pinsToken && pinsToken.Type != JTokenType.Null)
+            {
+
+                if (pinsToken is not JArray pinArray)
+                {
+                    Error = $"the 'keyPins' of '{id}' must be a JSON array.";
+                    return false;
+                }
+
+                keyPins = [];
+
+                foreach (var pinToken in pinArray)
+                {
+
+                    if (pinToken is not JObject pinJSON)
+                    {
+                        Error = $"a key pin of '{id}' is not a JSON object.";
+                        return false;
+                    }
+
+                    if (!StationKeyPin.TryParse(pinJSON, out var keyPin, out var problem))
+                    {
+                        Error = $"a key pin of '{id}' cannot be read: {problem}";
+                        return false;
+                    }
+
+                    if (keyPins.Any(known => known.Pin == keyPin.Pin))
+                    {
+                        Error = $"the key pin {keyPin.Pin} is listed twice for '{id}'.";
+                        return false;
+                    }
+
+                    keyPins.Add(keyPin);
+
+                }
+
+                if (keyPins.Count > MaxKeyPins)
+                {
+                    Error = $"'{id}' has {keyPins.Count} key pins, and a charging station may have at most {MaxKeyPins}.";
+                    return false;
+                }
+
+                if (keyPins.Count == 0)
+                    keyPins = null;
+
+            }
+
+            #endregion
+
             var addedAt = DateTimeOffset.MinValue;
 
             DateTimeOffset.TryParse(JSON.Value<String>("addedAt"),
@@ -294,7 +392,8 @@ namespace cloud.charging.open.LocalController.OCPP
                         JSON.Value<Boolean?>("enabled") ?? true,
                         addedAt,
                         JSON.Value<String>("note")?.Trim() is { Length: > 0 } note ? note : null,
-                        sshKeys
+                        sshKeys,
+                        keyPins
                     );
 
             return true;
@@ -319,7 +418,8 @@ namespace cloud.charging.open.LocalController.OCPP
                            new JProperty("addedAt",      AddedAt.ToString("o")),
                            new JProperty("hasPassword",  HasPassword),
                            new JProperty("hasTOTP",      HasTOTP),
-                           new JProperty("hasSSHKey",    HasSSHKey)
+                           new JProperty("hasSSHKey",    HasSSHKey),
+                           new JProperty("hasKeyPin",    HasKeyPin)
                        );
 
             if (Note is not null)
@@ -328,6 +428,10 @@ namespace cloud.charging.open.LocalController.OCPP
             // Public keys, so the same with and without the secrets.
             if (HasSSHKey)
                 json.Add("sshKeys", new JArray(Keys.Select(key => key.ToJSON())));
+
+            // Hashes of public keys, the same.
+            if (HasKeyPin)
+                json.Add("keyPins", new JArray(Pins.Select(pin => pin.ToJSON())));
 
             if (TOTP is not null)
                 json.Add("totp", TOTP.ToJSON(WithSecret: WithSecrets));
@@ -346,7 +450,7 @@ namespace cloud.charging.open.LocalController.OCPP
         public override String ToString()
 
             => $"{Id} in '{GroupId}' ({(Enabled ? "on" : "off")}): " +
-               $"{(HasPassword || HasTOTP || HasSSHKey ? String.Join(" and ", Credentials.Select(method => method.AsText())) : "no credentials")}";
+               $"{(HasPassword || HasTOTP || HasSSHKey || HasKeyPin ? String.Join(" and ", Credentials.Select(method => method.AsText())) : "no credentials")}";
 
         #endregion
 

@@ -72,6 +72,9 @@ namespace cloud.charging.open.LocalController
             AddHandler(root + "certificates/{id}",    PutCertificate,           HTTPMethod.PUT);
             AddHandler(root + "certificates/{id}",    DeleteCertificate,        HTTPMethod.DELETE);
 
+            AddHandler(root + "serverKeys",           PostServerKey,            HTTPMethod.POST);
+            AddHandler(root + "serverKeys/switch",    PostServerKeySwitch,      HTTPMethod.POST);
+
             AddHandler(root + "trust",                GetTrust,                 HTTPMethod.GET);
             AddHandler(root + "trust",                PostTrust,                HTTPMethod.POST);
             AddHandler(root + "trust/{id}",           PutTrust,                 HTTPMethod.PUT);
@@ -92,6 +95,9 @@ namespace cloud.charging.open.LocalController
 
             AddHandler(root + "stations/{id}/sshKeys",               PostStationSSHKey,    HTTPMethod.POST);
             AddHandler(root + "stations/{id}/sshKeys/{fingerprint}", DeleteStationSSHKey,  HTTPMethod.DELETE);
+
+            AddHandler(root + "stations/{id}/keyPins",               PostStationKeyPin,    HTTPMethod.POST);
+            AddHandler(root + "stations/{id}/keyPins/{pin}",         DeleteStationKeyPin,  HTTPMethod.DELETE);
 
         }
 
@@ -534,6 +540,81 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
+        #region (private) The server key charging stations pin
+
+        /// <summary>
+        /// POST .../serverKeys with {"algorithm", "next"}: generate a server key
+        /// that charging stations may pin, presented in a carrier certificate -
+        /// the current one where nothing is presented yet, or with "next" the
+        /// one announced for the next rollover.
+        /// </summary>
+        /// <remarks>
+        /// Answers with its key pin and the whole store, as the page reads it.
+        /// The private key does not come back, as for every other key here.
+        /// </remarks>
+        private Task<HTTPResponse> PostServerKey(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permission.Edit(NodeResources.Certificates), true, out var user, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryParseJSONObject(Request, out var json, out var errorResponse))
+                return Task.FromResult(errorResponse);
+
+            var asNext = json.Value<Boolean?>("next") ?? false;
+
+            if (!Controller.ServerCertificates.TryCreateServerKey(
+                     json.Value<String>("algorithm"),
+                     asNext,
+                     out var id,
+                     out var keyPin,
+                     out var error,
+                     out var notSaved))
+            {
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, error, notSaved));
+            }
+
+            Log.Notice($"'{user.Id}' had this local controller generate the {(asNext ? "next " : "")}server key '{id}' with the key pin {keyPin}.", "ocpp", "tls", "web");
+
+            return Task.FromResult(
+                       JSONResponse(
+                           Request,
+                           HTTPStatusCode.Created,
+                           new JObject(
+                               new JProperty("id",            id),
+                               new JProperty("keyPin",        keyPin.ToHex()),
+                               new JProperty("next",          asNext),
+                               new JProperty("certificates",  Controller.ServerCertificates.ToJSON())
+                           )
+                       )
+                   );
+
+        }
+
+        /// <summary>
+        /// POST .../serverKeys/switch: present the announced next key from now
+        /// on. Charging stations that pinned only the key before are refused
+        /// from their next handshake on.
+        /// </summary>
+        private Task<HTTPResponse> PostServerKeySwitch(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permission.Edit(NodeResources.Certificates), true, out var user, out var refused))
+                return Task.FromResult(refused);
+
+            if (!Controller.ServerCertificates.TrySwitchToNextKey(out var id, out var error, out var notSaved))
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.Conflict, error, notSaved));
+
+            Log.Notice($"'{user.Id}' switched the charging station server to the server key '{id}'.", "ocpp", "tls", "web");
+
+            return Task.FromResult(
+                       JSONResponse(Request, HTTPStatusCode.OK, Controller.ServerCertificates.ToJSON())
+                   );
+
+        }
+
+        #endregion
+
         #region (private) The chains this controller accepts
 
         /// <summary>
@@ -933,6 +1014,86 @@ namespace cloud.charging.open.LocalController
         }
 
         /// <summary>
+        /// POST .../stations/{id}/keyPins with {"pin", "label", "group",
+        /// "note"}: let a charging station in by the key pin of its TLS client
+        /// key, adding the station where it is not listed yet.
+        /// </summary>
+        /// <remarks>
+        /// The pin is SHA-256 over the station's public key - 64 hexadecimal
+        /// digits, with or without colons, or "sha256//" and base64 - as the
+        /// station shows it at commissioning. Nothing about it is secret.
+        /// </remarks>
+        private Task<HTTPResponse> PostStationKeyPin(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out var user, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryGetId(Request, out var id, out var badRequest))
+                return Task.FromResult(badRequest);
+
+            if (!TryParseJSONObject(Request, out var json, out var errorResponse))
+                return Task.FromResult(errorResponse);
+
+            if (!Controller.StationLogins.TryAddKeyPin(
+                     id,
+                     json.Value<String>("pin"),
+                     json.Value<String>("label"),
+                     json.Value<String>("group"),
+                     json.Value<String>("note"),
+                     user.Id.ToString(),
+                     out var keyPin,
+                     out var error,
+                     out var notSaved))
+            {
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, error, notSaved));
+            }
+
+            Log.Notice($"'{user.Id}' gave the charging station '{id}' the key pin {keyPin.Pin}.", "ocpp", "station", "auth", "tls", "web");
+
+            return Task.FromResult(
+                       JSONResponse(Request, HTTPStatusCode.OK, new JObject(
+                           new JProperty("id",        id),
+                           new JProperty("keyPin",    keyPin.Pin.ToHex()),
+                           new JProperty("stations",  Controller.StationLogins.ToJSON())
+                       ))
+                   );
+
+        }
+
+        /// <summary>
+        /// DELETE .../stations/{id}/keyPins/{pin}: stop letting a charging
+        /// station in by a key pin. A connection it opened stays open; the next
+        /// one is refused.
+        /// </summary>
+        /// <remarks>
+        /// The pin as 64 hexadecimal digits, which is what the page sends: the
+        /// other notations hold a '/' or ':', which a path is better without.
+        /// </remarks>
+        private Task<HTTPResponse> DeleteStationKeyPin(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out var user, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryGetId(Request, out var id, out var badRequest))
+                return Task.FromResult(badRequest);
+
+            if (Request.ParsedURLParameters.ElementAtOrDefault(1)?.Trim() is not { Length: > 0 } pin)
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, "The key pin is required."));
+
+            if (!Controller.StationLogins.TryRemoveKeyPin(id, pin, out var error, out var notSaved))
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.NotFound, error, notSaved));
+
+            Log.Notice($"'{user.Id}' took the key pin {pin} of the charging station '{id}' away.", "ocpp", "station", "auth", "tls", "web");
+
+            return Task.FromResult(
+                       JSONResponse(Request, HTTPStatusCode.OK, Controller.StationLogins.ToJSON())
+                   );
+
+        }
+
+        /// <summary>
         /// What the two routes above have in common.
         /// </summary>
         private HTTPResponse TakeCredentialAway(HTTPRequest       Request,
@@ -1061,7 +1222,7 @@ namespace cloud.charging.open.LocalController
                     if (method is null)
                         return ErrorJSON(Request, HTTPStatusCode.BadRequest,
                                          $"'{token}' is not a way of signing in that this local controller knows; " +
-                                          "there are basic, totp, certificate and sshkey.");
+                                          "there are basic, totp, certificate, sshkey and keypin.");
 
                     methods.Add(method.Value);
 

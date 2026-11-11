@@ -21,6 +21,8 @@ using System.Security.Cryptography.X509Certificates;
 
 using Newtonsoft.Json.Linq;
 
+using org.GraphDefined.Vanaheimr.Hermod;
+
 #endregion
 
 namespace cloud.charging.open.LocalController.OCPP
@@ -123,6 +125,47 @@ namespace cloud.charging.open.LocalController.OCPP
         public DateTimeOffset?              NotAfter
             => Certificate is null ? null : new DateTimeOffset(Certificate.NotAfter.ToUniversalTime());
 
+        /// <summary>
+        /// The key pin of this key: SHA-256 over its SubjectPublicKeyInfo - the
+        /// same whether the key is presented in a certificate an authority
+        /// issued for it or in its carrier certificate.
+        /// </summary>
+        public KeyPin                       KeyPin           { get; }
+
+        /// <summary>
+        /// The self-signed certificate this key is presented in where no
+        /// certificate authority issued one, with the key attached - or null
+        /// for a key that was made for a signing request alone.
+        /// </summary>
+        /// <remarks>
+        /// Nothing in it is meant to be believed but the key: a charging
+        /// station that pinned the key checks the key pin and nothing else.
+        /// Kept beside a certificate an authority issues later rather than
+        /// replaced by it, so that the key goes on being presented when that
+        /// certificate runs out.
+        /// </remarks>
+        public X509Certificate2?            Carrier          { get; internal set; }
+
+        /// <summary>
+        /// Whether this is the announced next key: made ahead of a rollover, its
+        /// key pin handed to the charging stations, and presented only once
+        /// somebody switches to it.
+        /// </summary>
+        public Boolean                      IsNext           { get; internal set; }
+
+        /// <summary>
+        /// Since when this key with a carrier is the current one - made as the
+        /// first, or switched to - or null for one that never was.
+        /// </summary>
+        public DateTimeOffset?              CurrentSince     { get; internal set; }
+
+        /// <summary>
+        /// Whether this key has a carrier certificate, i.e. was made as a server
+        /// key that charging stations may pin.
+        /// </summary>
+        public Boolean                      HasCarrier
+            => Carrier is not null;
+
         #endregion
 
         #region Constructor(s)
@@ -130,16 +173,23 @@ namespace cloud.charging.open.LocalController.OCPP
         /// <summary>
         /// One key pair of the charging station server.
         /// </summary>
+        /// <param name="Id">What this key is called.</param>
+        /// <param name="Algorithm">What kind of key it is.</param>
+        /// <param name="CreatedAt">When it was generated.</param>
+        /// <param name="Subject">What was asked for in the signing request.</param>
+        /// <param name="KeyPin">The key pin of its public key.</param>
         public ServerCertificateEntry(String          Id,
                                       String          Algorithm,
                                       DateTimeOffset  CreatedAt,
-                                      String          Subject)
+                                      String          Subject,
+                                      KeyPin          KeyPin)
         {
 
             this.Id         = Id;
             this.Algorithm  = Algorithm;
             this.CreatedAt  = CreatedAt;
             this.Subject    = Subject;
+            this.KeyPin     = KeyPin;
 
         }
 
@@ -172,8 +222,10 @@ namespace cloud.charging.open.LocalController.OCPP
         /// </remarks>
         /// <param name="Now">What time it is, by the clock of this controller - which is what decides whether a certificate is in its window.</param>
         /// <param name="InUse">Whether this is the certificate the server is currently presenting.</param>
+        /// <param name="Presented">In which wrapper this key is presented right now - "certificate" or "carrier" - or null where it is not.</param>
         public JObject ToJSON(DateTimeOffset  Now,
-                              Boolean         InUse)
+                              Boolean         InUse,
+                              String?         Presented = null)
         {
 
             var json = new JObject(
@@ -181,11 +233,25 @@ namespace cloud.charging.open.LocalController.OCPP
                            new JProperty("algorithm",      Algorithm),
                            new JProperty("createdAt",      CreatedAt.ToString("o")),
                            new JProperty("subject",        Subject),
+                           new JProperty("keyPin",         KeyPin.ToHex()),
                            new JProperty("hasCertificate", Certificate is not null),
+                           new JProperty("hasCarrier",     Carrier is not null),
+                           new JProperty("next",           IsNext),
+                           new JProperty("currentSince",   CurrentSince?.ToString("o")),
                            new JProperty("canBePresented", CanBePresented),
                            new JProperty("inUse",          InUse),
+                           new JProperty("presented",      Presented),
                            new JProperty("warnings",       new JArray(Warnings))
                        );
+
+            // Without its dates: nobody who pinned the key looks at them, and
+            // its end, the last second of 9999, is past what a local time can
+            // hold on this side of Greenwich - .NET hands it back an hour short.
+            if (Carrier is not null)
+                json.Add("carrier", new JObject(
+                    new JProperty("subject",     Carrier.Subject),
+                    new JProperty("thumbprint",  Carrier.Thumbprint)
+                ));
 
             if (Certificate is not null)
             {
@@ -249,6 +315,7 @@ namespace cloud.charging.open.LocalController.OCPP
         {
 
             Certificate?.Dispose();
+            Carrier?.    Dispose();
 
             foreach (var intermediate in Intermediates)
                 intermediate.Dispose();
@@ -262,7 +329,9 @@ namespace cloud.charging.open.LocalController.OCPP
         public override String ToString()
 
             => Certificate is null
-                   ? $"{Id} ({Algorithm}), waiting for a certificate"
+                   ? Carrier is null
+                         ? $"{Id} ({Algorithm}), waiting for a certificate"
+                         : $"{Id} ({Algorithm}), key pin {KeyPin}{(IsNext ? ", the next key" : "")}"
                    : $"{Id} ({Algorithm}), '{Certificate.Subject}' until {NotAfter:yyyy-MM-dd}";
 
         #endregion

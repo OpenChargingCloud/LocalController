@@ -64,6 +64,23 @@ function controller({ method, path, body }: Asked): unknown {
     if (path === '/configuration/ocpp-server/certificates' && method === 'GET')
         return held;
 
+    if (path === '/configuration/ocpp-server/serverKeys' && method === 'POST') {
+        const { next } = body as { algorithm: string; next: boolean };
+        const id       = next ? 'k5' : 'k4';
+        const keyPin   = (next ? 'b2' : 'a1').repeat(32);
+        const made     = { ...aKey(id), subject: `CN=Key pin carrier ${id}`, hasCarrier: true, next, keyPin };
+        held = { ...held, entries: [ made, ...held.entries ],
+                 keyPins: next ? { current: held.keyPins!.current, next: { id, keyPin, createdAt: made.createdAt } }
+                               : { current: { id, keyPin, createdAt: made.createdAt, presented: 'carrier' }, next: null } };
+        return { id, keyPin, next, certificates: held };
+    }
+
+    if (path === '/configuration/ocpp-server/serverKeys/switch' && method === 'POST') {
+        held = { ...held, keyPins: { current: { ...held.keyPins!.next!, presented: 'carrier' }, next: null },
+                 entries: held.entries.map(entry => ({ ...entry, next: false })) };
+        return held;
+    }
+
     if (path === '/configuration/ocpp-server/certificates' && method === 'POST') {
         held = { ...held, entries: [ ...held.entries, aKey('k3') ] };
         return { id: 'k3', csr: '-----BEGIN CERTIFICATE REQUEST-----' };
@@ -166,6 +183,37 @@ describe('the server certificates', () => {
         assert.equal(field<HTMLSelectElement>(root, '#create-form', 'algorithm').value,   'ecdsa-p256');
         assert.equal(root.querySelector('#algorithm-remark')!.textContent!.trim(),        'What every station takes.');
         assert.match(root.querySelector('pre.pem')?.textContent ?? '', /BEGIN CERTIFICATE REQUEST/);
+
+    });
+
+    it('make the server key where nothing is presented, show its pin, announce a next key and switch to it', async () => {
+
+        const root   = await opened();
+        const pinOf  = (selector: string) => root.querySelector(selector)?.textContent?.trim();
+
+        assert.ok(root.querySelector('#current-keypin') === null, 'a key pin is shown where nothing is presented');
+
+        root.querySelector<HTMLButtonElement>('#serverkey-create')!.click();
+        await until(() => root.querySelector('#current-keypin') !== null, 'the key pin of the server key made is not shown');
+
+        assert.deepEqual(asked.find(one => one.path.endsWith('/serverKeys'))?.body, { algorithm: 'ecdsa-p256', next: false });
+        assert.equal(pinOf('#current-keypin'), 'a1'.repeat(32));
+        assert.match(root.querySelector('#keypins')!.textContent!, /in its carrier certificate/);
+        assert.equal(pinOf('.keypin[data-id="k4"]'), 'a1'.repeat(32), 'the key does not say its pin');
+        assert.ok(root.querySelector('#serverkey-create') === null, 'a second server key is offered beside the first');
+
+        root.querySelector<HTMLButtonElement>('#serverkey-next')!.click();
+        await until(() => root.querySelector('#next-keypin') !== null, 'the next key pin is not shown');
+
+        assert.deepEqual(asked.filter(one => one.path.endsWith('/serverKeys')).at(-1)?.body, { algorithm: 'ecdsa-p256', next: true });
+        assert.equal(pinOf('#current-keypin'), 'a1'.repeat(32), 'the next key took over before the switch');
+        assert.equal(pinOf('#next-keypin'),    'b2'.repeat(32));
+
+        root.querySelector<HTMLButtonElement>('#serverkey-switch')!.click();
+        await until(() => root.querySelector('#next-keypin') === null, 'the switch is not drawn');
+
+        assert.ok(asked.some(one => one.method === 'POST' && one.path.endsWith('/serverKeys/switch')), 'no switch was asked for');
+        assert.equal(pinOf('#current-keypin'), 'b2'.repeat(32));
 
     });
 

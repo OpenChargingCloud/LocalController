@@ -218,6 +218,23 @@ namespace cloud.charging.open.LocalController
             => ocppServerTLS;
 
         /// <summary>
+        /// The key pin a charging station pins to reach this controller: the
+        /// one of the key presented at the next handshake - or null where the
+        /// station port is not encrypted, or nothing is presented.
+        /// </summary>
+        public KeyPin? OCPPServerKeyPin
+            => ocppServerTLS
+                   ? ServerCertificates.CurrentKey?.KeyPin
+                   : null;
+
+        /// <summary>
+        /// The key pin of the announced next key, to be handed to the charging
+        /// stations before the switch - or null where none was announced.
+        /// </summary>
+        public KeyPin? OCPPServerNextKeyPin
+            => ServerCertificates.NextKey?.KeyPin;
+
+        /// <summary>
         /// Where the charging stations are told to connect.
         /// </summary>
         public String OCPPServerURL
@@ -380,6 +397,13 @@ namespace cloud.charging.open.LocalController
 
                                   );
 
+            // A station's certificate let in by its key pin names nobody: the
+            // station is the one the pin is listed for, and its path has to say
+            // so - see ValidateStation. Told to the server as well, or it would
+            // read the common name, register the connection under it, and turn
+            // a station whose certificate names another away with a 403.
+            ocppWebSocketServer.AcceptedByKeyPin = certificate => StationLogins.FindKeyPin(KeyPin.FromCertificate(certificate)) is not null;
+
             ocppWebSocketServer.OnValidateWebSocketConnection += ValidateStation;
 
             ApplyStationLogins(ocppWebSocketServer);
@@ -510,7 +534,7 @@ namespace cloud.charging.open.LocalController
                     Log.Warning(
                         "Security profile 2 or 3 is configured, but there is no server certificate - so the charging station port is " +
                         "unencrypted and only security profile 1 can be used on it. Make a signing request and upload the certificate " +
-                        "that answers it; the port encrypts from the next start.",
+                        "that answers it, or make a server key for the stations to pin; the port encrypts from the next start.",
                         "ocpp", "station", "tls"
                     );
 
@@ -544,7 +568,10 @@ namespace cloud.charging.open.LocalController
             Log.Notice(
                 $"The charging stations connect to {OCPPServerURL} " +
                 $"({(ocppServerTLS ? "TLS" : "unencrypted")}, security profile(s) {String.Join(", ", settings.SecurityProfiles ?? [])}, " +
-                $"{StationLogins.EnabledCount} station login(s), {ClientTrust.EnabledCount} accepted chain(s)).",
+                $"{StationLogins.EnabledCount} station login(s), {ClientTrust.EnabledCount} accepted chain(s))" +
+                (OCPPServerKeyPin     is KeyPin keyPin  ? $", key pin {keyPin}"           : "") +
+                (OCPPServerNextKeyPin is KeyPin nextPin ? $", next key pin {nextPin}"     : "") +
+                ".",
                 "ocpp", "station"
             );
 
@@ -576,10 +603,12 @@ namespace cloud.charging.open.LocalController
                     "ocpp", "station", "auth"
                 );
 
-            if (settings.SecurityProfiles?.Contains<Byte>(3) == true && ClientTrust.EnabledCount == 0)
+            if (settings.SecurityProfiles?.Contains<Byte>(3) == true &&
+                ClientTrust.EnabledCount == 0 &&
+                !StationLogins.Logins.Any(login => login.HasKeyPin))
                 Log.Warning(
-                    "Security profile 3 is allowed, but no certificate authority has been named to accept charging stations from - " +
-                    "so no station can connect with a certificate. An empty list is 'nobody', not 'everybody'.",
+                    "Security profile 3 is allowed, but no certificate authority has been named to accept charging stations from, " +
+                    "and no station has a key pin - so no station can connect with a certificate. An empty list is 'nobody', not 'everybody'.",
                     "ocpp", "station", "tls"
                 );
 
@@ -822,6 +851,56 @@ namespace cloud.charging.open.LocalController
                 if (!profiles.Contains<Byte>(3))
                     return Refuse(Connection, "it authenticated with a certificate, and security profile 3 is not allowed here");
 
+                var keyPin = KeyPin.FromCertificate(Connection.ClientCertificate);
+
+                #region By its key pin: the station the pin is listed for, on its own path, and nobody else
+
+                // A certificate whose key pin is listed was let through the
+                // handshake by the pin alone, and its chain, its name and its
+                // dates were never looked at: anybody can wrap a key in a
+                // certificate that says anything. So its common name names
+                // nobody, and the station it is let in as is the one the pin
+                // is listed for - only on that station's own path, the last
+                // segment of the URL, which is what the CN check of OCPP's
+                // security profile 3 is for a certificate (A00.FR.511).
+                if (StationLogins.FindKeyPin(keyPin) is ChargingStationLogin pinned)
+                {
+
+                    var path = StationOfPath(Connection.HTTPRequest);
+
+                    if (path != pinned.Id)
+                        return Refuse(Connection, $"its key pin {keyPin} is the charging station '{pinned.Id}''s, and it asked to connect as " +
+                                                  (path is null ? "nobody in particular" : $"'{path}'"));
+
+                    if (!pinned.Enabled)
+                        return Refuse(Connection, $"the charging station '{pinned.Id}' is switched off here");
+
+                    if (!GroupAllows(pinned, AuthMethod.KeyPin, 3, out var whyNot))
+                        return Refuse(Connection, $"the charging station '{pinned.Id}' {whyNot}");
+
+                    if (ocppServerSettings.Logging?.Authentication != false)
+                        Log.Info($"The charging station '{pinned.Id}' signed in from {from} with its key pin {keyPin} (security profile 3).",
+                                 "ocpp", "station", "auth");
+
+                    Connection.TryAddCustomData(StationIdKey, pinned.Id);
+
+                    return Task.FromResult<HTTPResponse?>(null);
+
+                }
+
+                // Its pin was listed once and is no longer: the handshake may
+                // have let it through by that pin, before the pin was taken
+                // away - the client decides how long it waits between the two.
+                // Such a certificate skipped the accepted chains, so it is held
+                // against them now, rather than read as one that passed them.
+                if (StationLogins.WasEverListed(keyPin) &&
+                    !ClientTrust.Validate(Connection.ClientCertificate, null, ocppServerSettings.CheckCertificateRevocation == true).Accepted)
+                {
+                    return Refuse(Connection, $"its key pin {keyPin} is no charging station's any more, and its certificate does not lead to an accepted chain");
+                }
+
+                #endregion
+
                 // The certificate itself was held against the accepted chains
                 // during the handshake; a connection that got this far with one
                 // has passed.
@@ -837,6 +916,14 @@ namespace cloud.charging.open.LocalController
 
                     if (!certificateLogin.Enabled)
                         return Refuse(Connection, $"the charging station '{named}' is switched off here");
+
+                    // Either by key pin or by certificate authority, never both
+                    // (EVQI Transport, key pins, 5.4): a station listed with key
+                    // pins is let in by them, and a certificate an authority
+                    // issued to its name with another key is a key it was never
+                    // given - the very thing a pin is there to refuse.
+                    if (certificateLogin.HasKeyPin)
+                        return Refuse(Connection, $"the charging station '{named}' is let in by its key pins, and the key of this certificate is none of them");
 
                     if (!GroupAllows(certificateLogin, AuthMethod.Certificate, 3, out var why))
                         return Refuse(Connection, $"the charging station '{named}' {why}");
@@ -1045,6 +1132,15 @@ namespace cloud.charging.open.LocalController
         /// profile 3, so it has no password to fall back to, and a certificate
         /// that does not check out is worth a line in the log rather than a
         /// quiet second attempt.
+        ///
+        /// <b>Or by its key pin.</b> A certificate whose key pin is listed for
+        /// a charging station that is switched on is let through by that pin
+        /// alone, and its chain, name and dates are not looked at - that is what
+        /// a station without a certificate authority behind it relies on. Which
+        /// station it is, and whether it may come in as the one it asks to be,
+        /// is decided in <see cref="ValidateStation"/>. Every other certificate
+        /// is held against the accepted chains as before; a key pin of a station
+        /// that is switched off opens nothing here.
         /// </remarks>
         private TLSValidationResult ValidateStationCertificate(Object                                                             Sender,
                                                                System.Security.Cryptography.X509Certificates.X509Certificate2?    Certificate,
@@ -1055,6 +1151,38 @@ namespace cloud.charging.open.LocalController
 
             if (Certificate is null)
                 return new TLSValidationResult(IsValid: true, Errors: null, Warnings: null);
+
+            #region By its key pin
+
+            if (StationLogins.FindKeyPin(KeyPin.FromCertificate(Certificate)) is ChargingStationLogin pinned &&
+                pinned.Enabled)
+            {
+
+                // Hermod's validator rather than a comparison here: it also
+                // refuses a key that cannot be one - a malformed key, an
+                // unknown algorithm, a point that is not on its curve - before
+                // any pin is compared (EVQI Transport, key pins, 10.7).
+                var validation = KeyPinValidator.Validate(
+                                     new KeyPinPolicy(pinned.Pins.Select(keyPin => keyPin.Pin)),
+                                     Certificate
+                                 );
+
+                if (ocppServerSettings.Logging?.Authentication != false)
+                    Log.Log(
+                        validation.IsAccepted ? LogLevel.Debug : LogLevel.Warning,
+                        validation.IsAccepted
+                            ? $"The certificate of '{Certificate.Subject}' was accepted by its key pin {validation.Pin}, which is the charging station '{pinned.Id}''s."
+                            : $"The certificate of '{Certificate.Subject}' was refused: {validation.Reason}",
+                        "ocpp", "station", "tls"
+                    );
+
+                return validation.IsAccepted
+                           ? TLSValidationResult.Success()
+                           : TLSValidationResult.Failed(validation.Reason ?? "The key was refused.");
+
+            }
+
+            #endregion
 
             var result = ClientTrust.Validate(
                              Certificate,
@@ -1269,6 +1397,29 @@ namespace cloud.charging.open.LocalController
             => Connection.TryGetCustomData(StationIdKey) as String ?? Connection.RemoteSocket.ToString();
 
         /// <summary>
+        /// The charging station the URL of an upgrade names: its last segment,
+        /// percent-decoded, as OCPP 2.1 Part 4, 3.1.1 has it - or null where it
+        /// names none.
+        /// </summary>
+        /// <remarks>
+        /// Read the way the WebSocket server reads it when it registers the
+        /// connection, so that the station this controller let in and the one
+        /// the connection is registered as cannot be two.
+        /// </remarks>
+        private static String? StationOfPath(HTTPRequest? Request)
+        {
+
+            if (Request is null)
+                return null;
+
+            var path     = Request.Path.ToString();
+            var station  = path[(path.LastIndexOf('/') + 1)..];
+
+            return station.Length > 0 ? station : null;
+
+        }
+
+        /// <summary>
         /// Which charging station a connection over SSH is: the networking
         /// node its HELLO was welcomed as - or where it comes from.
         /// </summary>
@@ -1391,6 +1542,11 @@ namespace cloud.charging.open.LocalController
                     new JProperty("trustedChains",           ClientTrust.EnabledCount),
                     new JProperty("hasCertificate",          ServerCertificates.HasCertificate),
 
+                    // What a charging station pins to reach this port, and what
+                    // to hand it before a switch (EVQI Transport, key pins, 7.4).
+                    new JProperty("keyPin",                  OCPPServerKeyPin?.    ToHex()),
+                    new JProperty("nextKeyPin",              OCPPServerNextKeyPin?.ToHex()),
+
                     // What a change to the socket is waiting for, said rather
                     // than left to be discovered.
                     new JProperty("waitingForARestart",      new JArray(waiting))
@@ -1455,7 +1611,8 @@ namespace cloud.charging.open.LocalController
                 !ServerCertificates.HasCertificate)
             {
                 Error = "Security profiles 2 and 3 both need TLS, and there is no server certificate yet. " +
-                        "Make a signing request and upload the certificate that answers it, or allow security profile 1 as well.";
+                        "Make a signing request and upload the certificate that answers it, or make a server key for the charging " +
+                        "stations to pin, or allow security profile 1 as well.";
                 return false;
             }
 

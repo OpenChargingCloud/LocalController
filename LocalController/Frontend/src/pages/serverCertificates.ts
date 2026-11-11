@@ -160,6 +160,8 @@ export const serverCertificatesPage: Page = {
             return html`
                 <div class="cards">
 
+                    ${keyPinsCard(certificates)}
+
                     <section class="card">
 
                         <h2><i class="fa-solid fa-key"></i> Make a signing request</h2>
@@ -255,6 +257,88 @@ export const serverCertificatesPage: Page = {
         }
 
 
+        /**
+         * The key pins a charging station pins to reach this controller - the
+         * current key's, and the next one's ahead of a rollover - and the three
+         * moves that make them: the server key where nothing is presented yet,
+         * a next key, and the switch to it.
+         */
+        function keyPinsCard(certificates: ServerCertificates): TemplateResult {
+
+            const current = certificates.keyPins?.current ?? null;
+            const next    = certificates.keyPins?.next    ?? null;
+
+            return html`
+                <section class="card" id="keypins">
+
+                    <h2><i class="fa-solid fa-fingerprint"></i> Key pins</h2>
+
+                    <p class="hint">
+                        A charging station that pins this controller's key checks SHA-256 over its public key and
+                        nothing else - no certificate authority, no name, no dates. The pin is the same whether the
+                        key is presented in a certificate an authority issued for it or in the carrier certificate
+                        made from it here. Hand it to the station at commissioning.
+                    </p>
+
+                    ${current === null
+                          ? html`<p class="muted">No key is presented to the charging stations yet.</p>`
+                          : html`
+                              <dl class="kv">
+                                  <dt>Key pin</dt>
+                                  <dd><code class="keypin" id="current-keypin">${current.keyPin}</code></dd>
+                                  <dt>Of the key</dt>
+                                  <dd>
+                                      <code>${current.id}</code>, made ${formatTimestamp(current.createdAt)},
+                                      presented ${current.presented === 'carrier'
+                                                      ? 'in its carrier certificate'
+                                                      : 'in the certificate an authority issued for it'}
+                                  </dd>
+                              </dl>
+                          `}
+
+                    ${next === null ? nothing : html`
+                        <dl class="kv">
+                            <dt>Next key pin</dt>
+                            <dd><code class="keypin" id="next-keypin">${next.keyPin}</code></dd>
+                            <dt>Of the key</dt>
+                            <dd><code>${next.id}</code>, made ${formatTimestamp(next.createdAt)} - presented once it is switched to</dd>
+                        </dl>
+                    `}
+
+                    <div class="form-actions">
+                        ${current === null ? html`
+                            <button type="button" class="btn primary" id="serverkey-create" ?disabled=${!mayManage}
+                                    @click=${() => void makeServerKey(false)}>
+                                Make the server key
+                            </button>
+                        ` : next === null ? html`
+                            <button type="button" class="btn" id="serverkey-next" ?disabled=${!mayManage}
+                                    @click=${() => void makeServerKey(true)}>
+                                Announce a next key
+                            </button>
+                        ` : html`
+                            <button type="button" class="btn danger" id="serverkey-switch" ?disabled=${!mayManage}
+                                    @click=${() => void switchKey(next.id)}>
+                                Switch to the next key
+                            </button>
+                        `}
+                        <span id="serverkey-error" class="form-error" role="alert"></span>
+                    </div>
+
+                    <p class="hint">
+                        ${current === null
+                              ? 'The server key is made here, without a signing request, and presented in a carrier certificate made from it. The charging station port encrypts from the next start.'
+                              : next === null
+                                    ? 'Ahead of a rollover: the next key is made now and only presented once somebody switches to it. Hand its pin to every station first.'
+                                    : 'Once every station has the next pin, switch: stations that pinned only the current key are refused from their next handshake on.'}
+                    </p>
+
+                </section>
+            `;
+
+        }
+
+
         function entryCard(entry: ServerCertificate): TemplateResult {
 
             const certificate = entry.certificate;
@@ -267,14 +351,18 @@ export const serverCertificatesPage: Page = {
                             <code>${entry.id}</code>
                             <span class="badge">${entry.algorithm}</span>
                             ${entry.inUse ? html`<span class="badge ok">being presented</span>` : nothing}
+                            ${entry.next ? html`<span class="badge">next key</span>` : nothing}
+                            ${entry.hasCarrier ? html`<span class="badge">server key</span>` : nothing}
                             ${certificate ? html`<span class="badge ${stateClass(certificate.state)}">${certificate.state}</span>` : nothing}
-                            ${certificate ? nothing : html`<span class="badge warn">waiting for a certificate</span>`}
+                            ${certificate || entry.hasCarrier ? nothing : html`<span class="badge warn">waiting for a certificate</span>`}
                             ${entry.canBePresented ? nothing : html`<span class="badge warn">not servable here</span>`}
                         </div>
                         <div class="entry-actions">
-                            <a class="btn small" href="${api.ocppServer.certificates.csrURL(entry.id)}" download>
-                                Signing request
-                            </a>
+                            ${entry.hasCarrier ? nothing : html`
+                                <a class="btn small" href="${api.ocppServer.certificates.csrURL(entry.id)}" download>
+                                    Signing request
+                                </a>
+                            `}
                             <button type="button" class="btn small danger remove" data-id="${entry.id}"
                                     ?disabled=${!mayManage} @click=${() => void remove(entry.id)}>
                                 Remove
@@ -283,11 +371,16 @@ export const serverCertificatesPage: Page = {
                     </div>
 
                     <dl class="kv">
-                        <dt>Asked for</dt>
-                        <dd>${entry.subject}</dd>
+                        <dt>${entry.hasCarrier ? 'Carrier' : 'Asked for'}</dt>
+                        <dd>${entry.carrier?.subject ?? entry.subject}</dd>
 
                         <dt>Key made</dt>
                         <dd>${formatTimestamp(entry.createdAt)}</dd>
+
+                        ${entry.keyPin === undefined ? nothing : html`
+                            <dt>Key pin</dt>
+                            <dd><code class="small keypin" data-id="${entry.id}">${entry.keyPin}</code></dd>
+                        `}
 
                         ${certificate ? html`
                             <dt>Issued to</dt>
@@ -326,7 +419,11 @@ export const serverCertificatesPage: Page = {
 
                     <form class="form-stack upload-form" data-id="${entry.id}" @submit=${(event: SubmitEvent) => void upload(entry.id, event)}>
 
-                        <label>${certificate ? 'Replace this certificate' : 'The certificate that answers this request'}
+                        <label>${certificate
+                                     ? 'Replace this certificate'
+                                     : entry.hasCarrier
+                                           ? 'A certificate an authority issued for this key - its carrier stays'
+                                           : 'The certificate that answers this request'}
                             <textarea name="pem" rows="5" placeholder="-----BEGIN CERTIFICATE-----&#10;..."
                                       ?disabled=${!mayManage}></textarea>
                         </label>
@@ -705,6 +802,69 @@ export const serverCertificatesPage: Page = {
             {
                 if (!cancelled)
                     error.textContent = errorMessage(problem);
+            }
+
+        }
+
+
+        /** The server key, or the next one: made here, and its pin shown on the card. */
+        async function makeServerKey(next: boolean): Promise<void> {
+
+            const error = must<HTMLElement>(content, '#serverkey-error');
+            error.textContent = '';
+
+            try
+            {
+
+                const made = await api.ocppServer.serverKeys.create('ecdsa-p256', next);
+
+                if (cancelled)
+                    return;
+
+                justMade  = null;
+                store     = made.certificates;
+                server    = await api.ocppServer.get();
+
+                draw();
+
+            }
+            catch (problem)
+            {
+                if (!cancelled)
+                    must<HTMLElement>(content, '#serverkey-error').textContent = errorMessage(problem);
+            }
+
+        }
+
+
+        /** Present the next key from now on - asked first, because stations without its pin are locked out. */
+        async function switchKey(id: string): Promise<void> {
+
+            if (!window.confirm(`Present the next key '${id}' from now on?\n\n` +
+                                'Charging stations that pinned only the current key are refused from their next handshake on.'))
+                return;
+
+            const error = must<HTMLElement>(content, '#serverkey-error');
+            error.textContent = '';
+
+            try
+            {
+
+                store = await api.ocppServer.serverKeys.switch();
+
+                if (cancelled)
+                    return;
+
+                justMade = null;
+                server   = await api.ocppServer.get();
+
+                draw();
+
+            }
+            catch (problem)
+            {
+                if (!cancelled)
+                    must<HTMLElement>(content, '#serverkey-error').textContent = errorMessage(problem);
             }
 
         }

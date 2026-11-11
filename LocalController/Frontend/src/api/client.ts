@@ -109,6 +109,10 @@ export interface OCPPServerConfiguration {
         stationLogins:      number;
         trustedChains:      number;
         hasCertificate:     boolean;
+        /** What a station pins to reach this port: 64 hexadecimal digits, or null on an unencrypted one. */
+        keyPin?:            string | null;
+        /** The key pin of the announced next key, to be handed to the stations before the switch. */
+        nextKeyPin?:        string | null;
         /**
          * The fields that were changed but are not in effect: the socket is
          * decided when the server is built. Empty when everything saved is
@@ -208,6 +212,20 @@ export interface ServerCertificate {
     /** Whether this is the one being presented to the charging stations. */
     inUse:           boolean;
     warnings:        string[];
+    /** SHA-256 over the key's SubjectPublicKeyInfo, 64 lower-case hexadecimal digits: the same in every wrapper. */
+    keyPin?:         string;
+    /** Whether it is a server key, presented in a self-signed carrier certificate where no authority issued one. */
+    hasCarrier?:     boolean;
+    /** Whether it is the announced next key, presented only once somebody switches to it. */
+    next?:           boolean;
+    /** Since when it is the current server key, if it ever was. */
+    currentSince?:   string | null;
+    /** What it is presented in at the next handshake - or null where it is not. */
+    presented?:      'certificate' | 'carrier' | null;
+    carrier?: {
+        subject:     string;
+        thumbprint:  string;
+    };
     certificate?: {
         subject:          string;
         issuer:           string;
@@ -233,6 +251,18 @@ export interface ServerCertificates {
     algorithms:            KeyAlgorithm[];
     /** Always false, and said out loud: a private key is made here and never arrives. */
     canImportPrivateKeys:  boolean;
+    /** The key pins a charging station pins: the current key's first, and the announced next one's. */
+    keyPins?: {
+        current:  ServerKeyPin & { presented: 'certificate' | 'carrier' | null } | null;
+        next:     ServerKeyPin | null;
+    };
+}
+
+/** The key pin of one key of this local controller, and the key it is of. */
+export interface ServerKeyPin {
+    id:         string;
+    keyPin:     string;
+    createdAt:  string;
 }
 
 /** One certificate found in a text or a file, and the key of this controller it is for. */
@@ -341,7 +371,19 @@ export interface CSMSUpdate {
 }
 
 /** A way a charging station can prove who it is. */
-export type AuthMethod = 'basic' | 'totp' | 'certificate' | 'sshkey';
+export type AuthMethod = 'basic' | 'totp' | 'certificate' | 'sshkey' | 'keypin';
+
+/**
+ * The key pin of a TLS client key a charging station is let in by: SHA-256
+ * over its SubjectPublicKeyInfo. Nothing about it is secret.
+ */
+export interface StationKeyPin {
+    /** 64 lower-case hexadecimal digits. */
+    pin:       string;
+    label?:    string;
+    added:     string;
+    addedBy?:  string;
+}
 
 /** An SSH public key a charging station signs in with for OCPP over SSH. Nothing about it is secret. */
 export interface StationSSHKey {
@@ -380,6 +422,8 @@ export interface StationLogin {
     totp?:        TOTPSettings;
     hasSSHKey?:   boolean;
     sshKeys?:     StationSSHKey[];
+    hasKeyPin?:   boolean;
+    keyPins?:     StationKeyPin[];
     note?:        string;
 }
 
@@ -519,6 +563,24 @@ export const api = {
 
         },
 
+        /**
+         * The server key the charging stations pin, presented in a carrier
+         * certificate made from it: the first one where nothing is presented
+         * yet, or the next one, announced ahead of a rollover. Given the time
+         * a key takes to make, as above.
+         */
+        serverKeys: {
+
+            create:  (algorithm: string, next: boolean) =>
+                         request<{ id: string; keyPin: string; next: boolean; certificates: ServerCertificates }>(
+                             'POST', '/configuration/ocpp-server/serverKeys', { algorithm, next }, 3 * 60_000),
+
+            /** Present the next key from now on; stations that pinned only the key before are refused. */
+            switch:  () =>
+                         request<ServerCertificates>('POST', '/configuration/ocpp-server/serverKeys/switch', {})
+
+        },
+
         trust: {
 
             get:      ()  => request<ClientTrust>('GET', '/configuration/ocpp-server/trust'),
@@ -583,7 +645,21 @@ export const api = {
             /** Take a key away; a session it opened ends. */
             removeSSHKey: (id: string, fingerprint: string) =>
                           request<StationLogins>('DELETE',
-                              `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/sshKeys/${fingerprintInURL(fingerprint)}`)
+                              `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/sshKeys/${fingerprintInURL(fingerprint)}`),
+
+            /**
+             * Let a station in by the key pin of its TLS client key - 64
+             * hexadecimal digits, with or without colons, or "sha256//" and
+             * base64 - adding the station where it is not listed yet.
+             */
+            addKeyPin: (id: string, pin: string, label: string, group: string, note: string) =>
+                          request<{ id: string; keyPin: string; stations: StationLogins }>(
+                              'POST', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/keyPins`, { pin, label, group, note }),
+
+            /** Stop letting a station in by a key pin; the pin as the list has it, 64 hexadecimal digits. */
+            removeKeyPin: (id: string, pin: string) =>
+                          request<StationLogins>('DELETE',
+                              `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/keyPins/${encodeURIComponent(pin)}`)
 
         },
 

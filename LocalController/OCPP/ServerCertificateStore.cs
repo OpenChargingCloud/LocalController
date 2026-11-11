@@ -73,6 +73,24 @@ namespace cloud.charging.open.LocalController.OCPP
     /// would take the site down in both cases, which is the worse of the two
     /// failures for a box in a car park - so this says so loudly in the log
     /// instead, and keeps the door open.
+    ///
+    /// <b>A server key needs no certificate authority.</b> A key can also be
+    /// made as a server key, without a signing request: it is presented in a
+    /// self-signed carrier certificate made from it, and a charging station
+    /// that pinned its key pin - SHA-256 over its SubjectPublicKeyInfo - checks
+    /// that and nothing else (EVQI Transport, key pins, 5.3). Where an
+    /// authority issues a certificate for the same key later, that one is
+    /// presented while it is valid, for the stations that check chains, and
+    /// the carrier again when it runs out; the pin is the same in both. Made
+    /// only when somebody asks, never by itself: a first certificate of any
+    /// kind turns the station port to TLS at the next start.
+    ///
+    /// <b>The current key and the next one.</b> One key with a carrier is the
+    /// current one and is presented. A next key can be announced ahead of a
+    /// rollover: it is kept and its pin shown, so that the charging stations
+    /// can be given it, and it is presented only once somebody switches to it
+    /// (EVQI Transport, key pins, 5.5). The keys made for signing requests
+    /// alone go on as before, until a server key is current.
     /// </remarks>
     public sealed class ServerCertificateStore : IDisposable
     {
@@ -112,6 +130,33 @@ namespace cloud.charging.open.LocalController.OCPP
         /// </summary>
         public const Int32   MaxSubjectLength      = 200;
 
+        /// <summary>
+        /// What a carrier certificate is valid from: far in the past, so that a
+        /// charging station whose clock believes it is 1970 does not refuse it
+        /// for its dates (EVQI Transport, key pins, section 4, B0).
+        /// </summary>
+        public static readonly DateTimeOffset CarrierNotBefore  = new (1970, 1, 1,    0,  0,  0, TimeSpan.Zero);
+
+        /// <summary>
+        /// What a carrier certificate is valid until: 99991231235959Z, which
+        /// RFC 5280 4.1.2.5 says for a certificate without a well-defined end.
+        /// Nobody who pinned the key looks at it, and nothing about it may run
+        /// out under a station that does.
+        /// </summary>
+        public static readonly DateTimeOffset CarrierNotAfter   = new (9999, 12, 31, 23, 59, 59, TimeSpan.Zero);
+
+        /// <summary>
+        /// What a carrier certificate is presented as, and how its wearer is
+        /// presented in what this store says: a certificate an authority issued,
+        /// or the carrier.
+        /// </summary>
+        public const String  PresentedAsCertificate  = "certificate";
+
+        /// <summary>
+        /// See <see cref="PresentedAsCertificate"/>.
+        /// </summary>
+        public const String  PresentedAsCarrier      = "carrier";
+
         private readonly Object                                   updateLock  = new ();
         private readonly Dictionary<String, ServerCertificateEntry>  entries  = [];
 
@@ -122,10 +167,12 @@ namespace cloud.charging.open.LocalController.OCPP
         private readonly Dictionary<String, Byte[]>               publicKeys  = [];
 
         /// <summary>
-        /// The chain that is being presented, and the entry it came from.
+        /// The chain that is being presented, the entry it came from, and which
+        /// of the entry's certificates it is.
         /// </summary>
         private ServerCertificateChain?                           served;
         private String?                                           servedId;
+        private String?                                           servedAs;
 
         #endregion
 
@@ -164,13 +211,57 @@ namespace cloud.charging.open.LocalController.OCPP
         /// Whether there is any certificate at all - which is what decides
         /// whether this server can speak TLS.
         /// </summary>
+        /// <remarks>
+        /// A carrier certificate counts, the carrier of a next key does not:
+        /// that one is not presented until somebody switches to it, and a key
+        /// announced for later must not turn the port to TLS today.
+        /// </remarks>
         public Boolean HasCertificate
         {
             get
             {
                 lock (updateLock)
-                    return entries.Values.Any(entry => entry.Certificate is not null &&
-                                                       entry.CanBePresented);
+                    return entries.Values.Any(entry => !entry.IsNext &&
+                                                        entry.CanBePresented &&
+                                                       (entry.Certificate is not null || entry.Carrier is not null));
+            }
+        }
+
+        /// <summary>
+        /// The key that is presented to the charging stations now, or would be
+        /// at the next handshake - whatever it is wrapped in - or null where
+        /// there is none.
+        /// </summary>
+        /// <remarks>
+        /// Its key pin is the one a charging station has to pin, which is why
+        /// it is asked here without presenting anything: a page or a command
+        /// that shows the pin must not be what switches the server over.
+        /// </remarks>
+        public ServerCertificateEntry? CurrentKey
+            => GetCurrentKey(out _);
+
+        /// <summary>
+        /// The key that is presented to the charging stations now, or would be
+        /// at the next handshake, and what it is presented in: a certificate an
+        /// authority issued, <see cref="PresentedAsCertificate"/>, or its
+        /// carrier, <see cref="PresentedAsCarrier"/>.
+        /// </summary>
+        /// <param name="PresentedAs">What the key is presented in, or null without a key.</param>
+        public ServerCertificateEntry? GetCurrentKey(out String? PresentedAs)
+        {
+            lock (updateLock)
+                return Choose(TimeProvider.GetUtcNow(), out PresentedAs);
+        }
+
+        /// <summary>
+        /// The announced next key, or null where none was made.
+        /// </summary>
+        public ServerCertificateEntry? NextKey
+        {
+            get
+            {
+                lock (updateLock)
+                    return entries.Values.FirstOrDefault(entry => entry.IsNext);
             }
         }
 
@@ -294,6 +385,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 served    = null;
                 servedId  = null;
+                servedAs  = null;
 
                 if (!Directory.Exists(Path))
                     return;
@@ -540,7 +632,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 #endregion
 
-                var entry = new ServerCertificateEntry(id, algorithm.Name, createdAt, subjectText);
+                var entry = new ServerCertificateEntry(id, algorithm.Name, createdAt, subjectText, KeyPin.FromSubjectPublicKeyInfo(publicKey));
 
                 entries   [id] = entry;
                 publicKeys[id] = publicKey;
@@ -551,6 +643,328 @@ namespace cloud.charging.open.LocalController.OCPP
             }
 
             OnNotice?.Invoke(LogLevel.Notice, $"A new {algorithm.Name} key '{id}' was generated and a signing request for {String.Join(", ", names)} is waiting to be collected.");
+
+            return true;
+
+        }
+
+        #endregion
+
+        #region TryCreateServerKey(Algorithm, AsNext, out Id, out KeyPin, out Error [, out NotSaved])
+
+        /// <summary>
+        /// Generate a server key that charging stations may pin, presented in a
+        /// self-signed carrier certificate made from it - as the current key
+        /// where nothing is presented yet, or as the announced next key.
+        /// </summary>
+        /// <param name="Algorithm">One of <see cref="Algorithms"/>; P-256 when nothing is said.</param>
+        /// <param name="AsNext">Whether this is the next key, announced ahead of a rollover and presented only once somebody switches to it.</param>
+        public Boolean TryCreateServerKey(String?                           Algorithm,
+                                          Boolean                           AsNext,
+                                          [NotNullWhen(true)]  out String?  Id,
+                                          [NotNullWhen(true)]  out KeyPin?  KeyPin,
+                                          [NotNullWhen(false)] out String?  Error)
+
+            => TryCreateServerKey(Algorithm, AsNext, out Id, out KeyPin, out Error, out _);
+
+        /// <summary>
+        /// Generate a server key that charging stations may pin - and say
+        /// whether a refusal was the files' rather than the request's.
+        /// </summary>
+        /// <remarks>
+        /// <b>No signing request and no names.</b> A key pin vouches for the key
+        /// alone, so nothing has to be known about what this controller is
+        /// reachable as, and no certificate authority has to be asked. The key
+        /// is presented in a carrier certificate that says what it is and what
+        /// it is not: not an authority (basicConstraints CA:FALSE, no
+        /// keyCertSign), for TLS servers only, valid from 1970 to 9999. A
+        /// station that installed it as a root could otherwise be made to trust
+        /// whatever its key signs (EVQI Transport, key pins, section 4, B0).
+        ///
+        /// <b>Never in place of what is presented.</b> Where something is
+        /// presented already, the first key has to be announced as the next one
+        /// and switched to: a key made here never takes over by itself, because
+        /// every charging station that checks the old certificate or pinned the
+        /// old key would be locked out at once. And where nothing is presented
+        /// yet, there is nothing to announce a next key after.
+        /// </remarks>
+        /// <param name="NotSaved">True where the key, its carrier or what is said of it could not be written: nothing about the request was wrong, and no key was made.</param>
+        public Boolean TryCreateServerKey(String?                           Algorithm,
+                                          Boolean                           AsNext,
+                                          [NotNullWhen(true)]  out String?  Id,
+                                          [NotNullWhen(true)]  out KeyPin?  KeyPin,
+                                          [NotNullWhen(false)] out String?  Error,
+                                          out Boolean                       NotSaved)
+        {
+
+            Id        = null;
+            KeyPin    = null;
+            Error     = null;
+            NotSaved  = false;
+
+            var algorithm = KeyAlgorithm.Find(Algorithm ?? DefaultAlgorithm);
+
+            if (algorithm is null)
+            {
+                Error = $"'{Algorithm}' is not a key this local controller generates ({String.Join(", ", KeyAlgorithm.All.Select(one => one.Id))}).";
+                return false;
+            }
+
+            #region What may be made now
+
+            lock (updateLock)
+            {
+
+                if (AsNext && entries.Values.FirstOrDefault(entry => entry.IsNext) is ServerCertificateEntry next)
+                {
+                    Error = $"'{next.Id}' is announced as the next key already. Switch to it, or remove it, before announcing another.";
+                    return false;
+                }
+
+                if (AsNext && !HasCertificate)
+                {
+                    Error = "Nothing is presented to the charging stations yet, so there is nothing to announce a next key after. " +
+                            "Make the server key itself first.";
+                    return false;
+                }
+
+                if (!AsNext && HasCertificate)
+                {
+                    Error = $"'{Choose(TimeProvider.GetUtcNow(), out _)?.Id}' is presented to the charging stations already, and a new key does not " +
+                             "take its place by itself: every station that checks it would be locked out at once. Announce the new " +
+                             "key as the next one, hand its key pin to the stations, and switch to it.";
+                    return false;
+                }
+
+            }
+
+            #endregion
+
+            AsymmetricCipherKeyPair pair;
+
+            try
+            {
+                pair = algorithm.Generate();
+            }
+            catch (Exception e)
+            {
+                Error = $"No {algorithm.Name} key could be generated: {e.Message}";
+                return false;
+            }
+
+            var publicKey  = SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(pair.Public).GetDerEncoded();
+            var id         = KeyId(publicKey);
+            var pin        = org.GraphDefined.Vanaheimr.Hermod.KeyPin.FromSubjectPublicKeyInfo(publicKey);
+            var createdAt  = TimeProvider.GetUtcNow();
+
+            #region The carrier certificate
+
+            String carrierPEM;
+            String carrierSubject;
+
+            try
+            {
+                (carrierPEM, carrierSubject) = CreateCarrier(pair, algorithm, id);
+            }
+            catch (Exception e)
+            {
+                Error = $"No carrier certificate could be made for the new key ({algorithm.Name}): {e.Message}";
+                return false;
+            }
+
+            #endregion
+
+            lock (updateLock)
+            {
+
+                if (entries.ContainsKey(id))
+                {
+                    Error = $"A key with the identification '{id}' is already here.";
+                    return false;
+                }
+
+                #region Written down, the key first and with its own permissions
+
+                try
+                {
+
+                    CreateDirectory();
+
+                    WriteFile(
+                        FilePath(id, "key.pem"),
+                        PemEncoding.WriteString(
+                            "PRIVATE KEY",
+                            PrivateKeyInfoFactory.CreatePrivateKeyInfo(pair.Private).GetDerEncoded()
+                        ) + Environment.NewLine,
+                        OwnerOnly: true
+                    );
+
+                    WriteFile(FilePath(id, "carrier.pem"), carrierPEM);
+
+                    WriteFile(
+                        FilePath(id, "json"),
+                        MetaOf(id, algorithm.Id, createdAt, carrierSubject, AsNext, AsNext ? null : createdAt)
+                    );
+
+                }
+                catch (Exception e)
+                {
+
+                    Error     = $"The key could not be written to '{Path}': {e.Message}";
+                    NotSaved  = true;
+
+                    // Not left behind half made, as a key with a request is not.
+                    Forget(id, "key.pem", "carrier.pem", "json");
+
+                    return false;
+
+                }
+
+                #endregion
+
+                // Read back the way it will be read at the next start: a
+                // carrier that cannot be loaded from its own file is a server
+                // that would present nothing after a restart.
+                if (!TryLoadEntry(id, out var entry, out var loadedKey, out var problem))
+                {
+                    Forget(id, "key.pem", "carrier.pem", "json");
+                    Error = $"The key was written but cannot be read back: {problem}";
+                    return false;
+                }
+
+                if (!entry.CanBePresented)
+                {
+
+                    Forget(id, "key.pem", "carrier.pem", "json");
+                    entry.Dispose();
+
+                    // A key nobody can be shown is no server key: unlike a
+                    // certificate that came from an authority, there is nothing
+                    // here worth keeping for the day the platform learns it.
+                    Error = entry.PresentationProblem ?? $"This machine cannot present {algorithm.Name} keys over TLS.";
+                    return false;
+
+                }
+
+                entries   [id] = entry;
+                publicKeys[id] = loadedKey;
+
+                Id      = id;
+                KeyPin  = pin;
+
+            }
+
+            OnNotice?.Invoke(
+                LogLevel.Notice,
+                AsNext
+                    ? $"A new {algorithm.Name} key '{id}' was generated as the next server key, with the key pin {pin}. " +
+                       "It is presented once somebody switches to it; until then, hand its key pin to the charging stations."
+                    : $"A new {algorithm.Name} key '{id}' was generated as the server key, with the key pin {pin}, " +
+                       "and is presented in a carrier certificate made from it."
+            );
+
+            return true;
+
+        }
+
+        #endregion
+
+        #region TrySwitchToNextKey(out Id, out Error [, out NotSaved])
+
+        /// <summary>
+        /// Present the announced next key from now on: it becomes the current
+        /// one, and the key before it is kept, no longer presented, until
+        /// somebody removes it.
+        /// </summary>
+        public Boolean TrySwitchToNextKey([NotNullWhen(true)]  out String?  Id,
+                                          [NotNullWhen(false)] out String?  Error)
+
+            => TrySwitchToNextKey(out Id, out Error, out _);
+
+        /// <summary>
+        /// Present the announced next key from now on - and say whether a
+        /// refusal was the file's rather than the request's.
+        /// </summary>
+        /// <remarks>
+        /// Asked for, never done by itself: whether every charging station has
+        /// the next key pin by now is known to whoever handed it out - the CSMS,
+        /// or the technician - and not to this store. A station that has not is
+        /// refused at its next handshake.
+        ///
+        /// One file is written, the next key's: it stops being next and becomes
+        /// the current one from now on. The key it takes over from is current
+        /// no longer because the newer of the two is, so there is no moment at
+        /// which a half-written switch leaves two current keys or none.
+        /// </remarks>
+        /// <param name="NotSaved">True where the next key's file could not be written: nothing was switched.</param>
+        public Boolean TrySwitchToNextKey([NotNullWhen(true)]  out String?  Id,
+                                          [NotNullWhen(false)] out String?  Error,
+                                          out Boolean                       NotSaved)
+        {
+
+            Id        = null;
+            Error     = null;
+            NotSaved  = false;
+
+            String? before;
+
+            lock (updateLock)
+            {
+
+                var next = entries.Values.FirstOrDefault(entry => entry.IsNext);
+
+                if (next is null)
+                {
+                    Error = "No next key has been announced, so there is nothing to switch to.";
+                    return false;
+                }
+
+                if (next.Carrier is null || !next.CanBePresented)
+                {
+                    Error = $"The next key '{next.Id}' cannot be presented by this machine: {next.PresentationProblem ?? "it has no carrier certificate"}";
+                    return false;
+                }
+
+                before = Choose(TimeProvider.GetUtcNow(), out _)?.Id;
+
+                var now = TimeProvider.GetUtcNow();
+
+                // Never earlier than the current key's own moment: a clock that
+                // was set back would otherwise leave the old key the newer one.
+                var current = CurrentServerKey();
+
+                if (current?.CurrentSince is DateTimeOffset since && since >= now)
+                    now = since.AddTicks(1);
+
+                var switchedAt = now;
+
+                try
+                {
+                    RewriteMeta(next.Id, meta => {
+                        meta["next"]          = false;
+                        meta["currentSince"]  = switchedAt.ToString("o");
+                    });
+                }
+                catch (Exception e)
+                {
+                    Error     = $"The switch to '{next.Id}' could not be written to '{Path}': {e.Message}";
+                    NotSaved  = true;
+                    return false;
+                }
+
+                next.IsNext        = false;
+                next.CurrentSince  = now;
+
+                Id = next.Id;
+
+            }
+
+            OnNotice?.Invoke(
+                LogLevel.Notice,
+                $"The charging station server switched to the server key '{Id}'" +
+                (before is not null ? $", which takes over from '{before}'" : "") +
+                ". Charging stations that pinned only the key before are refused from their next handshake on."
+            );
 
             return true;
 
@@ -582,7 +996,9 @@ namespace cloud.charging.open.LocalController.OCPP
 
             if (!File.Exists(path))
             {
-                Error = $"The signing request of '{Id}' is no longer in '{Path}'.";
+                Error = File.Exists(FilePath(Id, "carrier.pem"))
+                            ? $"'{Id}' is a server key that charging stations pin; it was made without a signing request."
+                            : $"The signing request of '{Id}' is no longer in '{Path}'.";
                 return false;
             }
 
@@ -880,7 +1296,17 @@ namespace cloud.charging.open.LocalController.OCPP
                     return false;
                 }
 
-                if (!TrySetAside(Id, [ "key.pem", "csr.pem", "cert.pem", "json" ], leftOver, out var setAside, out var problem))
+                // Asked whether or not anything was presented yet: the current
+                // server key is what the next handshake presents, and taking it
+                // away would hand the stations that pinned it another key.
+                if (CurrentServerKey()?.Id == Id)
+                {
+                    Error = $"'{Id}' is the current server key, which the charging stations pinned. " +
+                             "Announce a next key, switch to it, then remove this one.";
+                    return false;
+                }
+
+                if (!TrySetAside(Id, [ "key.pem", "csr.pem", "cert.pem", "carrier.pem", "json" ], leftOver, out var setAside, out var problem))
                 {
                     Error     = $"'{Id}' could not be removed from '{Path}': {problem}";
                     NotSaved  = true;
@@ -930,6 +1356,12 @@ namespace cloud.charging.open.LocalController.OCPP
         /// being presented, and on a fresh start that is the one that expired
         /// most recently. See the remarks on this class for why that is better
         /// than presenting nothing.
+        ///
+        /// <b>Once a server key is current</b>, the rule is that key's: the
+        /// certificate an authority issued for it while that is valid, and its
+        /// carrier otherwise. Another key's certificate is not presented beside
+        /// it, however valid - a station that pinned the current key would be
+        /// shown a key it never heard of.
         /// </remarks>
         public ServerCertificateChain? Select()
         {
@@ -939,51 +1371,63 @@ namespace cloud.charging.open.LocalController.OCPP
             lock (updateLock)
             {
 
-                // Not merely "has a certificate": one this machine cannot
-                // present would turn every handshake into a failure, which is
-                // worse than the expired certificate below.
-                var usable = entries.Values.Where(entry => entry.Certificate is not null &&
-                                                           entry.CanBePresented).ToArray();
-
-                if (usable.Length == 0)
-                    return null;
-
-                var chosen = usable.Where(entry => entry.IsValidAt(now)).
-                                    OrderByDescending(entry => entry.NotBefore!.Value).
-                                    ThenByDescending (entry => entry.NotAfter!. Value).
-                                    ThenBy           (entry => entry.Certificate!.Thumbprint, StringComparer.Ordinal).
-                                    FirstOrDefault();
+                var chosen = Choose(now, out var presentedAs);
 
                 if (chosen is null)
+                    return null;
+
+                // Nothing valid, and something is going out already: it keeps
+                // going out, see above.
+                if (presentedAs == PresentedAsCertificate &&
+                    !chosen.IsValidAt(now) &&
+                    served is not null &&
+                    servedId == chosen.Id &&
+                    servedAs == presentedAs)
                 {
-
-                    // Nothing is valid. Keep whatever is already going out;
-                    // a restart in this state takes the one that lasted longest.
-                    if (served is not null)
-                        return served;
-
-                    chosen = usable.OrderByDescending(entry => entry.NotAfter!.Value).First();
-
-                    OnNotice?.Invoke(
-                        LogLevel.Critical,
-                        $"No server certificate is valid right now - by this controller's clock it is {now:yyyy-MM-dd HH:mm}'Z'. " +
-                        $"'{chosen.Certificate!.Subject}' (expired {chosen.NotAfter:yyyy-MM-dd}) is being presented anyway so that the " +
-                         "charging stations are not locked out. Upload a current certificate."
-                    );
-
+                    return served;
                 }
 
-                if (servedId != chosen.Id || served is null)
+                if (servedId != chosen.Id || servedAs != presentedAs || served is null)
                 {
 
-                    served    = new ServerCertificateChain(chosen.Certificate!, chosen.Intermediates.Cast<X509Certificate2>());
-                    servedId  = chosen.Id;
+                    if (presentedAs == PresentedAsCarrier)
+                    {
 
-                    OnNotice?.Invoke(
-                        LogLevel.Notice,
-                        $"The charging station server is now presenting '{chosen.Certificate!.Subject}' " +
-                        $"({chosen.Id}, valid until {chosen.NotAfter:yyyy-MM-dd}, {chosen.Intermediates.Count} intermediate(s))."
-                    );
+                        served    = new ServerCertificateChain(chosen.Carrier!, []);
+                        servedId  = chosen.Id;
+                        servedAs  = presentedAs;
+
+                        OnNotice?.Invoke(
+                            LogLevel.Notice,
+                            $"The charging station server is now presenting its server key '{chosen.Id}' in its carrier certificate, " +
+                            $"with the key pin {chosen.KeyPin}. Charging stations that pinned it check the key alone; " +
+                             "those that check chains need a certificate an authority issued for this key."
+                        );
+
+                    }
+
+                    else
+                    {
+
+                        if (!chosen.IsValidAt(now))
+                            OnNotice?.Invoke(
+                                LogLevel.Critical,
+                                $"No server certificate is valid right now - by this controller's clock it is {now:yyyy-MM-dd HH:mm}'Z'. " +
+                                $"'{chosen.Certificate!.Subject}' (expired {chosen.NotAfter:yyyy-MM-dd}) is being presented anyway so that the " +
+                                 "charging stations are not locked out. Upload a current certificate."
+                            );
+
+                        served    = new ServerCertificateChain(chosen.Certificate!, chosen.Intermediates.Cast<X509Certificate2>());
+                        servedId  = chosen.Id;
+                        servedAs  = presentedAs;
+
+                        OnNotice?.Invoke(
+                            LogLevel.Notice,
+                            $"The charging station server is now presenting '{chosen.Certificate!.Subject}' " +
+                            $"({chosen.Id}, valid until {chosen.NotAfter:yyyy-MM-dd}, {chosen.Intermediates.Count} intermediate(s))."
+                        );
+
+                    }
 
                 }
 
@@ -992,6 +1436,83 @@ namespace cloud.charging.open.LocalController.OCPP
             }
 
         }
+
+        #endregion
+
+        #region (private) Choose(Now, out PresentedAs) / CurrentServerKey()
+
+        /// <summary>
+        /// The entry whose certificate <see cref="Select"/> presents at the
+        /// given moment, and as which of its certificates - without presenting
+        /// it, and without saying anything. Called with the lock held.
+        /// </summary>
+        private ServerCertificateEntry? Choose(DateTimeOffset  Now,
+                                               out String?     PresentedAs)
+        {
+
+            PresentedAs = null;
+
+            #region A server key is current: its certificate while valid, its carrier otherwise
+
+            if (CurrentServerKey() is ServerCertificateEntry current)
+            {
+
+                PresentedAs = current.IsValidAt(Now)
+                                  ? PresentedAsCertificate
+                                  : PresentedAsCarrier;
+
+                return current;
+
+            }
+
+            #endregion
+
+            #region Keys with certificates alone, as before there were server keys
+
+            // Not merely "has a certificate": one this machine cannot present
+            // would turn every handshake into a failure, which is worse than
+            // the expired certificate below. And never a next key's, which is
+            // not presented before somebody switches to it.
+            var usable = entries.Values.Where(entry => !entry.IsNext &&
+                                                        entry.Certificate is not null &&
+                                                        entry.CanBePresented).ToArray();
+
+            if (usable.Length == 0)
+                return null;
+
+            PresentedAs = PresentedAsCertificate;
+
+            var chosen = usable.Where(entry => entry.IsValidAt(Now)).
+                                OrderByDescending(entry => entry.NotBefore!.Value).
+                                ThenByDescending (entry => entry.NotAfter!. Value).
+                                ThenBy           (entry => entry.Certificate!.Thumbprint, StringComparer.Ordinal).
+                                FirstOrDefault();
+
+            // Nothing is valid. Whatever is already going out keeps going out;
+            // a restart in this state takes the one that lasted longest.
+            return chosen
+                       ?? (servedId is not null && servedAs == PresentedAsCertificate && usable.FirstOrDefault(entry => entry.Id == servedId) is ServerCertificateEntry going
+                               ? going
+                               : usable.OrderByDescending(entry => entry.NotAfter!.Value).First());
+
+            #endregion
+
+        }
+
+        /// <summary>
+        /// The current server key: of the keys with a carrier that are not the
+        /// next one, the one that became current last - or null where there is
+        /// none. Called with the lock held.
+        /// </summary>
+        private ServerCertificateEntry? CurrentServerKey()
+
+            => entries.Values.Where(entry => !entry.IsNext &&
+                                              entry.Carrier is not null &&
+                                              entry.CanBePresented &&
+                                              entry.CurrentSince.HasValue).
+                              OrderByDescending(entry => entry.CurrentSince!.Value).
+                              ThenBy           (entry => entry.Id, StringComparer.Ordinal).
+                              FirstOrDefault();
 
         #endregion
 
@@ -1080,6 +1601,14 @@ namespace cloud.charging.open.LocalController.OCPP
             var now = TimeProvider.GetUtcNow();
 
             lock (updateLock)
+            {
+
+                // What the next handshake presents, rather than what the last
+                // one did: before the first station connects nothing was
+                // presented yet, and the key pin to hand out is known all the
+                // same.
+                var current  = Choose(now, out var presentedAs);
+                var next     = entries.Values.FirstOrDefault(entry => entry.IsNext);
 
                 return new JObject(
 
@@ -1087,9 +1616,27 @@ namespace cloud.charging.open.LocalController.OCPP
                     new JProperty("now",         now.ToString("o")),
                     new JProperty("servedId",    servedId),
 
+                    // The key pins a charging station is to pin, current key
+                    // first (EVQI Transport, key pins, 7.4).
+                    new JProperty("keyPins",     new JObject(
+                        new JProperty("current", current is null ? null : new JObject(
+                            new JProperty("id",         current.Id),
+                            new JProperty("keyPin",     current.KeyPin.ToHex()),
+                            new JProperty("createdAt",  current.CreatedAt.ToString("o")),
+                            new JProperty("presented",  presentedAs)
+                        )),
+                        new JProperty("next",    next is null ? null : new JObject(
+                            new JProperty("id",         next.Id),
+                            new JProperty("keyPin",     next.KeyPin.ToHex()),
+                            new JProperty("createdAt",  next.CreatedAt.ToString("o"))
+                        ))
+                    )),
+
                     new JProperty("entries",     new JArray(
                         entries.Values.OrderByDescending(entry => entry.CreatedAt).
-                                       Select(entry => entry.ToJSON(now, entry.Id == servedId))
+                                       Select(entry => entry.ToJSON(now,
+                                                                    entry.Id == servedId,
+                                                                    entry.Id == current?.Id ? presentedAs : null))
                     )),
 
                     new JProperty("algorithms",  new JArray(
@@ -1101,6 +1648,8 @@ namespace cloud.charging.open.LocalController.OCPP
                     new JProperty("canImportPrivateKeys", false)
 
                 );
+
+            }
 
         }
 
@@ -1124,11 +1673,13 @@ namespace cloud.charging.open.LocalController.OCPP
 
             #region What is known about the key
 
-            var algorithm  = DefaultAlgorithm;
-            var createdAt  = TimeProvider.GetUtcNow();
-            var subject    = "";
+            var algorithm     = DefaultAlgorithm;
+            var createdAt     = TimeProvider.GetUtcNow();
+            var subject       = "";
+            var isNext        = false;
+            var currentSince  = default(DateTimeOffset?);
 
-            var metaPath   = FilePath(Id, "json");
+            var metaPath      = FilePath(Id, "json");
 
             if (File.Exists(metaPath))
             {
@@ -1139,12 +1690,19 @@ namespace cloud.charging.open.LocalController.OCPP
 
                     algorithm  = meta.Value<String>("algorithm") ?? DefaultAlgorithm;
                     subject    = meta.Value<String>("subject")   ?? "";
+                    isNext     = meta.Value<Boolean?>("next")    ?? false;
 
                     if (DateTimeOffset.TryParse(meta.Value<String>("createdAt"),
                                                 System.Globalization.CultureInfo.InvariantCulture,
                                                 System.Globalization.DateTimeStyles.RoundtripKind,
                                                 out var parsed))
                         createdAt = parsed;
+
+                    if (DateTimeOffset.TryParse(meta.Value<String>("currentSince"),
+                                                System.Globalization.CultureInfo.InvariantCulture,
+                                                System.Globalization.DateTimeStyles.RoundtripKind,
+                                                out var since))
+                        currentSince = since;
 
                 }
                 catch (Exception e)
@@ -1203,7 +1761,61 @@ namespace cloud.charging.open.LocalController.OCPP
 
             PublicKey = publicKey;
 
-            var entry = new ServerCertificateEntry(Id, kind.Name, createdAt, subject);
+            var entry = new ServerCertificateEntry(Id, kind.Name, createdAt, subject, KeyPin.FromSubjectPublicKeyInfo(publicKey)) {
+                            IsNext        = isNext,
+                            CurrentSince  = currentSince
+                        };
+
+            #endregion
+
+            #region The carrier certificate, when it is a server key
+
+            var carrierPath = FilePath(Id, "carrier.pem");
+
+            if (File.Exists(carrierPath))
+            {
+
+                X509Certificate2 carrier;
+
+                try
+                {
+                    carrier = X509Certificate2.CreateFromPem(File.ReadAllText(carrierPath));
+                }
+                catch (Exception e)
+                {
+                    Error = $"'{carrierPath}' is not a certificate: {e.Message}";
+                    return false;
+                }
+
+                using (carrier)
+                {
+
+                    if (!carrier.PublicKey.ExportSubjectPublicKeyInfo().AsSpan().SequenceEqual(publicKey))
+                    {
+                        Error = $"'{carrierPath}' is the carrier of another key.";
+                        return false;
+                    }
+
+                    try
+                    {
+                        entry.Carrier = WithPrivateKey(carrier, privateKey);
+                    }
+                    catch (Exception e)
+                    {
+                        entry.CanBePresented      = false;
+                        entry.PresentationProblem = $"This machine cannot make a usable TLS certificate out of its {kind.Name} key: {e.Message}";
+                    }
+
+                }
+
+                if (entry.Carrier is not null &&
+                    !KeyAlgorithm.CanBePresented(kind.Id, entry.Carrier))
+                {
+                    entry.CanBePresented      = false;
+                    entry.PresentationProblem = $"{kind.Name} keys cannot be presented over TLS by this machine - the handshake fails.";
+                }
+
+            }
 
             #endregion
 
@@ -1540,6 +2152,121 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
+        #region (private static) CreateCarrier(KeyPair, Algorithm, Id)
+
+        /// <summary>
+        /// The self-signed carrier certificate of a server key, as PEM, and the
+        /// subject it was made out to.
+        /// </summary>
+        /// <remarks>
+        /// <b>Built to be harmless when it is misused.</b> Nothing in it but the
+        /// key is meant to be believed, so it claims as little as it can: no
+        /// authority (basicConstraints CA:FALSE, critical), no keyCertSign, a
+        /// digital signature for a TLS server and nothing else. A station that
+        /// installed it as a root rather than pinning its key cannot be made by
+        /// its key to trust a certificate it "issued" - provided the station's
+        /// TLS stack honours what is written here (EVQI Transport, key pins,
+        /// section 4, B0).
+        ///
+        /// A name that says what it is, and no subject alternative name: there
+        /// is no name it could be valid for that a station would check, and one
+        /// that looked like the controller's would invite checking it. Dated
+        /// from 1970 to 9999, for the same reason.
+        ///
+        /// Built by Bouncy Castle, as the signing requests are, so that every
+        /// kind of key in <see cref="Algorithms"/> gets one.
+        /// </remarks>
+        private static (String PEM, String Subject) CreateCarrier(AsymmetricCipherKeyPair  KeyPair,
+                                                                  KeyAlgorithm             Algorithm,
+                                                                  String                   Id)
+        {
+
+            var name       = new X509Name($"CN=Key pin carrier {Id},OU=Checked by its key pin only");
+            var generator  = new X509V3CertificateGenerator();
+
+            generator.SetSerialNumber(PKIFactory.RandomSerial());
+            generator.SetIssuerDN    (name);
+            generator.SetSubjectDN   (name);
+            generator.SetNotBefore   (CarrierNotBefore.UtcDateTime);
+            generator.SetNotAfter    (CarrierNotAfter. UtcDateTime);
+            generator.SetPublicKey   (KeyPair.Public);
+
+            generator.AddExtension(X509Extensions.BasicConstraints,      true,   new BasicConstraints(false));
+            generator.AddExtension(X509Extensions.KeyUsage,              true,   new KeyUsage(KeyUsage.DigitalSignature));
+            generator.AddExtension(X509Extensions.ExtendedKeyUsage,      false,  new ExtendedKeyUsage(KeyPurposeID.id_kp_serverAuth));
+
+            var carrier    = generator.Generate(new Asn1SignatureFactory(Algorithm.SignatureAlgorithm, KeyPair.Private));
+
+            using var loaded = X509CertificateLoader.LoadCertificate(carrier.GetEncoded());
+
+            return (PemEncoding.WriteString("CERTIFICATE", carrier.GetEncoded()) + Environment.NewLine,
+                    loaded.Subject);
+
+        }
+
+        #endregion
+
+        #region (private) MetaOf(...) / RewriteMeta(Id, Change)
+
+        /// <summary>
+        /// What is said of a server key beside it, as its file holds it.
+        /// </summary>
+        private static String MetaOf(String           Id,
+                                     String           Algorithm,
+                                     DateTimeOffset   CreatedAt,
+                                     String           Subject,
+                                     Boolean          IsNext,
+                                     DateTimeOffset?  CurrentSince)
+        {
+
+            var meta = new JObject(
+                           new JProperty("id",         Id),
+                           new JProperty("algorithm",  Algorithm),
+                           new JProperty("createdAt",  CreatedAt.ToString("o")),
+                           new JProperty("subject",    Subject),
+                           new JProperty("carrier",    true),
+                           new JProperty("next",       IsNext)
+                       );
+
+            if (CurrentSince.HasValue)
+                meta.Add("currentSince", CurrentSince.Value.ToString("o"));
+
+            return meta.ToString(Formatting.Indented) + Environment.NewLine;
+
+        }
+
+        /// <summary>
+        /// Change what is said of a key, as it stands in its file: read, changed
+        /// and written beside it, then moved over it in one step - so that a
+        /// write the disk ran out in leaves the file as it was rather than a key
+        /// nothing can be read about at the next start.
+        /// </summary>
+        private void RewriteMeta(String          Id,
+                                 Action<JObject> Change)
+        {
+
+            var path  = FilePath(Id, "json");
+            var meta  = File.Exists(path)
+                            ? JObject.Parse(File.ReadAllText(path))
+                            : new JObject(new JProperty("id", Id));
+
+            Change(meta);
+
+            try
+            {
+                WriteFile(FilePath(Id, "json.tmp"), meta.ToString(Formatting.Indented) + Environment.NewLine);
+                File.Move(FilePath(Id, "json.tmp"), path, overwrite: true);
+            }
+            catch
+            {
+                Forget(Id, "json.tmp");
+                throw;
+            }
+
+        }
+
+        #endregion
+
         #region (private) FilePath / Known / CreateDirectory / Complain / WriteFile
 
         private String FilePath(String Id, String Extension)
@@ -1725,6 +2452,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 served    = null;
                 servedId  = null;
+                servedAs  = null;
 
             }
         }

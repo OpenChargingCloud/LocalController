@@ -227,6 +227,10 @@ export const stationLoginsPage: Page = {
                             <input type="checkbox" name="sshkey" ?checked=${ticked('sshkey')} />
                             <span>An SSH key (OCPP over SSH - no security profile, so the profiles below are not asked)</span>
                         </label>
+                        <label class="check">
+                            <input type="checkbox" name="keypin" ?checked=${ticked('keypin')} />
+                            <span>A key pin of a TLS client key (security profile 3, without a certificate authority)</span>
+                        </label>
                     </fieldset>
 
                     <fieldset>
@@ -373,6 +377,43 @@ export const stationLoginsPage: Page = {
 
                     </form>
 
+                    <h3>A key pin, for a TLS client key</h3>
+
+                    <p class="hint">
+                        SHA-256 over the station's public key, as the station shows it at commissioning: 64 hexadecimal
+                        digits, with or without colons, or <code>sha256//</code> and base64. The station is let in by
+                        that key alone, in whatever certificate it wraps it - only on its own path, and as nobody the
+                        certificate names. A station with key pins is not let in by a certificate authority's
+                        certificate in its name. A station that is not listed yet is added with it. One key is one
+                        charging station.
+                    </p>
+
+                    <form id="keypin-form" class="form-row" @submit=${addKeyPin}>
+
+                        <label>Identification
+                            <input type="text" name="id" placeholder="cs001" maxlength="48"
+                                   ?disabled=${!mayChange} required />
+                        </label>
+
+                        <label>Its key pin
+                            <input type="text" name="pin" placeholder="64 hexadecimal digits" maxlength="200"
+                                   ?disabled=${!mayChange} required />
+                        </label>
+
+                        <label>Called
+                            <input type="text" name="label" placeholder="bay 1" maxlength="200"
+                                   ?disabled=${!mayChange} />
+                        </label>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn primary" ?disabled=${!mayChange}>
+                                Let it in by the pin
+                            </button>
+                            <span id="keypin-error" class="form-error" role="alert"></span>
+                        </div>
+
+                    </form>
+
                 </section>
             `;
 
@@ -418,7 +459,10 @@ export const stationLoginsPage: Page = {
                         ${station.hasSSHKey
                               ? html`<span class="badge ${usable('sshkey') ? '' : 'warn'}">SSH key</span> `
                               : nothing}
-                        ${!station.hasPassword && !station.hasTOTP && !station.hasSSHKey
+                        ${station.hasKeyPin
+                              ? html`<span class="badge ${usable('keypin') ? '' : 'warn'}">key pin</span> `
+                              : nothing}
+                        ${!station.hasPassword && !station.hasTOTP && !station.hasSSHKey && !station.hasKeyPin
                               ? html`<span class="badge">certificate only</span>`
                               : nothing}
                         ${station.totp
@@ -440,6 +484,22 @@ export const stationLoginsPage: Page = {
                           `)}
                         ${station.hasSSHKey && !usable('sshkey')
                               ? html`<div class="small warn">its group does not accept SSH keys</div>`
+                              : nothing}
+                        ${(station.keyPins ?? []).map(keyPin => html`
+                              <div class="small muted station-keypin" data-id="${station.id}" data-pin="${keyPin.pin}">
+                                  <code class="keypin">${keyPin.pin}</code>${keyPin.label ? ` - ${keyPin.label}` : ''}
+                                  <button type="button" class="btn small station-keypin-remove"
+                                          data-id="${station.id}" data-pin="${keyPin.pin}"
+                                          ?disabled=${!mayChange} @click=${() => void dropKeyPin(station.id, keyPin.pin)}>
+                                      Take away
+                                  </button>
+                              </div>
+                          `)}
+                        ${station.hasKeyPin && !usable('keypin')
+                              ? html`<div class="small warn">its group does not accept key pins</div>`
+                              : nothing}
+                        ${station.hasKeyPin && usable('keypin') && group?.securityProfiles.includes(3) === false
+                              ? html`<div class="small warn">its group does not accept security profile 3, which a client key is</div>`
                               : nothing}
                     </td>
 
@@ -517,6 +577,7 @@ export const stationLoginsPage: Page = {
             if (ticked('totp'))         methods.push('totp');
             if (ticked('certificate'))  methods.push('certificate');
             if (ticked('sshkey'))       methods.push('sshkey');
+            if (ticked('keypin'))       methods.push('keypin');
 
             const profiles: number[] = [];
 
@@ -646,6 +707,58 @@ export const stationLoginsPage: Page = {
                 if (!cancelled)
                     error.textContent = errorMessage(problem);
             }
+
+        }
+
+
+        function addKeyPin(event: SubmitEvent): void {
+
+            event.preventDefault();
+
+            void tellKeyPin(event.currentTarget as HTMLFormElement);
+
+        }
+
+
+        async function tellKeyPin(form: HTMLFormElement): Promise<void> {
+
+            const error = must<HTMLElement>(content, '#keypin-error');
+            error.textContent = '';
+
+            try
+            {
+
+                // As for an SSH key: the group and the note are the station
+                // form's business.
+                const answer = await api.ocppServer.stations.addKeyPin(
+                                   field(form, 'id'), field(form, 'pin'), field(form, 'label', false), '', '');
+
+                if (cancelled)
+                    return;
+
+                store     = answer.stations;
+                justMade  = null;
+
+                draw();
+
+                form.reset();
+
+            }
+            catch (problem)
+            {
+                if (!cancelled)
+                    error.textContent = errorMessage(problem);
+            }
+
+        }
+
+
+        async function dropKeyPin(id: string, pin: string): Promise<void> {
+
+            if (!window.confirm(`Take the key pin ${pin} away from '${id}'?\n\nA connection it let in stays open; the next one is refused.`))
+                return;
+
+            await change(() => api.ocppServer.stations.removeKeyPin(id, pin));
 
         }
 

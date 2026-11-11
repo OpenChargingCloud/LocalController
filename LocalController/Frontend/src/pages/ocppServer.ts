@@ -227,7 +227,8 @@ export const ocppServerPage: Page = {
                                   <div class="notice warn">
                                       Profile 2 or 3 is allowed, but there is no server certificate - so this port is
                                       <strong>not encrypted</strong> and only profile 1 can be used on it.
-                                      <a href="${toURL('/configuration/ocpp-server/certificates')}">Make a signing request</a>.
+                                      <a href="${toURL('/configuration/ocpp-server/certificates')}">Make a signing request, or a server key
+                                      for the stations to pin</a>.
                                   </div>
                               `
                               : nothing}
@@ -236,8 +237,8 @@ export const ocppServerPage: Page = {
                               ? html`
                                   <div class="notice warn">
                                       Profile 3 is allowed, but no certificate authority has been named to accept
-                                      charging stations from, so none can connect with a certificate. An empty list
-                                      is "nobody", not "everybody" &mdash;
+                                      charging stations from, so none can connect with a certificate - unless it is
+                                      let in by a key pin listed for it. An empty list is "nobody", not "everybody" &mdash;
                                       <a href="${toURL('/configuration/ocpp-server/trust')}">name one</a>.
                                   </div>
                               `
@@ -476,6 +477,16 @@ export const ocppServerPage: Page = {
 
                         <dt>Stations connect to</dt>
                         <dd><code>${configuration.state.url}</code></dd>
+
+                        ${configuration.state.keyPin ? html`
+                            <dt>Key pin</dt>
+                            <dd><code class="keypin" id="state-keypin">${configuration.state.keyPin}</code></dd>
+                        ` : nothing}
+
+                        ${configuration.state.keyPin && configuration.state.nextKeyPin ? html`
+                            <dt>Next key pin</dt>
+                            <dd><code class="keypin" id="state-next-keypin">${configuration.state.nextKeyPin}</code></dd>
+                        ` : nothing}
 
                         <dt>Connected</dt>
                         <dd>${configuration.state.connections}</dd>

@@ -339,6 +339,131 @@ namespace cloud.charging.open.LocalController.Tests
         #endregion
 
 
+        #region ServerKeys_AreMadeShownAndSwitched_AtTheConsole()
+
+        /// <summary>
+        /// The server key the stations pin, at the console: none to begin with,
+        /// then made and shown with its pin, a next one announced beside it,
+        /// and switched to - and a second server key in the place of the first
+        /// refused.
+        /// </summary>
+        [Test]
+        public async Task ServerKeys_AreMadeShownAndSwitched_AtTheConsole()
+        {
+
+            var lc        = AController();
+            using var cli = new ControllerCLI(lc);
+
+            var none      = await cli.Execute("serverKeys");
+            var made      = await cli.Execute("serverKeys create");
+            var current   = lc.ServerCertificates.CurrentKey!;
+            var listed    = await cli.Execute("serverKeys list");
+            var again     = await cli.Execute("serverKeys create");
+            var announced = await cli.Execute("serverKeys next");
+            var next      = lc.ServerCertificates.NextKey!;
+            var both      = await cli.Execute("serverKeys");
+            var switched  = await cli.Execute("serverKeys switch");
+            var unknown   = await cli.Execute("serverKeys rotate");
+
+            Assert.Multiple(() => {
+
+                Assert.That(none.First(),       Does.StartWith("No key is presented to the charging stations."));
+                Assert.That(made.First(),       Is.EqualTo($"key pin       {current.KeyPin}  {current.Id}"));
+                Assert.That(listed.First(),     Does.StartWith($"key pin       {current.KeyPin}  {current.Id}").And.EndWith("in its carrier certificate"));
+                Assert.That(again.Single(),     Does.StartWith("No key was made: ").And.Contain("Announce the new key as the next one"));
+                Assert.That(announced.First(),  Is.EqualTo($"next key pin  {next.KeyPin}  {next.Id}"));
+                Assert.That(both,               Has.Some.StartWith($"key pin       {current.KeyPin}"));
+                Assert.That(both,               Has.Some.StartWith($"next key pin  {next.KeyPin}"));
+                Assert.That(switched.First(),   Does.Contain($"'{next.Id}'").And.Contain($"{next.KeyPin}"));
+                Assert.That(lc.ServerCertificates.CurrentKey?.Id, Is.EqualTo(next.Id));
+                Assert.That(unknown.Single(),   Does.StartWith("Usage: serverKeys "));
+
+                lock (said)
+                    Assert.That(said,           Has.Some.EqualTo($"Somebody at the command line had this local controller generate the server key '{current.Id}' with the key pin {current.KeyPin}."));
+
+            });
+
+        }
+
+        #endregion
+
+        #region StationPins_AreGivenListedAndTakenAway_AtTheConsole()
+
+        /// <summary>
+        /// A key pin given to a station that is not listed yet lists it, is
+        /// listed with who gave it, is refused for a second station, and is
+        /// taken away in another notation than it was given in.
+        /// </summary>
+        [Test]
+        public async Task StationPins_AreGivenListedAndTakenAway_AtTheConsole()
+        {
+
+            var lc        = AController();
+            using var cli = new ControllerCLI(lc);
+
+            using var key = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+            var pin       = KeyPin.FromKey(key);
+
+            var added     = await cli.Execute($"stationPins cs001 add {pin.ToHexWithColons()} bay 1");
+            var listed    = await cli.Execute("stationPins cs001");
+            var every     = await cli.Execute("stationPins");
+            var twice     = await cli.Execute($"stationPins cs002 add {pin}");
+            var notAPin   = await cli.Execute("stationPins cs002 add SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU");
+            var removed   = await cli.Execute($"stationPins cs001 remove {pin.ToCurl()}");
+            var gone      = await cli.Execute($"stationPins cs001 remove {pin}");
+
+            Assert.Multiple(() => {
+
+                Assert.That(added.First(),     Is.EqualTo($"'cs001' is a charging station of this local controller now, in the group 'default', and is let in by the key pin {pin}."));
+                Assert.That(listed.First(),    Does.StartWith(pin.ToHex()).And.Contain(" by the console").And.EndWith("bay 1"));
+                Assert.That(every.First(),     Is.EqualTo("cs001:"));
+                Assert.That(twice.Single(),    Does.StartWith("The key pin was not given: ").And.Contain("already lets the charging station 'cs001' in"));
+                Assert.That(notAPin.Single(),  Does.StartWith("The key pin was not given: "));
+                Assert.That(removed,           Is.EqualTo(new[] { $"The key pin {pin} lets 'cs001' in no more." }));
+                Assert.That(gone,              Is.EqualTo(new[] { $"'cs001' has no key pin {pin}." }));
+                Assert.That(lc.StationLogins.TryGet("cs002", out _), Is.False);
+
+                lock (said)
+                    Assert.That(said,          Has.Some.EqualTo($"Somebody at the command line gave the charging station 'cs001' the key pin {pin}."));
+
+            });
+
+        }
+
+        #endregion
+
+        #region KeyPins_OverSSH_AskWhatTheWebInterfaceAsks()
+
+        /// <summary>
+        /// Over SSH a CPO may read the server key and give a station a key pin,
+        /// as the web interface lets one - and may not make a server key, which
+        /// is the certificates' business and not the site's.
+        /// </summary>
+        [Test]
+        public async Task KeyPins_OverSSH_AskWhatTheWebInterfaceAsks()
+        {
+
+            await AStartedController();
+
+            using var cpo = await OverSSHAs("cleo", "cpo");
+
+            var looked    = await cpo.Execute("serverKeys");
+            var refused   = await cpo.Execute("serverKeys create");
+            var given     = await cpo.Execute($"stationPins cs001 add {new String('a', 64)}");
+
+            Assert.Multiple(() => {
+                Assert.That(looked.First(),    Does.StartWith("No key is presented"));
+                Assert.That(refused.Single(),  Does.StartWith("'cleo' may not do that here: it needs the "));
+                Assert.That(controller!.ServerCertificates.Entries, Is.Empty);
+                Assert.That(given.First(),     Does.StartWith("'cs001' is a charging station of this local controller now"));
+                Assert.That(controller.StationLogins.TryGet("cs001", out var login) && login.Pins.Single().AddedBy == "cleo", Is.True);
+            });
+
+        }
+
+        #endregion
+
+
         #region OpenADR_TakesInTheCredentialsAtTheConsole_AndAsks()
 
         /// <summary>
