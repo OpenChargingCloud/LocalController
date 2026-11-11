@@ -36,6 +36,7 @@ using cloud.charging.open.protocols.WWCP.Node.Configuration;
 using cloud.charging.open.protocols.WWCP.Node.SecureShell;
 
 using cloud.charging.open.LocalController.Configuration;
+using cloud.charging.open.LocalController.CommandLine;
 using cloud.charging.open.LocalController.Web;
 
 #endregion
@@ -352,6 +353,16 @@ namespace cloud.charging.open.LocalController
 
             // And the grid operator's VTN. Nothing is asked yet: Start() does.
             BuildOpenADRConnection(configuration.OpenADR);
+
+            #endregion
+
+            #region What somebody signed in over SSH gets
+
+            // A local controller's command line, with its commands beside the
+            // node's - whichever program runs this controller, and not only
+            // LocalControllerCLI. Before the node starts, as the node asks; a
+            // program with a command line of its own sets another after this.
+            CommandLines = (terminal, caller) => new ControllerCLI(this, terminal, caller);
 
             #endregion
 
