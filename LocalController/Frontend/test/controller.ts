@@ -35,7 +35,7 @@ export function anOCPPServer(): OCPPServerConfiguration {
         pingEverySeconds:            60,
         logging:                     { connections: true, authentication: true, messages: false, payloads: false,
                                        payloadsUntil: null, payloadsNow: false, pings: false },
-        ssh:                         { enabled: false, subprotocols: null, maxMessageSize: 16777216, pingEverySeconds: 30,
+        ssh:                         { enabled: false, subprotocols: null, maxMessageSize: 67108864, pingEverySeconds: 30,
                                        subsystem: 'ocpp@open.charging.cloud',
                                        state: { served: false, sshServer: true, url: 'ssh://lc001.example.org:22',
                                                 hostKey: 'ssh-ed25519 SHA256:bm90IGEgcmVhbCBrZXkgYXQgYWxsLCBqdXN0IGZvcg',

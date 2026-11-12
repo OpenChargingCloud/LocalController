@@ -75,10 +75,12 @@ namespace cloud.charging.open.LocalController.Configuration
         public const String  Path                   = OCPPServerConfiguration.SectionName + "." + FieldName;
 
         /// <summary>
-        /// The largest OCPP message, when nothing says otherwise: what the SSH
-        /// message protocol takes by default.
+        /// The largest OCPP message, when nothing says otherwise: 64 MiB, what
+        /// the SSH message protocol takes by default and what a WebSocket
+        /// takes, so that a message that got in over one gets out over the
+        /// other.
         /// </summary>
-        public const UInt32  DefaultMaxMessageSize  = 16 * 1024 * 1024;
+        public const UInt32  DefaultMaxMessageSize  = 64 * 1024 * 1024;
 
         /// <summary>
         /// The smallest and the largest that may be configured: no less than
