@@ -63,13 +63,40 @@ namespace cloud.charging.open.LocalController
 
             var policy = Node.OCPP.SignaturePolicy;
 
-            policy.IncomingDirection  ??= "CSMS->CS";
-            policy.PermissionsOfRole  ??= PermissionsOfRole;
+            policy.IncomingDirection    ??= "CSMS->CS";
+            policy.PermissionsOfRole    ??= PermissionsOfRole;
+
+            // The entries of SetVariables and GetVariables are decided one by one,
+            // by the node (ActionsDecidedPerEntry), each by its component's resource.
+            policy.ResourceOfComponent    = ResourceOfComponent;
 
             if (!policy.ActionPermissions.Any())
                 policy.AddActionPermissions(LocalControllerActionPermissions.Default());
 
         }
+
+        #endregion
+
+        #region (private static) ResourceOfComponent(Component)
+
+        /// <summary>
+        /// The resource of this controller's role model a component of its own
+        /// device model belongs to.
+        /// </summary>
+        /// <remarks>
+        /// The name servers and the time are "dns" and "nts", as for every node.
+        /// EVQICtrlr is the keys of the station port, whose switch changes whom
+        /// every station of the site trusts - a trust decision, as a change of
+        /// the certificates is: "certificates". TLSClientController is the line
+        /// up to the CSMS: "csms", as SetNetworkProfile.
+        /// </remarks>
+        private static String ResourceOfComponent(String Component)
+
+            => Component switch {
+                   "EVQICtrlr"            => NodeResources.Certificates,
+                   "TLSClientController"  => LocalControllerAccess.CSMS,
+                   _                      => protocols.WWCP.SignaturePolicy.DefaultResourceOfComponent(Component)
+               };
 
         #endregion
 

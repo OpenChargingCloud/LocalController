@@ -329,6 +329,10 @@ namespace cloud.charging.open.LocalController
 
             #region The OCPP node
 
+            // What OCPP shows of the name servers and the time servers follows
+            // this node from now on, whichever OCPP node is given it below.
+            deviceModelBridge = NewDeviceModelBridge();
+
             lc01 = BuildOCPPNode(this.OCPP);
 
             // What only the CSMS asks - InstallSSHKey, SetVariables, Reset and the
@@ -348,6 +352,10 @@ namespace cloud.charging.open.LocalController
             // The cards of the stations are the CSMS's to decide on: sent on,
             // and not answered by the node's own list of stations.
             BuildAuthorization();
+
+            // The name servers and the time servers, as a charging station shows
+            // them: DNSClientController, ClockCtrlr, NTPController and theirs.
+            deviceModelBridge.Configure(lc01);
 
             // "this." and not for tidiness: the parameters of this constructor
             // shadow the properties of the same name, and the "Log" parameter

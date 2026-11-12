@@ -266,11 +266,13 @@ namespace cloud.charging.open.LocalController
             /// controller itself). Refused then with "NotAuthorized", as a request without that right.
             /// </para>
             /// <para>
-            /// Not checked yet, by decision: signed messages to the local controller are not built, so
-            /// every SetVariables that reaches this node over its line up to the CSMS may switch - one
-            /// from a station connected to it never gets here, see CSMSOnlyActions - and
-            /// only to the announced next key, which EVQICtrlr and the store both hold it to. The request
-            /// is handed over whole, with its network path and its signatures, for the day it is.
+            /// Checked before it gets here: the node's signature policy decides each entry of a
+            /// SetVariables by the resource of its component, and EVQICtrlr is "certificates"
+            /// (LocalController.SignaturePolicy.cs) - in the mode "Enforce" an entry whose signers may not
+            /// "certificates:edit" is refused with "NotAuthorized" and never reaches the switch. In the
+            /// mode "Off", the default, every SetVariables that reaches this node over its line up to the
+            /// CSMS may switch - one from a station connected to it never gets here, see CSMSOnlyActions -
+            /// and only to the announced next key, which EVQICtrlr and the store both hold it to.
             /// </para>
             /// </remarks>
             private static OCPPv2_1.StatusInfo? RefusalOfTheRight(OCPPv2_1.CSMS.SetVariablesRequest? Request)
