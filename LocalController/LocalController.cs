@@ -334,6 +334,10 @@ namespace cloud.charging.open.LocalController
             AttachSSHKeyMessages(lc01);
             AttachSignaturePolicy(lc01);
 
+            // The cards of the stations are the CSMS's to decide on: sent on,
+            // and not answered by the node's own list of stations.
+            BuildAuthorization();
+
             // "this." and not for tidiness: the parameters of this constructor
             // shadow the properties of the same name, and the "Log" parameter
             // is null whenever the caller did not bring an event log of its own.
