@@ -233,7 +233,7 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.That(await lc.PollOpenADR(), Is.Null);
             Assert.That(vtn.TokenRequests, Is.EqualTo(1));
 
-            var expires = lc.OpenADRToken.Expires;
+            var expires = lc.OpenADRToken.Expires ?? throw new AssertionException("The first poll left no token that expires.");
 
             clock.Advance(TimeSpan.FromMinutes(50));
 

@@ -65,24 +65,34 @@ namespace cloud.charging.open.LocalController
                                                                                  new OCPPv2_1.StatusInfo("NotSupported", "This local controller lets its stations in over SSH for OCPP only."),
                                                                                  HostKeys: HostKeyFingerprints));
 
-                var installed = StationLogins.TryAddSSHKey(request.NetworkingNodeId.ToString(),
-                                                           request.PublicKey,
-                                                           "Installed by the CSMS",
-                                                           null,
-                                                           null,
-                                                           $"OCPP {request.NetworkPath.Source}",
-                                                           out _,
-                                                           out var error);
+                if (!StationLogins.TryAddSSHKey(request.NetworkingNodeId.ToString(),
+                                                request.PublicKey,
+                                                "Installed by the CSMS",
+                                                null,
+                                                null,
+                                                $"OCPP {request.NetworkPath.Source}",
+                                                out _,
+                                                out var error))
+                {
 
-                Log.Log(installed ? protocols.WWCP.Node.Logging.LogLevel.Info : protocols.WWCP.Node.Logging.LogLevel.Warning,
-                        installed
-                            ? $"The CSMS installed an SSH key for the charging station '{request.NetworkingNodeId}'."
-                            : $"The CSMS's SSH key for the charging station '{request.NetworkingNodeId}' was not taken: {error}",
+                    Log.Log(protocols.WWCP.Node.Logging.LogLevel.Warning,
+                            $"The CSMS's SSH key for the charging station '{request.NetworkingNodeId}' was not taken: {error}",
+                            "ocpp", "station", "ssh");
+
+                    return Task.FromResult(new OCPPv2_1.CS.InstallSSHKeyResponse(request,
+                                                                                 OCPPv2_1.GenericStatus.Rejected,
+                                                                                 new OCPPv2_1.StatusInfo(ReasonOf(error), error),
+                                                                                 HostKeys: HostKeyFingerprints));
+
+                }
+
+                Log.Log(protocols.WWCP.Node.Logging.LogLevel.Info,
+                        $"The CSMS installed an SSH key for the charging station '{request.NetworkingNodeId}'.",
                         "ocpp", "station", "ssh");
 
                 return Task.FromResult(new OCPPv2_1.CS.InstallSSHKeyResponse(request,
-                                                                             installed ? OCPPv2_1.GenericStatus.Accepted : OCPPv2_1.GenericStatus.Rejected,
-                                                                             installed ? null : new OCPPv2_1.StatusInfo(ReasonOf(error), error),
+                                                                             OCPPv2_1.GenericStatus.Accepted,
+                                                                             null,
                                                                              HostKeys: HostKeyFingerprints));
 
             };
