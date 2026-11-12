@@ -109,6 +109,11 @@ the session it opened at once. Which OCPP versions are offered is the
 WebSocket port's, unless `subprotocols` beside `enabled` says otherwise;
 `maxMessageSize` and `pingEverySeconds` there too wait for the next start.
 
+The whole way from both ends, step by step - the options of a key, the
+settings and what to look at when a station does not connect - is in
+[Charging stations over SSH: a walk-through](https://github.com/OpenChargingCloud/LocalControllerCLI/blob/master/docs/Charging-stations-over-SSH.md)
+of LocalControllerCLI.
+
 The grid operator the charging pool is connected behind may limit it over
 OpenADR 3: the controller is then a VEN of the grid operator's VTN, as the
 `openADR` section says - `"openADR": { "enabled": true, "vtnURL":
