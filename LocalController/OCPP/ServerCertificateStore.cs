@@ -254,6 +254,22 @@ namespace cloud.charging.open.LocalController.OCPP
         }
 
         /// <summary>
+        /// The key presented now, or at the next handshake, and the announced
+        /// next key, as one pair: read together, so that a switch in between
+        /// cannot show the key before it beside no next key, or the new current
+        /// key as the next one as well.
+        /// </summary>
+        /// <param name="Next">The announced next key, or null where none was made.</param>
+        public ServerCertificateEntry? GetCurrentAndNextKey(out ServerCertificateEntry? Next)
+        {
+            lock (updateLock)
+            {
+                Next = entries.Values.FirstOrDefault(entry => entry.IsNext);
+                return Choose(TimeProvider.GetUtcNow(), out _);
+            }
+        }
+
+        /// <summary>
         /// The announced next key, or null where none was made.
         /// </summary>
         public ServerCertificateEntry? NextKey
@@ -317,6 +333,18 @@ namespace cloud.charging.open.LocalController.OCPP
         /// is logged at stays the decision of the thing that owns the log.
         /// </remarks>
         public event Action<LogLevel, String>? OnNotice;
+
+        /// <summary>
+        /// The charging station server switched to its announced next key -
+        /// whoever asked for it, the command line, the web page or the CSMS:
+        /// the key pin presented before, where there was one, and the one
+        /// presented from now on.
+        /// </summary>
+        /// <remarks>
+        /// Raised once the switch is written, outside the lock: what it sets
+        /// off may read this store again.
+        /// </remarks>
+        public event Action<KeyPin?, KeyPin>? OnSwitched;
 
         #endregion
 
@@ -869,7 +897,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region TrySwitchToNextKey(out Id, out Error [, out NotSaved])
+        #region TrySwitchToNextKey([IfNextKeyPinIs,] out Id, out Error [, out NotSaved])
 
         /// <summary>
         /// Present the announced next key from now on: it becomes the current
@@ -879,11 +907,23 @@ namespace cloud.charging.open.LocalController.OCPP
         public Boolean TrySwitchToNextKey([NotNullWhen(true)]  out String?  Id,
                                           [NotNullWhen(false)] out String?  Error)
 
-            => TrySwitchToNextKey(out Id, out Error, out _);
+            => TrySwitchToNextKey(null, out Id, out Error, out _);
 
         /// <summary>
         /// Present the announced next key from now on - and say whether a
         /// refusal was the file's rather than the request's.
+        /// </summary>
+        /// <param name="NotSaved">True where the next key's file could not be written: nothing was switched.</param>
+        public Boolean TrySwitchToNextKey([NotNullWhen(true)]  out String?  Id,
+                                          [NotNullWhen(false)] out String?  Error,
+                                          out Boolean                       NotSaved)
+
+            => TrySwitchToNextKey(null, out Id, out Error, out NotSaved);
+
+        /// <summary>
+        /// Present the announced next key from now on, where it is still the
+        /// key with the given key pin - and say whether a refusal was the
+        /// file's rather than the request's.
         /// </summary>
         /// <remarks>
         /// Asked for, never done by itself: whether every charging station has
@@ -891,13 +931,21 @@ namespace cloud.charging.open.LocalController.OCPP
         /// or the technician - and not to this store. A station that has not is
         /// refused at its next handshake.
         ///
+        /// <b>Compare and switch.</b> Whoever names the pin - the CSMS, which
+        /// handed exactly that pin to its stations - gets that key or nothing:
+        /// the next key is compared under the same lock that switches, so a
+        /// switch and a new next key made meanwhile on the command line cannot
+        /// make it a switch to a key nobody handed out.
+        ///
         /// One file is written, the next key's: it stops being next and becomes
         /// the current one from now on. The key it takes over from is current
         /// no longer because the newer of the two is, so there is no moment at
         /// which a half-written switch leaves two current keys or none.
         /// </remarks>
+        /// <param name="IfNextKeyPinIs">The key pin the announced next key has to have; whichever it has where null.</param>
         /// <param name="NotSaved">True where the next key's file could not be written: nothing was switched.</param>
-        public Boolean TrySwitchToNextKey([NotNullWhen(true)]  out String?  Id,
+        public Boolean TrySwitchToNextKey(KeyPin?                           IfNextKeyPinIs,
+                                          [NotNullWhen(true)]  out String?  Id,
                                           [NotNullWhen(false)] out String?  Error,
                                           out Boolean                       NotSaved)
         {
@@ -907,6 +955,8 @@ namespace cloud.charging.open.LocalController.OCPP
             NotSaved  = false;
 
             String? before;
+            KeyPin? beforePin;
+            KeyPin  afterPin;
 
             lock (updateLock)
             {
@@ -919,13 +969,23 @@ namespace cloud.charging.open.LocalController.OCPP
                     return false;
                 }
 
+                if (IfNextKeyPinIs is not null && next.KeyPin != IfNextKeyPinIs)
+                {
+                    Error = $"The announced next key is '{next.Id}' with the key pin {next.KeyPin}, not the key with the key pin {IfNextKeyPinIs}.";
+                    return false;
+                }
+
                 if (next.Carrier is null || !next.CanBePresented)
                 {
                     Error = $"The next key '{next.Id}' cannot be presented by this machine: {next.PresentationProblem ?? "it has no carrier certificate"}";
                     return false;
                 }
 
-                before = Choose(TimeProvider.GetUtcNow(), out _)?.Id;
+                var presented  = Choose(TimeProvider.GetUtcNow(), out _);
+
+                before         = presented?.Id;
+                beforePin      = presented?.KeyPin;
+                afterPin       = next.KeyPin;
 
                 var now = TimeProvider.GetUtcNow();
 
@@ -965,6 +1025,8 @@ namespace cloud.charging.open.LocalController.OCPP
                 (before is not null ? $", which takes over from '{before}'" : "") +
                 ". Charging stations that pinned only the key before are refused from their next handshake on."
             );
+
+            OnSwitched?.Invoke(beforePin, afterPin);
 
             return true;
 

@@ -26,6 +26,8 @@ using cloud.charging.open.protocols.WWCP.Node.Configuration;
 
 using org.GraphDefined.Vanaheimr.Hermod;
 
+using WWCPNetworkingMode = cloud.charging.open.protocols.WWCP.NetworkingNode.NetworkingMode;
+
 #endregion
 
 namespace cloud.charging.open.LocalController.Configuration
@@ -67,6 +69,7 @@ namespace cloud.charging.open.LocalController.Configuration
     /// <param name="ReconnectInitialDelay">How long to wait before the first attempt to dial again.</param>
     /// <param name="ReconnectMaxDelay">The longest the waiting between attempts may grow to.</param>
     /// <param name="ClientCertificate">The TLS identity of this controller's certificate store it signs in with under security profile 3, by its handle; empty for none, and null where nothing was said.</param>
+    /// <param name="NetworkingMode">How the messages on the line carry where they go and where they come from: in the plain OCPP frame (standard), or in the frame of the overlay network, which names both.</param>
     public sealed record CSMSConfiguration(Boolean?                Enabled                      = null,
                                            String?                 URL                          = null,
                                            Byte?                   SecurityProfile              = null,
@@ -78,7 +81,8 @@ namespace cloud.charging.open.LocalController.Configuration
                                            TimeSpan?               RequestTimeout               = null,
                                            TimeSpan?               ReconnectInitialDelay        = null,
                                            TimeSpan?               ReconnectMaxDelay            = null,
-                                           String?                 ClientCertificate            = null)
+                                           String?                 ClientCertificate            = null,
+                                           WWCPNetworkingMode?     NetworkingMode               = null)
     {
 
         #region Data
@@ -150,6 +154,40 @@ namespace cloud.charging.open.LocalController.Configuration
         /// </summary>
         public const Int32  MaxHandleLength      = 64;
 
+        /// <summary>
+        /// How the networking mode is written in the file: the plain OCPP frame.
+        /// </summary>
+        public const String  StandardMode        = "standard";
+
+        /// <summary>
+        /// How the networking mode is written in the file: the frame of the
+        /// overlay network, which names where a message goes and where it comes
+        /// from.
+        /// </summary>
+        public const String  OverlayMode         = "overlay";
+
+        /// <summary>
+        /// The networking mode of the line when nothing says otherwise.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The overlay network, as decided on 2026-11-12: a controller exists for
+        /// the stations behind it, and only in the overlay network does the CSMS
+        /// see them - each by its own name, each reachable, each handed its key
+        /// pins.
+        /// </para>
+        /// <para>
+        /// In standard mode a frame names neither where it goes nor where it
+        /// comes from, so everything the CSMS sends down this line is taken for
+        /// this controller's own, and everything a station behind it sends up
+        /// for this controller's: the CSMS sees one station where there are
+        /// several. Standard is for a CSMS that knows nothing of the overlay
+        /// network, and is said so by name in the file. The CSMS is told the
+        /// mode in the header X-OCPP-NetworkingMode of the dial.
+        /// </para>
+        /// </remarks>
+        public const WWCPNetworkingMode  DefaultNetworkingMode  = WWCPNetworkingMode.OverlayNetwork;
+
         #endregion
 
         #region Properties
@@ -174,6 +212,12 @@ namespace cloud.charging.open.LocalController.Configuration
         public String? ChosenClientCertificate
             => ClientCertificate is { Length: > 0 } handle ? handle : null;
 
+        /// <summary>
+        /// Whether the line speaks in the frame of the overlay network.
+        /// </summary>
+        public Boolean InOverlayNetwork
+            => (NetworkingMode ?? DefaultNetworkingMode) == WWCPNetworkingMode.OverlayNetwork;
+
         #endregion
 
 
@@ -195,7 +239,8 @@ namespace cloud.charging.open.LocalController.Configuration
                     RequestTimeout              ?? DefaultRequestTimeout,
                     ReconnectInitialDelay       ?? DefaultReconnectInitialDelay,
                     ReconnectMaxDelay           ?? DefaultReconnectMaxDelay,
-                    ClientCertificate);
+                    ClientCertificate,
+                    NetworkingMode              ?? DefaultNetworkingMode);
 
         #endregion
 
@@ -218,7 +263,8 @@ namespace cloud.charging.open.LocalController.Configuration
                     Changes.RequestTimeout              ?? RequestTimeout,
                     Changes.ReconnectInitialDelay       ?? ReconnectInitialDelay,
                     Changes.ReconnectMaxDelay           ?? ReconnectMaxDelay,
-                    Changes.ClientCertificate           ?? ClientCertificate);
+                    Changes.ClientCertificate           ?? ClientCertificate,
+                    Changes.NetworkingMode              ?? NetworkingMode);
 
         #endregion
 
@@ -245,6 +291,10 @@ namespace cloud.charging.open.LocalController.Configuration
             if (MinimumTLSVersion  != AsBuilt.MinimumTLSVersion)   yield return "minimumTLSVersion";
             if (PingEvery          != AsBuilt.PingEvery)           yield return "pingEvery";
             if (RequestTimeout     != AsBuilt.RequestTimeout)      yield return "requestTimeout";
+
+            // Told the CSMS once, in the header of the dial: the frames of a
+            // line cannot change their shape under it.
+            if (InOverlayNetwork   != AsBuilt.InOverlayNetwork)    yield return "networkingMode";
 
             if (ChosenClientCertificate != AsBuilt.ChosenClientCertificate)
                 yield return "clientCertificate";
@@ -279,10 +329,35 @@ namespace cloud.charging.open.LocalController.Configuration
                 !ConfigurationReader.TryReadSeconds(JSON, "requestTimeout",              SectionName, 1, 600,                   out var requestTimeout, out Error) ||
                 !ConfigurationReader.TryReadSeconds(JSON, "reconnectInitialDelay",       SectionName, 1, 600,                   out var initialDelay,   out Error) ||
                 !ConfigurationReader.TryReadSeconds(JSON, "reconnectMaxDelay",           SectionName, 1, 3600,                   out var maxDelay,       out Error) ||
-                !ConfigurationReader.TryReadString (JSON, "clientCertificate",           SectionName, MaxHandleLength,  out var identity,       out Error))
+                !ConfigurationReader.TryReadString (JSON, "clientCertificate",           SectionName, MaxHandleLength,  out var identity,       out Error) ||
+                !ConfigurationReader.TryReadString (JSON, "networkingMode",              SectionName, 16,               out var mode,           out Error))
             {
                 return false;
             }
+
+            #region The networking mode is one of the two
+
+            WWCPNetworkingMode? networkingMode = null;
+
+            if (mode is not null)
+            {
+
+                networkingMode = mode.Trim().ToLowerInvariant() switch {
+                                     StandardMode  => WWCPNetworkingMode.Standard,
+                                     OverlayMode   => WWCPNetworkingMode.OverlayNetwork,
+                                     _             => null
+                                 };
+
+                if (networkingMode is null)
+                {
+                    Error = $"'{SectionName}.networkingMode' is '{mode}', and has to be '{StandardMode}' - the plain OCPP frame - or '{OverlayMode}' - " +
+                             "the frame of the overlay network, in which a CSMS reaches the charging stations behind this controller.";
+                    return false;
+                }
+
+            }
+
+            #endregion
 
             #region The TLS identity is a handle of the certificate store, or none
 
@@ -398,7 +473,8 @@ namespace cloud.charging.open.LocalController.Configuration
                                 requestTimeout,
                                 initialDelay,
                                 maxDelay,
-                                identity?.ToLowerInvariant()
+                                identity?.ToLowerInvariant(),
+                                networkingMode
                             );
 
             return true;
@@ -428,6 +504,7 @@ namespace cloud.charging.open.LocalController.Configuration
             if (ReconnectInitialDelay      is not null)  json.Add("reconnectInitialDelay",       ReconnectInitialDelay.Value.TotalSeconds);
             if (ReconnectMaxDelay          is not null)  json.Add("reconnectMaxDelay",           ReconnectMaxDelay.Value.TotalSeconds);
             if (ClientCertificate          is not null)  json.Add("clientCertificate",           ClientCertificate);
+            if (NetworkingMode             is not null)  json.Add("networkingMode",              InOverlayNetwork ? OverlayMode : StandardMode);
 
             return json;
 

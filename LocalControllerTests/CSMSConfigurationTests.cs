@@ -141,6 +141,84 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+
+        #region TheNetworkingMode_IsOverlayUnlessTheFileSaysStandard()
+
+        /// <summary>
+        /// The networking mode of the line up: the overlay network where nothing is said - in which the CSMS
+        /// sees the stations behind the controller - and overlay or standard where it is, in either case;
+        /// written back as it was said, and not at all where nothing was.
+        /// </summary>
+        [TestCase("""{ }""",                              true,  null)]
+        [TestCase("""{ "networkingMode": "standard" }""",  false, "standard")]
+        [TestCase("""{ "networkingMode": " Standard " }""", false, "standard")]
+        [TestCase("""{ "networkingMode": "overlay" }""",   true,  "overlay")]
+        [TestCase("""{ "networkingMode": " Overlay " }""", true,  "overlay")]
+        public void TheNetworkingMode_IsOverlayUnlessTheFileSaysStandard(String   JSON,
+                                                                        Boolean  Overlay,
+                                                                        String?  Written)
+        {
+
+            var configuration = Read(JSON);
+
+            Assert.Multiple(() => {
+                Assert.That(configuration.InOverlayNetwork,                                Is.EqualTo(Overlay));
+                Assert.That(configuration.Effective().InOverlayNetwork,                    Is.EqualTo(Overlay));
+                Assert.That(configuration.Effective().NetworkingMode,                      Is.EqualTo(Overlay ? protocols.WWCP.NetworkingNode.NetworkingMode.OverlayNetwork
+                                                                                                              : protocols.WWCP.NetworkingNode.NetworkingMode.Standard));
+                Assert.That(configuration.ToJSON()["networkingMode"]?.Value<String>(),     Is.EqualTo(Written), "written back otherwise than said");
+                Assert.That(Read(configuration.ToJSON().ToString()).InOverlayNetwork,      Is.EqualTo(Overlay), "not read back as written");
+            });
+
+        }
+
+        #endregion
+
+        #region ANetworkingModeThatIsNeither_IsRefused()
+
+        [TestCase("overlayNetwork")]
+        [TestCase("websocket")]
+        [TestCase("1")]
+        public void ANetworkingModeThatIsNeither_IsRefused(String Written)
+        {
+
+            var read = CSMSConfiguration.TryParse(new JObject(new JProperty("networkingMode", Written)), out _, out var error);
+
+            Assert.Multiple(() => {
+                Assert.That(read,   Is.False, $"'{Written}' was taken as a networking mode");
+                Assert.That(error,  Does.Contain("'csms.networkingMode'").And.Contain("'standard'").And.Contain("'overlay'"));
+            });
+
+        }
+
+        #endregion
+
+        #region AnotherNetworkingMode_WaitsForTheLineToBeDialledAgain()
+
+        /// <summary>
+        /// The mode is said once, in the header of the dial: a change waits for the next one, and saying
+        /// nothing - a save of another field - leaves the mode as it was.
+        /// </summary>
+        [Test]
+        public void AnotherNetworkingMode_WaitsForTheLineToBeDialledAgain()
+        {
+
+            var dialled  = Read("""{ "networkingMode": "standard" }""").Effective();
+            var overlay  = dialled.Merge(Read("""{ "networkingMode": "overlay" }"""));
+            var other    = overlay.Merge(Read("""{ "pingEvery": 60 }"""));
+            var stays    = dialled.Merge(Read("""{ "pingEvery": 60 }"""));
+
+            Assert.Multiple(() => {
+                Assert.That(overlay.NeedsARestartFor(dialled),  Does.Contain("networkingMode"));
+                Assert.That(dialled.NeedsARestartFor(dialled),  Does.Not.Contain("networkingMode"));
+                Assert.That(other.InOverlayNetwork,             Is.True,  "saying nothing of the mode changed it");
+                Assert.That(stays.InOverlayNetwork,             Is.False, "saying nothing of the mode made a standard line an overlay one");
+            });
+
+        }
+
+        #endregion
+
     }
 
 }

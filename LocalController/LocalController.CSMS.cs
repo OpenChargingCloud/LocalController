@@ -158,7 +158,11 @@ namespace cloud.charging.open.LocalController
 
             Log.Info(
                 csmsSettings.Enabled == true
-                    ? $"This local controller reports to {csmsSettings.URL} (security profile {csmsSettings.SecurityProfile})."
+                    ? $"This local controller reports to {csmsSettings.URL} (security profile {csmsSettings.SecurityProfile}, " +
+                      (csmsSettings.InOverlayNetwork ? "in the overlay network" : "in the plain OCPP frame, which names no station behind it") +
+                      // A controller whose file says nothing dials in the overlay network since 2026-11-12, and
+                      // dialled in the plain frame before: said, for whoever wonders why its CSMS sees it otherwise.
+                      $"{(Configuration?.NetworkingMode is null ? $" - as nothing says otherwise; \"networkingMode\": \"{CSMSConfiguration.StandardMode}\" is for a CSMS that knows nothing of the overlay network" : "")})."
                     : "This local controller reports to no CSMS; it is switched off under Configuration.",
                 "ocpp", "csms"
             );
@@ -269,6 +273,15 @@ namespace cloud.charging.open.LocalController
 
                                          RemoteURL:                 URL.Parse(url),
                                          NextHopNetworkingNodeId:   NetworkingNode_Id.Parse(csmsSettings.NextHopNodeId ?? CSMSConfiguration.DefaultNextHopNodeId),
+
+                                         // Standard unless the file says overlay: in
+                                         // the overlay network every frame names where
+                                         // it goes and where it comes from, which is
+                                         // what lets the CSMS reach the stations behind
+                                         // this controller rather than only the
+                                         // controller - and what the CSMS is told in
+                                         // the header X-OCPP-NetworkingMode of the dial.
+                                         NetworkingMode:            csmsSettings.NetworkingMode ?? CSMSConfiguration.DefaultNetworkingMode,
 
                                          HTTPAuthentication:        authentication,
                                          TOTPConfig:                totpConfig,

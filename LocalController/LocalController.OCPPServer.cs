@@ -311,6 +311,9 @@ namespace cloud.charging.open.LocalController
 
             ServerCertificates.OnNotice += (level, message) => Log.Log(level, message, "ocpp", "tls");
 
+            // Every switch, from wherever it was asked for, told to the CSMS.
+            ServerCertificates.OnSwitched += ReportServerKeySwitch;
+
             ClientTrust        = new ClientTrustStore(
                                      Path.Combine(directory, ClientTrustStore.DefaultDirectoryName),
                                      TimeProvider

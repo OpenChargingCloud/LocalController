@@ -98,6 +98,36 @@ with is remembered in `known-servers.json`, and another certificate than before
 is said. A CSMS reads who is dialling from the last segment of the address, as
 OCPP has every client say it: `wss://csms.example.org/ocpp/lc001`.
 
+The line speaks in the frame of the overlay network unless `networkingMode` in
+the `csms` section says `"standard"`: every frame names where it goes and
+where it comes from, and the dial tells the CSMS so in the header
+`X-OCPP-NetworkingMode: OverlayNetwork`. That is what lets the CSMS see the
+stations behind the controller, each by its own name, and reach them - to
+hand them their key pins, say. `"standard"`, the plain OCPP frame, is for a
+CSMS that knows nothing of the overlay network: then everything the CSMS sends
+down is taken for the controller's own, everything a station sends up for the
+controller's, and the CSMS sees one station where there are several. Until
+2026-11-12 a file that said nothing meant standard; the start says which mode
+it is, and whether the file said so. A CSMS of the overlay network takes what
+a login sends in another station's name only from a local controller's: at
+this project's CSMS the controller's login is marked as one -
+`localControllers lc001 on`, or "Local controller" on the page of its station
+logins - and until it is, what the controller forwards of its stations is
+dropped there, and the CSMS's log says so. Either way the controller answers what is
+addressed to it and forwards what is addressed to a station; a change waits for
+the line to be dialled again.
+
+What only a CSMS asks of a node it manages - `InstallSSHKey`, `DeleteSSHKey`,
+`SetVariables`, `GetVariables`, a `Reset`, its files and its signature
+policies, every request of OCPP 2.1 a CSMS sends - comes over this line and
+from no charging station. A station can write the frame of the overlay network
+whatever the line speaks, address the controller itself and call itself the
+CSMS: such a request is refused with a `SecurityError`. What a station sends
+on goes up to the CSMS, in the station's own name: a frame that names another
+sender is dropped, and one addressed to another station of the controller is
+refused. An answer the controller passes on goes to whoever asked, whatever
+the answer names.
+
 The charging stations may speak OCPP over SSH as well, where `ssh` in the
 `ocppServer` section says so - `"ssh": { "enabled": true }`, switched off
 unless somebody says otherwise, and on and off without a restart. There is no
