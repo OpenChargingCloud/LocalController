@@ -183,7 +183,12 @@ namespace cloud.charging.open.LocalController.Tests
                                                    new JProperty("enabled",          true),
                                                    new JProperty("url",              $"ws://127.0.0.1:{csmsPort}"),
                                                    new JProperty("securityProfile",  1),
-                                                   new JProperty("nextHopNodeId",    "CSMS")
+                                                   new JProperty("nextHopNodeId",    "CSMS"),
+
+                                                   // What stands in for the CSMS here is a plain OCPP
+                                                   // node, which knows nothing of the overlay network
+                                                   // a controller dials by default.
+                                                   new JProperty("networkingMode",   "standard")
                                                )
                                              : new JObject(
                                                    new JProperty("enabled",          false)
