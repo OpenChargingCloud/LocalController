@@ -194,22 +194,24 @@ namespace cloud.charging.open.LocalController.Tests
         #endregion
 
 
-        #region ALocalControllerKnowsItsResourcesAndItsThreeRoles()
+        #region ALocalControllerKnowsItsResourcesAndItsFourRoles()
 
         /// <summary>
-        /// The node brings the viewer and the administrators, and the local
-        /// controller its CPO - and the line up to the CSMS and the charging
-        /// stations as resources beside the node's.
+        /// The node brings the viewer, the support and the administrators, and
+        /// the local controller its CPO - and the line up to the CSMS and the
+        /// charging stations as resources beside the node's.
         /// </summary>
         [Test]
-        public void ALocalControllerKnowsItsResourcesAndItsThreeRoles()
+        public void ALocalControllerKnowsItsResourcesAndItsFourRoles()
         {
 
             var lc = AController();
 
             Assert.Multiple(() => {
-                Assert.That(lc.Roles,             Is.EqualTo(new[] { "viewer", "cpo", WWCPNode.AdminRole }));
-                Assert.That(lc.Access.Resources,  Is.EqualTo(new[] { "configuration", "dns", "nts", "certificates", "ssh", "log", "csms", "stations", "openadr" }));
+                Assert.That(lc.Roles,             Is.EqualTo(new[] { "viewer", "support", "cpo", WWCPNode.AdminRole }));
+                Assert.That(lc.Access.Resources,  Is.EqualTo(new[] { "configuration", "dns", "nts", "certificates", "ssh", "log",
+                                                                     "node", "reset", "reset-immediate", "state", "firmware", "signatures",
+                                                                     "csms", "stations", "openadr" }));
             });
 
         }
@@ -247,6 +249,26 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("cpo",          "openadr:edit",        true)]
         [TestCase("cpo",          "certificates:edit",   false)]
         [TestCase("cpo",          "configuration:edit",  false)]
+        [TestCase("cpo",          "node:run",            true)]
+        [TestCase("cpo",          "reset:run",           true)]
+        [TestCase("cpo",          "reset-immediate:run", true)]
+        [TestCase("cpo",          "state:run",           true)]
+        [TestCase("cpo",          "firmware:edit",       true)]
+        [TestCase("cpo",          "signatures:edit",     false)]
+        [TestCase("cpo",          "log:read",            true)]
+
+        [TestCase("viewer",       "log:read",            true)]
+        [TestCase("viewer",       "state:read",          true)]
+        [TestCase("viewer",       "reset:run",           false)]
+
+        [TestCase("support",      "state:read",          true)]
+        [TestCase("support",      "state:run",           true)]
+        [TestCase("support",      "reset:run",           true)]
+        [TestCase("support",      "reset-immediate:run", false)]
+        [TestCase("support",      "log:read",            false)]
+        [TestCase("support",      "configuration:read",  false)]
+        [TestCase("support",      "csms:read",           false)]
+        [TestCase("support",      "stations:read",       false)]
 
         [TestCase("systemadmin",  "certificates:edit",   true)]
         [TestCase("systemadmin",  "stations:edit",       true)]
@@ -315,19 +337,19 @@ namespace cloud.charging.open.LocalController.Tests
             await TestPorts.StartedOnFreshPorts(() => AController(new JObject(
                                                                       new JProperty("nts",    new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
                                                                       new JProperty("roles",  new JObject(
-                                                                          new JProperty("support", new JArray("dns:read", "stations:read"))
+                                                                          new JProperty("helpdesk", new JArray("dns:read", "stations:read"))
                                                                       ))
                                                                   )));
 
-            using var support  = await SignedInAs("supporter", "support");
+            using var helpdesk = await SignedInAs("helper", "helpdesk");
 
-            var dns            = await support.GetAsync("api/v1/configuration/dns");
-            var stations       = await support.GetAsync("api/v1/configuration/ocpp-server/stations");
-            var csms           = await support.GetAsync("api/v1/configuration/csms");
+            var dns            = await helpdesk.GetAsync("api/v1/configuration/dns");
+            var stations       = await helpdesk.GetAsync("api/v1/configuration/ocpp-server/stations");
+            var csms           = await helpdesk.GetAsync("api/v1/configuration/csms");
             var refusal        = await csms.Content.ReadAsStringAsync();
 
             Assert.Multiple(() => {
-                Assert.That(controller!.Roles,   Is.EqualTo(new[] { "viewer", "cpo", "support", WWCPNode.AdminRole }));
+                Assert.That(controller!.Roles,   Is.EqualTo(new[] { "viewer", "support", "cpo", "helpdesk", WWCPNode.AdminRole }));
                 Assert.That(dns.StatusCode,      Is.EqualTo(HttpStatusCode.OK));
                 Assert.That(stations.StatusCode, Is.EqualTo(HttpStatusCode.OK));
                 Assert.That(csms.StatusCode,     Is.EqualTo(HttpStatusCode.Forbidden));
@@ -427,12 +449,16 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("GET",     "api/v1/certificates/c1",                                   "certificates:read")]
         [TestCase("PATCH",   "api/v1/certificates/c1",                                   "certificates:edit")]
         [TestCase("DELETE",  "api/v1/certificates/c1",                                   "certificates:edit")]
+        [TestCase("GET",     "api/v1/logs",                                              "log:read")]
+        [TestCase("GET",     "api/v1/state",                                             "state:read")]
         public async Task EveryRouteAsksForItsOwnPermission(String Method, String Path, String Permission)
         {
 
             var roles = new JObject();
 
-            foreach (var resource in new[] { "configuration", "dns", "nts", "certificates", "ssh", "log", "csms", "stations", "openadr" })
+            foreach (var resource in new[] { "configuration", "dns", "nts", "certificates", "ssh", "log",
+                                               "node", "reset", "reset-immediate", "state", "firmware", "signatures",
+                                               "csms", "stations", "openadr" })
                 foreach (var operation in new[] { "read", "edit", "run" })
                     roles.Add($"r-{resource}-{operation}", new JArray($"{resource}:{operation}"));
 
@@ -471,9 +497,9 @@ namespace cloud.charging.open.LocalController.Tests
         #region TheClockIsForAnybodySignedIn()
 
         /// <summary>
-        /// Whether the time here is worth anything is for anybody signed in, as
-        /// the log and the event stream are - an account in no role at all
-        /// included. Everything that is a resource is not.
+        /// Whether the time here is worth anything is for anybody signed in -
+        /// an account in no role at all included. Everything that is a
+        /// resource is not, the log included.
         /// </summary>
         [Test]
         public async Task TheClockIsForAnybodySignedIn()
@@ -491,6 +517,139 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(clock.StatusCode,          Is.EqualTo(HttpStatusCode.OK));
                 Assert.That(configuration.StatusCode,  Is.EqualTo(HttpStatusCode.Forbidden));
                 Assert.That(refusal,                   Does.Contain("This needs the viewer or cpo or systemadmin role."));
+            });
+
+        }
+
+        #endregion
+
+        #region TheLogIsForWhoeverMayReadIt()
+
+        /// <summary>
+        /// The log shows the stations and their connections: it needs
+        /// "log:read", which the viewer has and the support has not - nor an
+        /// account in no role, which once read it like the clock. The session
+        /// tells the page so, as it tells the command line over SSH.
+        /// </summary>
+        [Test]
+        public async Task TheLogIsForWhoeverMayReadIt()
+        {
+
+            await TestPorts.StartedOnFreshPorts(() => AController());
+
+            using var nobody   = await SignedInAs("nobody2",  null);
+            using var support  = await SignedInAs("support1", "support");
+            using var viewer   = await SignedInAs("viewer1",  "viewer");
+
+            var ofNobody       = await nobody. GetAsync("api/v1/logs");
+            var ofSupport      = await support.GetAsync("api/v1/logs");
+            var ofViewer       = await viewer. GetAsync("api/v1/logs");
+            var refusal        = await ofSupport.Content.ReadAsStringAsync();
+
+            var supportMe      = JObject.Parse(await support.GetStringAsync("api/v1/auth/me"));
+            var viewerMe       = JObject.Parse(await viewer. GetStringAsync("api/v1/auth/me"));
+
+            Assert.Multiple(() => {
+                Assert.That(ofNobody.StatusCode,                   Is.EqualTo(HttpStatusCode.Forbidden));
+                Assert.That(ofSupport.StatusCode,                  Is.EqualTo(HttpStatusCode.Forbidden));
+                Assert.That(ofViewer.StatusCode,                   Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(refusal,                               Does.Contain("This needs the viewer or cpo or systemadmin role."));
+                Assert.That(supportMe["mayReadTheLog"]?.Value<Boolean>(), Is.False);
+                Assert.That(viewerMe ["mayReadTheLog"]?.Value<Boolean>(), Is.True);
+            });
+
+        }
+
+        #endregion
+
+        #region TheSupportSeesWhatIsGoingOnAndNoneOfTheConfiguration()
+
+        /// <summary>
+        /// "state:read" shows whether the line up to the CSMS stands and which
+        /// charging stations were seen when - and nothing of where the line
+        /// goes, whom the station port lets in or how: the support reads it,
+        /// and is refused the configuration it is apart from. A station seen
+        /// stays seen after it went away, no longer connected.
+        /// </summary>
+        [Test]
+        public async Task TheSupportSeesWhatIsGoingOnAndNoneOfTheConfiguration()
+        {
+
+            const String stationPassword = "a-password-long-enough-for-ocpp";
+
+            await TestPorts.StartedOnFreshPorts(() => AController(new JObject(
+                                                                      new JProperty("nts",         new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
+                                                                      new JProperty("csms",        new JObject(
+                                                                          new JProperty("enabled",           false),
+                                                                          new JProperty("url",               "wss://csms.example.org/ocpp")
+                                                                      )),
+                                                                      new JProperty("ocppServer",  new JObject(
+                                                                          new JProperty("enabled",           true),
+                                                                          new JProperty("address",           "127.0.0.1"),
+                                                                          new JProperty("port",              TestPorts.Free()),
+                                                                          new JProperty("securityProfiles",  new JArray(1)),
+                                                                          new JProperty("subprotocols",      new JArray("ocpp2.1"))
+                                                                      ))
+                                                                  )));
+
+            Assert.That(controller!.StationLogins.TrySetPassword("cs001", stationPassword, null, "Ladepunkt 1", out _, out var error), Is.True, error);
+
+            using var support  = await SignedInAs("support2", "support");
+            using var station  = new System.Net.WebSockets.ClientWebSocket();
+            using var timeout  = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+            station.Options.AddSubProtocol("ocpp2.1");
+            station.Options.SetRequestHeader("Authorization", "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"cs001:{stationPassword}")));
+
+            await station.ConnectAsync(new Uri($"ws://127.0.0.1:{controller.OCPPServerSettings.TCPPort}"), timeout.Token);
+
+            var whileThere     = await support.GetAsync("api/v1/state");
+            var text           = await whileThere.Content.ReadAsStringAsync();
+            var state          = JObject.Parse(text);
+            var seen           = state["stations"]?["seen"] as JArray;
+
+            var csms           = await support.GetAsync("api/v1/configuration/csms");
+            var stations       = await support.GetAsync("api/v1/configuration/ocpp-server/stations");
+
+            Assert.Multiple(() => {
+                Assert.That(whileThere.StatusCode,                         Is.EqualTo(HttpStatusCode.OK), text);
+                Assert.That(state["csms"]?["connected"]?.Value<Boolean>(), Is.False);
+                Assert.That(state["stations"]?["connected"]?.Value<Int32>(), Is.EqualTo(1));
+                Assert.That(seen?.Select(entry => entry["id"]?.Value<String>()), Is.EqualTo(new[] { "cs001" }));
+                Assert.That(seen?[0]?["connected"]?.Value<Boolean>(),      Is.True);
+                Assert.That(seen?[0]?["over"]?.Value<String>(),            Is.EqualTo("WebSocket"));
+                Assert.That(seen?[0]?["lastSeen"]?.Value<String>(),        Is.Not.Null);
+                Assert.That(text,                                          Does.Not.Contain("csms.example.org").And.Not.Contain("127.0.0.1").And.Not.Contain(stationPassword),
+                            "the state says something of the configuration");
+                Assert.That(csms.StatusCode,                               Is.EqualTo(HttpStatusCode.Forbidden));
+                Assert.That(stations.StatusCode,                           Is.EqualTo(HttpStatusCode.Forbidden));
+            });
+
+            try
+            {
+                await station.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "done", timeout.Token);
+            }
+            catch (Exception)
+            { }
+
+            JObject? afterwards = null;
+
+            for (var attempt = 0; attempt < 50; attempt++)
+            {
+
+                afterwards = JObject.Parse(await support.GetStringAsync("api/v1/state"));
+
+                if (afterwards["stations"]?["connected"]?.Value<Int32>() == 0)
+                    break;
+
+                await Task.Delay(100);
+
+            }
+
+            Assert.Multiple(() => {
+                Assert.That(afterwards!["stations"]?["connected"]?.Value<Int32>(),          Is.EqualTo(0), "the station that went away is still connected");
+                Assert.That(afterwards!["stations"]?["seen"]?[0]?["id"]?.Value<String>(),   Is.EqualTo("cs001"));
+                Assert.That(afterwards!["stations"]?["seen"]?[0]?["connected"]?.Value<Boolean>(), Is.False);
             });
 
         }

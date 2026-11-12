@@ -13,9 +13,12 @@ import { ocppServerPage }         from './pages/ocppServer';
 import { stationLoginsPage }      from './pages/stationLogins';
 import { serverCertificatesPage } from './pages/serverCertificates';
 import { clientTrustPage }        from './pages/clientTrust';
+import { statePage }              from './pages/state';
 
 // What a local controller has pages for beside what every node has: the line
-// up to its CSMS, and the server its charging stations connect to. The sign-in,
+// up to its CSMS, the server its charging stations connect to, and what is
+// going on with both - the State, for whoever may see it and no more (the
+// support, say, whose first page it is). The sign-in,
 // the log, the name servers, the time servers, the certificate store, the
 // frame and following the log while somebody is signed in are every node's -
 // see WWCP_Node's start.ts. Server identities is the node's store too: who the
@@ -41,6 +44,7 @@ startNode({
             { path: '/configuration/ocpp-server/certificates',  label: 'Server certificates', icon: 'fa-certificate',       permission: [ 'certificates:read' ] },
             { path: '/configuration/ocpp-server/trust',         label: 'Accepted chains',     icon: 'fa-user-shield',       permission: [ 'certificates:read' ] }
         ]),
+        { path: '/state', label: 'State', icon: 'fa-heart-pulse', permission: [ 'state:read' ] },
         nodeMenu.logs
     ],
 
@@ -68,7 +72,9 @@ startNode({
         '/configuration/ocpp-server':               ocppServerPage,
         '/configuration/ocpp-server/logins':        stationLoginsPage,
         '/configuration/ocpp-server/certificates':  serverCertificatesPage,
-        '/configuration/ocpp-server/trust':         clientTrustPage
+        '/configuration/ocpp-server/trust':         clientTrustPage,
+
+        '/state':                                   statePage
 
     }
 

@@ -408,6 +408,7 @@ namespace cloud.charging.open.LocalController
 
             ApplyStationLogins(ocppWebSocketServer);
             WireOCPPServerLogging(ocppWebSocketServer);
+            WireStationsSeen(ocppWebSocketServer);
 
             #endregion
 
@@ -423,6 +424,7 @@ namespace cloud.charging.open.LocalController
                             );
 
             WireOCPPOverSSHLogging(ocppSshServer);
+            WireStationsSeen(ocppSshServer);
 
             stationSSHSignIns = new StationSSHSignIns(
                                     StationLogins,

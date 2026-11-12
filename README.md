@@ -51,12 +51,18 @@ CSMS and the charging station port on top.
 | Logins and groups | which charging stations may sign in, with what - a password, a one-time token, an SSH key - and what their group allows them | `stations:edit` |
 | Server certificates | the keys this controller presents, and the certificates that answer them | `certificates:edit` |
 | Accepted chains | which certificate authorities a charging station may be vouched for by | `certificates:edit` |
-| Logs | nothing - it reads | anybody signed in |
+| State | nothing - it shows whether the line up to the CSMS stands and since when, which charging stations were seen when and over what, and the grid operator's limits in force | `state:read` |
+| Logs | nothing - it reads | `log:read` |
 
 Looking at a page takes `read` on the resource in its column: `dns:read` for
-the DNS client, `stations:read` for the charging stations. The clock, the log
-and the event stream are for anybody signed in. Which roles hold what is under
-"Who may open it" below.
+the DNS client, `stations:read` for the charging stations. The clock is for
+anybody signed in. The log and the event stream take `log:read`, because they
+show the charging stations and their connections - the same over SSH, where a
+session without it is not shown the log. The State page is apart from the
+configuration: nothing on it says where the line goes, whom the station port
+lets in or what anybody signs in with, so that `state:read` can be given to
+people who are to read none of that. Which roles hold what is under "Who may
+open it" below.
 
 Everything on the DNS and NTS pages takes effect the moment it is saved, for
 everything inside the controller that resolves a name or reads a clock, and is
@@ -556,28 +562,50 @@ role, under the same name, and a role is a list of permissions, each an
 operation on a resource - written `dns:edit`. That is the model of every node,
 described in [WWCP_Node](https://github.com/OpenChargingCloud/WWCP_Node) under
 "Who may sign in"; the operations are `read`, `edit` and `run`, and the
-resources are the node's `configuration`, `dns`, `nts` and `certificates` and
-the three a local controller adds: `csms`, the line up to the CSMS,
-`stations`, the charging stations and which of them may sign in, and
+resources are the node's `configuration`, `dns`, `nts`, `certificates`, `ssh`
+and `log`, the node's six that a signed OCPP message can ask for - `node`,
+`reset` (a restart once idle), `reset-immediate` (a restart at once, which cuts
+every station behind the controller off from the CSMS), `state`, `firmware` and
+`signatures` - and the three a local controller adds: `csms`, the line up to
+the CSMS, `stations`, the charging stations and which of them may sign in, and
 `openadr`, the grid operator's VTN it reads its limits from.
 
 | Role | May |
 |------|-----|
 | `viewer` | read everything: `*:read` |
-| `cpo` | that, and run the site: change the name and time servers and ask them (`dns` and `nts`, `edit` and `run`), change the line up to the CSMS and the charging stations (`csms:edit`, `stations:edit`), and the grid operator's VTN and ask it (`openadr:edit`, `openadr:run`) |
-| `systemadmin` | everything this controller can be told, the certificates included |
+| `support` | see what is going on and have it reported again (`state:read`, `state:run`), and restart the controller once it is idle (`reset:run`) - nothing else: no configuration, no log |
+| `cpo` | read everything, and run the site: change the name and time servers and ask them (`dns` and `nts`, `edit` and `run`), change the line up to the CSMS and the charging stations (`csms:edit`, `stations:edit`), and the grid operator's VTN and ask it (`openadr:edit`, `openadr:run`); restart the controller, once idle and at once, have it send a message and report its state again, and install its firmware (`reset:run`, `reset-immediate:run`, `node:run`, `state:run`, `firmware:edit`) |
+| `systemadmin` | everything this controller can be told, the certificates and who may sign what (`signatures:edit`) included |
 
-The viewer and the administrators are the node's, the CPO is the local
-controller's. The certificates are the one resource only the administrators may
+The viewer, the support and the administrators are the node's, the CPO is the
+local controller's. The certificates are the one resource only the administrators may
 change: somebody who can add a certificate authority can let in a charging
 station that nobody issued a password to.
 
+The same roles say who may sign what is sent to the controller itself over
+OCPP (white paper "Signed OCPP Messages and Signer Roles", section 5.3): a key
+the controller knows by one of its roles may sign what that role may do on the
+web page and at the command line, and nothing else.
+`LocalControllerActionPermissions` is the table of what each action needs - a
+`Reset` once idle `reset:run`, at once `reset-immediate:run`; a
+`TriggerMessage` `node:run`, or `certificates:edit` for a new certificate;
+`InstallCertificate`, `DeleteCertificate` and `CertificateSigned`
+`certificates:edit`; `SetNetworkProfile` `csms:edit`; `GetLog` `log:read`;
+`SyncNetworkTime` and `TestTimeServer` `nts:run`; `UpdateFirmware`
+`firmware:edit`; the stations' SSH keys `stations:edit` and `stations:read`;
+the roles and signature policies `signatures:edit`. What the controller
+forwards is not decided here: the station it goes to holds it against its own
+resources, and the controller's role is no power of attorney for it. The
+policy is off by default - the controller then behaves as before it had one.
+
 The `roles` section of `configuration.json` adds roles, or says differently what
 one of them may do - and a role there that names a resource this controller
-does not have stops the start, rather than quietly granting nothing:
+does not have stops the start, rather than quietly granting nothing. A role of
+the file under the name of one of the node's - `viewer` or `support` - says
+differently what that one may do:
 
 ```json
-"roles": { "support": [ "dns:read", "stations:read" ] }
+"roles": { "helpdesk": [ "dns:read", "stations:read" ] }
 ```
 
 The groups are made at every start, so a group deleted by hand does not leave a

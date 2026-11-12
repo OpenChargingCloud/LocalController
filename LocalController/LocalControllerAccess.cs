@@ -30,8 +30,9 @@ namespace cloud.charging.open.LocalController
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The node brings the viewer, who may look at everything, and the
-    /// administrators, who may do everything - the certificates included,
+    /// The node brings the viewer, who may look at everything, the support,
+    /// who sees what is going on and restarts the controller once it is idle,
+    /// and the administrators, who may do everything - the certificates included,
     /// which is the one resource nobody else may edit here: somebody who can
     /// add a certificate authority can let in a charging station that nobody
     /// issued a password to, and who this controller is and whom it believes
@@ -90,10 +91,20 @@ namespace cloud.charging.open.LocalController
         /// stations - but may not touch the certificates.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// Day-to-day operation. A local controller in a car park is reached by
         /// whoever runs the site long before it is reached by whoever installed
         /// it, and a name server that moved, or a charging station that was
         /// replaced, is theirs to put right.
+        /// </para>
+        /// <para>
+        /// Restarts and firmware rollouts are the everyday business of the
+        /// operator's CSMS too, and what the CSMS signs for this controller is
+        /// signed by a role of it (white paper "Signed OCPP Messages and Signer
+        /// Roles", section 5.3, Q12): so the CPO restarts it, once it is idle
+        /// and at once, has it send a message and report its state again, and
+        /// installs its firmware.
+        /// </para>
         /// </remarks>
         public static readonly Role  CPO    = new ("cpo",
                                                    [ Permission.Read(Permission.AnyResource),
@@ -104,8 +115,13 @@ namespace cloud.charging.open.LocalController
                                                      Permission.Edit(CSMS),
                                                      Permission.Edit(Stations),
                                                      Permission.Edit(OpenADR),
-                                                     Permission.Run (OpenADR) ],
-                                                   "runs the site: its name and time servers, the line up to the CSMS, the grid operator's VTN and the charging stations");
+                                                     Permission.Run (OpenADR),
+                                                     Permission.Run (NodeResources.Node),
+                                                     Permission.Run (NodeResources.Reset),
+                                                     Permission.Run (NodeResources.ResetImmediate),
+                                                     Permission.Run (NodeResources.State),
+                                                     Permission.Edit(NodeResources.Firmware) ],
+                                                   "runs the site: its name and time servers, the line up to the CSMS, the grid operator's VTN and the charging stations - and restarts the controller and installs its firmware");
 
         /// <summary>
         /// The one role a local controller adds to the node's.

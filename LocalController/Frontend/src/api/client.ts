@@ -22,9 +22,13 @@ export * from '@node/api/client';
 
 /**
  * What a role may be allowed to touch on this local controller: what every
- * node has, and what a local controller adds to it.
+ * node has, and what a local controller adds to it. The log and the six of
+ * signed OCPP messages are every node's as well (WWCP_Node's NodeResources),
+ * and named here until WWCP_Node's NodeResource names them.
  */
-export type Resource = NodeResource | 'csms' | 'stations' | 'openadr';
+export type Resource = NodeResource
+                     | 'log' | 'node' | 'reset' | 'reset-immediate' | 'state' | 'firmware' | 'signatures'
+                     | 'csms' | 'stations' | 'openadr';
 
 /** What somebody signed in to this local controller may do: an operation on a resource, written "dns:edit". */
 export type Permission = `${Resource}:${Operation}`;
@@ -484,12 +488,31 @@ export function fingerprintInURL(fingerprint: string): string {
     return fingerprint.replace(/^SHA256:/, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
 
+/**
+ * What is going on, apart from how the local controller is configured: what
+ * "state:read" shows. Nothing of it says an address, a login or a secret.
+ */
+export interface ControllerState {
+    csms:       { enabled: boolean; connected: boolean; connectedSince: string | null };
+    stations:   { connected: number;
+                  seen: { id: string; connected: boolean; over: 'WebSocket' | 'SSH' | null;
+                          connectedSince: string | null; lastSeen: string }[] };
+    openADR:    { running: boolean; signedIn: boolean; lastPoll: string | null; lastRead: string | null;
+                  importKW: number | null; exportKW: number | null;
+                  limits: { eventID: string; name: string | null; kind: string; kW: number;
+                            start: string; end: string | null; state: string }[] };
+    timestamp:  string;
+}
+
 /** The routes every node has, typed with what a local controller says its own of them are. */
 const node = nodeAPI<{ me: Me; status: Status; configuration: Configuration; kind: CertificateKind; store: CertificateStore }>();
 
 export const api = {
 
     ...node,
+
+    /** What is going on: the line up to the CSMS, the stations seen, the limits in force. */
+    state: () => request<ControllerState>('GET', '/state'),
 
     /**
      * The charging station server: its socket, the certificates it presents,

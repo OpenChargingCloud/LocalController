@@ -92,10 +92,27 @@ namespace cloud.charging.open.LocalController
             // And the grid operator's VTN; see LCHTTPAPI.OpenADR.cs.
             RegisterOpenADRRoutes();
 
+            // And what is going on, apart from all of it; see LCHTTPAPI.State.cs.
+            RegisterStateRoutes();
+
         }
 
         #endregion
 
+
+        #region (protected override) ToReadTheLog
+
+        /// <summary>
+        /// Reading the log, its event stream and its files needs "log:read":
+        /// the log shows this controller's stations and their connections,
+        /// which the support - signed in, and in a role that sees what is
+        /// going on and nothing more - is not to read (white paper "Signed
+        /// OCPP Messages and Signer Roles", section 5.3, Q12).
+        /// </summary>
+        protected override Permission? ToReadTheLog
+            => Permission.Read(NodeResources.Log);
+
+        #endregion
 
         #region (protected override) ProductStatus()
 
