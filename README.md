@@ -623,7 +623,16 @@ web page and at the command line, and nothing else.
 `certificates:edit`; `SetNetworkProfile` `csms:edit`; `GetLog` `log:read`;
 `SyncNetworkTime` and `TestTimeServer` `nts:run`; `UpdateFirmware`
 `firmware:edit`; the stations' SSH keys `stations:edit` and `stations:read`;
-the roles and signature policies `signatures:edit`. What the controller
+the roles and signature policies `signatures:edit`. `SetVariables` and
+`GetVariables` have no row: each entry is decided by itself, by the resource of
+its component, and one the signers may not change or read is refused with
+`NotAuthorized` while the others are applied - the name servers
+(`DNSClientController`, `DNSServerController`) are `dns`, the time
+(`ClockCtrlr`, `NTPController` and theirs) `nts`, the keys of the station port
+(`EVQICtrlr`) `certificates`, the line up to the CSMS (`TLSClientController`)
+`csms`, anything else `configuration`. The controller shows its name servers
+and its time over OCPP as a charging station does, through WWCP_OCPP_Node's
+`DeviceModelBridge`. What the controller
 forwards is not decided here: the station it goes to holds it against its own
 resources, and the controller's role is no power of attorney for it. The
 policy is off by default - the controller then behaves as before it had one.

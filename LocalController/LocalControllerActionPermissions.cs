@@ -103,10 +103,9 @@ namespace cloud.charging.open.LocalController
                    ActionPermission.Needs  ("SendFile",              Edit(NodeResources.Configuration)),
                    ActionPermission.Needs  ("DeleteFile",            Edit(NodeResources.Configuration)),
 
-                   // The device model, as one request: a local controller has no
-                   // device model yet whose entries could be decided one by one.
-                   ActionPermission.Needs  ("SetVariables",          Edit(NodeResources.Configuration)),
-                   ActionPermission.Needs  ("GetVariables",          Read(NodeResources.Configuration)),
+                   // SetVariables and GetVariables have no row: the controller's own
+                   // device model decides each of their entries by the resource of
+                   // its component (LocalController.SignaturePolicy.cs).
 
                    // The roles and the signature policy: phase 4 renames these messages.
                    ActionPermission.Needs  ("AddUserRole",           Edit(NodeResources.Signatures)),

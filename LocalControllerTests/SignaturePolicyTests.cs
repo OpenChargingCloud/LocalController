@@ -56,6 +56,7 @@ namespace cloud.charging.open.LocalController.Tests
         private static readonly KeyPair cpo         = ECCKeyPair.GenerateKeys()!;
         private static readonly KeyPair admin       = ECCKeyPair.GenerateKeys()!;
         private static readonly KeyPair resetter    = ECCKeyPair.GenerateKeys()!;
+        private static readonly KeyPair dns         = ECCKeyPair.GenerateKeys()!;
         private static readonly KeyPair stranger    = ECCKeyPair.GenerateKeys()!;
 
         #endregion
@@ -98,7 +99,8 @@ namespace cloud.charging.open.LocalController.Tests
             var configuration = (JObject) TestControllers.Offline.DeepClone();
 
             configuration["roles"] = new JObject(
-                                         new JProperty("resetter", new JArray("reset:run"))
+                                         new JProperty("resetter",     new JArray("reset:run")),
+                                         new JProperty("nameservers",  new JArray("dns:edit", "dns:read"))
                                      );
 
             controller = TestControllers.New(directory, configuration);
@@ -108,6 +110,7 @@ namespace cloud.charging.open.LocalController.Tests
                               (cpo,       "cpo"),
                               (admin,     "systemadmin"),
                               (resetter,  "resetter"),
+                              (dns,       "nameservers"),
                               (stranger,  "nobody-here")
                           };
 
@@ -148,6 +151,22 @@ namespace cloud.charging.open.LocalController.Tests
 
             where TRequest : IRequest
 
+            => Accepts(Policy, Request, ToJSON, Parse, out ErrorResponse, out _, SignedBy);
+
+        /// <summary>
+        /// The same, handing out the request as the controller received it, with
+        /// its signatures verified: what its device model decides entry by entry.
+        /// </summary>
+        private static Boolean Accepts<TRequest>(SignaturePolicy                    Policy,
+                                                 TRequest                           Request,
+                                                 Func<TRequest, Boolean, JObject>   ToJSON,
+                                                 Func<JObject, TRequest>            Parse,
+                                                 out String?                        ErrorResponse,
+                                                 out TRequest                       Received,
+                                                 params KeyPair[]                   SignedBy)
+
+            where TRequest : IRequest
+
         {
 
             if (SignedBy.Length > 0)
@@ -158,11 +177,58 @@ namespace cloud.charging.open.LocalController.Tests
                             signingError);
 
             var onTheWire  = ToJSON(Request, false);
-            var received   = Parse(onTheWire);
+            Received       = Parse(onTheWire);
 
-            return Policy.VerifyRequestMessage(received, ToJSON(received, true), out ErrorResponse, onTheWire);
+            return Policy.VerifyRequestMessage(Received, ToJSON(Received, true), out ErrorResponse, onTheWire);
 
         }
+
+        /// <summary>
+        /// A SetVariables to the controller, signed by the given keys, as the
+        /// controller received it - and whether its policy let it on to the
+        /// device model.
+        /// </summary>
+        private Boolean AcceptsASetVariables(SignaturePolicy                             Policy,
+                                             out String?                                 ErrorResponse,
+                                             out OCPPv2_1.CSMS.SetVariablesRequest       Received,
+                                             params KeyPair[]                            SignedBy)
+        {
+
+            var requestId    = NextRequestId;
+            var destination  = ToTheController;
+
+            return Accepts(Policy,
+                           new OCPPv2_1.CSMS.SetVariablesRequest(
+                               destination,
+                               [
+                                   new OCPPv2_1.SetVariableData(
+                                       Component:       new OCPPv2_1.Component(Name: "DNSClientController"),
+                                       Variable:        new OCPPv2_1.Variable (Name: "Servers"),
+                                       AttributeValue:  "192.0.2.53"
+                                   )
+                               ],
+                               RequestId: requestId
+                           ),
+                           (request, withContext) => request.ToJSON(withContext),
+                           json => OCPPv2_1.CSMS.SetVariablesRequest.Parse(json, requestId, destination, NetworkPath.Empty),
+                           out ErrorResponse,
+                           out Received,
+                           SignedBy);
+
+        }
+
+        /// <summary>
+        /// Whether the controller's policy lets the signers of the given request
+        /// do the given operation on the given component, and why not.
+        /// </summary>
+        private static (Boolean Applied, String? Reason) Entry(SignaturePolicy  Policy,
+                                                               IRequest         Request,
+                                                               String           Component,
+                                                               String           Variable,
+                                                               String           Operation  = "edit",
+                                                               String?          Instance   = null)
+
+            => (Policy.DecideVariable(Request, Component, Variable, Instance, null, Operation, out var reason), reason);
 
         private Boolean AcceptsAReset(SignaturePolicy Policy, OCPPv2_1.ResetType Type, out String? ErrorResponse, params KeyPair[] SignedBy)
         {
@@ -380,6 +446,60 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(() => {
                 Assert.That(AcceptsAReset(policy, OCPPv2_1.ResetType.OnIdle,     out var e1, resetter),  Is.True,  e1);
                 Assert.That(AcceptsAReset(policy, OCPPv2_1.ResetType.Immediate,  out var e2, resetter),  Is.False, "A role that may restart once idle restarted at once!");
+            });
+
+        }
+
+        #endregion
+
+        #region TheDeviceModelIsDecidedEntryByEntry()
+
+        /// <summary>
+        /// SetVariables and GetVariables have no row of the table: a request of a
+        /// role that may change the name servers and nothing else passes as a
+        /// whole, and its device model decides each entry by the resource of its
+        /// component - the name servers "dns", the time "nts", the keys of the
+        /// station port "certificates", the line up to the CSMS "csms", and
+        /// anything else "configuration".
+        /// </summary>
+        [Test]
+        public void TheDeviceModelIsDecidedEntryByEntry()
+        {
+
+            var policy = AController(MessagePolicyModes.Enforce);
+
+            var passes      = AcceptsASetVariables(policy, out var error,     out var byTheNameServers, dns);
+            var unsigned    = AcceptsASetVariables(policy, out _,             out var byNobody);
+            var byTheAdmin  = AcceptsASetVariables(policy, out var adminError, out var byTheAdministrator, admin);
+
+            Assert.Multiple(() => {
+
+                Assert.That(policy.ActionPermissions.Select(permission => permission.Action),
+                            Has.None.EqualTo("SetVariables").And.None.EqualTo("GetVariables"),   "a row would decide the request as a whole");
+                Assert.That(policy.ActionsDecidedPerEntry,                Is.SupersetOf(new[] { "SetVariables", "GetVariables" }));
+
+                Assert.That(passes,                                       Is.True,  error);
+                Assert.That(byTheAdmin,                                   Is.True,  adminError);
+
+                Assert.That(Entry(policy, byTheNameServers, "DNSClientController",       "Servers").        Applied, Is.True);
+                Assert.That(Entry(policy, byTheNameServers, "DNSServerController",       "Address", Instance: "ns1").Applied, Is.True);
+                Assert.That(Entry(policy, byTheNameServers, "DNSClientController",       "Servers", "read").Applied, Is.True);
+
+                Assert.That(Entry(policy, byTheNameServers, "NTPController",             "ClientGroups").   Reason ?? "", Does.Contain("nts:edit"));
+                Assert.That(Entry(policy, byTheNameServers, "NTPClientGroupController",  "Clients").        Reason ?? "", Does.Contain("nts:edit"));
+                Assert.That(Entry(policy, byTheNameServers, "ClockCtrlr",                "TimeSource").     Reason ?? "", Does.Contain("nts:edit"));
+                Assert.That(Entry(policy, byTheNameServers, "EVQICtrlr",                 "ActiveKeyPin", Instance: "TLSServer").Reason ?? "",
+                                                                                                                   Does.Contain("certificates:edit"));
+                Assert.That(Entry(policy, byTheNameServers, "EVQICtrlr",                 "KeyPins", "read", "TLSServer").Reason ?? "",
+                                                                                                                   Does.Contain("certificates:read"));
+                Assert.That(Entry(policy, byTheNameServers, "TLSClientController",       "ServerKeyPins").  Reason ?? "", Does.Contain("csms:edit"));
+                Assert.That(Entry(policy, byTheNameServers, "SecurityCtrlr",             "OrganizationName").Reason ?? "", Does.Contain("configuration:edit"));
+
+                Assert.That(Entry(policy, byNobody,         "DNSClientController",       "Servers").        Applied, Is.False, "an unsigned entry was applied");
+
+                Assert.That(Entry(policy, byTheAdministrator, "EVQICtrlr",               "ActiveKeyPin", Instance: "TLSServer").Applied, Is.True);
+                Assert.That(Entry(policy, byTheAdministrator, "NTPController",           "ClientGroups").   Applied, Is.True);
+
             });
 
         }
