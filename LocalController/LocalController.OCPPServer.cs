@@ -1116,7 +1116,10 @@ namespace cloud.charging.open.LocalController
                            new HTTPResponse.Builder(Connection.HTTPRequest) {
                                HTTPStatusCode  = HTTPStatusCode.Unauthorized,
                                Server          = Server.HTTPServiceName,
-                               WWWAuthenticate = WWWAuthenticate.Basic("OCPP"),
+                               // Both, whatever this station has: which of
+                               // them a login may use is nobody's to learn
+                               // from a refusal.
+                               WWWAuthenticate = WWWAuthenticate.Basic("OCPP").And(WWWAuthenticate.TOTP("OCPP")),
                                Connection      = ConnectionType.Close
                            }.AsImmutable
                        );

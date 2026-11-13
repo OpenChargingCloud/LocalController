@@ -76,6 +76,63 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region AStationThatIsTurnedAwayIsToldItMayComeWithAPasswordOrAOneTimeToken()
+
+        /// <summary>
+        /// The 401 names both schemes, whatever the station has: a password
+        /// and a one-time token, in one WWW-Authenticate.
+        /// </summary>
+        [Test]
+        public async Task AStationThatIsTurnedAwayIsToldItMayComeWithAPasswordOrAOneTimeToken()
+        {
+
+            using var tcp = new System.Net.Sockets.TcpClient();
+
+            await tcp.ConnectAsync(System.Net.IPAddress.Loopback, Int32.Parse(Controller.OCPPServerSettings.TCPPort!.Value.ToString()));
+
+            var stream = tcp.GetStream();
+
+            await stream.WriteAsync(Encoding.ASCII.GetBytes(
+                                        "GET / HTTP/1.1\r\n" +
+                                       $"Host: 127.0.0.1:{Controller.OCPPServerSettings.TCPPort}\r\n" +
+                                        "Connection: Upgrade\r\n" +
+                                        "Upgrade: websocket\r\n" +
+                                        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+                                        "Sec-WebSocket-Version: 13\r\n" +
+                                        "Sec-WebSocket-Protocol: ocpp2.1\r\n" +
+                                        "\r\n"));
+
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+            var answer = new StringBuilder();
+            var buffer = new Byte[4096];
+
+            while (!answer.ToString().Contains("\r\n\r\n"))
+            {
+
+                var read = await stream.ReadAsync(buffer, timeout.Token);
+
+                if (read == 0)
+                    break;
+
+                answer.Append(Encoding.ASCII.GetString(buffer, 0, read));
+
+            }
+
+            var challenge = answer.ToString().
+                                   Split("\r\n").
+                                   FirstOrDefault(line => line.StartsWith("WWW-Authenticate:", StringComparison.OrdinalIgnoreCase));
+
+            Assert.Multiple(() => {
+                Assert.That(answer.ToString(),  Does.StartWith("HTTP/1.1 401"));
+                Assert.That(challenge,          Is.EqualTo("WWW-Authenticate: Basic realm=\"OCPP\", charset=\"UTF-8\", TOTP realm=\"OCPP\""));
+            });
+
+        }
+
+        #endregion
+
+
         #region (private) Connect(Authorization) / BasicAuth(...) / TOTPAuth(...)
 
         /// <summary>
