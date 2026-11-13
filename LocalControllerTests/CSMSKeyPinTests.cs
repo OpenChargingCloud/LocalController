@@ -72,7 +72,13 @@ namespace cloud.charging.open.LocalController.Tests
             public WebSocketServer   Server       { get; }
             public X509Certificate2  Certificate  { get; }
 
-            public CSMS(X509Certificate2 Certificate)
+            /// <summary>
+            /// What the TLS handshakes of its connections came to.
+            /// </summary>
+            public ConcurrentQueue<TLSSession?> TLSSessions { get; } = new();
+
+            public CSMS(X509Certificate2  Certificate,
+                        RawPublicKeyMode  RawPublicKeys = RawPublicKeyMode.Off)
             {
 
                 this.Certificate = Certificate;
@@ -84,7 +90,15 @@ namespace cloud.charging.open.LocalController.Tests
                              SecWebSocketProtocols:      [ "ocpp2.1" ],
                              DisableWebSocketPings:      true,
                              AutoStart:                  true
-                         );
+                         ) {
+                             // Whether this CSMS shows its key raw, without its certificate (RFC 7250).
+                             RawPublicKeys = RawPublicKeys
+                         };
+
+                Server.OnNewWebSocketConnection += (timestamp, server, connection, eventTrackingId, sharedSubprotocols, selectedSubprotocol, cancellationToken) => {
+                    TLSSessions.Enqueue(connection.TLSSession);
+                    return Task.CompletedTask;
+                };
 
                 Server.OnTextMessageReceived += async (timestamp, server, connection, frame, eventTrackingId, text, cancellationToken) => {
 
@@ -189,6 +203,14 @@ namespace cloud.charging.open.LocalController.Tests
             /// <summary>
             /// The security events of the given type the controller sent so far.
             /// </summary>
+            /// <summary>
+            /// What this CSMS was sent, in its order: for a test that has to say what did not come.
+            /// </summary>
+            public String Heard()
+                => String.Join(", ", received.Select(message => message[0].Value<Int32>() == 2
+                                                                    ? $"{message[2]}{(message[2].Value<String>() == "SecurityEventNotification" ? $"({message[3]?.Value<String>("type")})" : "")}"
+                                                                    : $"[{message[0]}]"));
+
             public JObject[] SecurityEvents(String Type)
                 => [.. received.Where (message => message[0].Value<Int32>() == 2 && message[2].Value<String>() == "SecurityEventNotification").
                                 Select(message => message[3] as JObject).
@@ -275,10 +297,17 @@ namespace cloud.charging.open.LocalController.Tests
         /// The CSMS, and the controller below it: set to dial it over wss:// with a password, to trust its
         /// key on first use, and to believe the pin sets this test's signer signs - then started.
         /// </summary>
-        private async Task AControllerThatLearnsTheKeyOfItsCSMS(Int64? ProbationSeconds = null)
+        /// <param name="ProbationSeconds">How long a learned key pin is on probation.</param>
+        /// <param name="RawPublicKeys">Whether the line offers raw public keys (RFC 7250): nothing, "Off", "Prefer" or "Require".</param>
+        /// <param name="CSMSShowsItsKeyRaw">Whether the CSMS shows its key raw.</param>
+        /// <param name="GetsThrough">Whether the controller is waited for to get through.</param>
+        private async Task AControllerThatLearnsTheKeyOfItsCSMS(Int64?            ProbationSeconds     = null,
+                                                                String?           RawPublicKeys        = null,
+                                                                RawPublicKeyMode  CSMSShowsItsKeyRaw   = RawPublicKeyMode.Off,
+                                                                Boolean           GetsThrough          = true)
         {
 
-            csms = new CSMS(ACertificate());
+            csms = new CSMS(ACertificate(), CSMSShowsItsKeyRaw);
 
             controller = await TestPorts.StartedOnFreshPorts(() => {
 
@@ -292,7 +321,7 @@ namespace cloud.charging.open.LocalController.Tests
 
                              Assert.That(made.CSMSLogin.TrySetPassword("lc002", "a-password-of-the-line-to-the-csms", out var loginError), Is.True, loginError);
 
-                             Assert.That(made.CSMSPins.TrySetTrust(new ServerKeyPinSettings(null, "Key", ProbationSeconds), out var trustError), Is.True, trustError);
+                             Assert.That(made.CSMSPins.TrySetTrust(new ServerKeyPinSettings(RawPublicKeys, "Key", ProbationSeconds), out var trustError), Is.True, trustError);
 
                              Assert.That(made.CSMSPins.TryAddPinSetSigner(Convert.ToBase64String(signer.PublicKeyBytes), "The CSMS", out var signerError), Is.True, signerError);
 
@@ -309,7 +338,8 @@ namespace cloud.charging.open.LocalController.Tests
 
                          });
 
-            await Until(() => csms.Connections > 0 && controller.CSMSConnected, "The controller got through to its CSMS", () => controller.CSMSLastProblem ?? "");
+            if (GetsThrough)
+                await Until(() => csms.Connections > 0 && controller.CSMSConnected, "The controller got through to its CSMS", () => controller.CSMSLastProblem ?? "");
 
         }
 
@@ -343,16 +373,25 @@ namespace cloud.charging.open.LocalController.Tests
         /// this test's signer for the controller, as the CSMS sends it, with the message id it goes under.
         /// </summary>
         private (JObject Payload, String Id) PinSet(String Pins, UInt64 Version)
+
+            => Signed(("ServerKeyPins", Pins), ("ServerKeyPinsVersion", Version.ToString()));
+
+        /// <summary>
+        /// A SetVariables of the line's TLSClientController, signed by this test's signer for the
+        /// controller, as the CSMS sends it, with the message id it goes under.
+        /// </summary>
+        private (JObject Payload, String Id) Signed(params (String Variable, String Value)[] Variables)
         {
 
             var id       = Guid.NewGuid().ToString();
 
             var request  = new OCPPv2_1.CSMS.SetVariablesRequest(
                                SourceRouting.To(NetworkingNode_Id.Parse("lc002")),
-                               [
-                                   new OCPPv2_1.SetVariableData(new OCPPv2_1.Component("TLSClientController", "csms"), new OCPPv2_1.Variable("ServerKeyPins"),        Pins),
-                                   new OCPPv2_1.SetVariableData(new OCPPv2_1.Component("TLSClientController", "csms"), new OCPPv2_1.Variable("ServerKeyPinsVersion"), Version.ToString())
-                               ],
+                               Variables.Select(one => new OCPPv2_1.SetVariableData(
+                                                           new OCPPv2_1.Component("TLSClientController", "csms"),
+                                                           new OCPPv2_1.Variable(one.Variable),
+                                                           one.Value
+                                                       )),
                                RequestId: Request_Id.Parse(id)
                            );
 
@@ -492,6 +531,214 @@ namespace cloud.charging.open.LocalController.Tests
 
                 Assert.That(afterwards[0].Value<Int32>(), Is.EqualTo(3), $"a request was refused after the key was confirmed: {afterwards}");
 
+            });
+
+        }
+
+        #endregion
+
+        #region TheKeyOfTheCSMS_ComesRaw_IsLearned_AndConfirmedByASignedPinSet(RawPublicKeys)
+
+        /// <summary>
+        /// A line that prefers or requires raw public keys (RFC 7250), and a CSMS that shows its key raw: no
+        /// certificate goes over the line. The key is learned on first use and put on probation as the key
+        /// of a certificate is, the CSMS is told, the variable says what was asked, and a signed pin set
+        /// confirms the key - the key pin rules do not ask how the key came.
+        /// </summary>
+        [Test]
+        public async Task TheKeyOfTheCSMS_ComesRaw_IsLearned_AndConfirmedByASignedPinSet([Values("Prefer", "Require")] String RawPublicKeys)
+        {
+
+            await AControllerThatLearnsTheKeyOfItsCSMS(RawPublicKeys: RawPublicKeys, CSMSShowsItsKeyRaw: RawPublicKeyMode.Prefer);
+
+            var pin = KeyPin.FromCertificate(csms!.Certificate);
+
+            await Until(() => csms.SecurityEvents("KeyPinLearned").Length > 0, "The CSMS was told of the key pin learned");
+
+            var trust     = controller!.CSMSKeyPinning!.TrustOf("csms");
+            var session   = csms.TLSSessions.First();
+            var asked     = await csms.Ask("GetVariables", GetVariables("TLSClientController", "RawPublicKeys", "csms"));
+
+            Assert.Multiple(() => {
+
+                // What the controller was shown: a key, and no certificate.
+                Assert.That(trust?.LastValidation?.Outcome,          Is.EqualTo(KeyPinOutcome.Learned));
+                Assert.That(trust?.LastValidation?.CertificateType,  Is.EqualTo(TLSCertificateType.RawPublicKey));
+                Assert.That(trust?.Learned,                          Is.EqualTo(pin));
+                Assert.That(trust?.OnProbation,                      Is.True);
+
+                // What the CSMS showed.
+                Assert.That(session?.Provider,                       Is.EqualTo(TLSProvider.BouncyCastle));
+                Assert.That(session?.LocalCertificateType,           Is.EqualTo(TLSCertificateType.RawPublicKey));
+
+                // The key pin rules as for a key in a certificate.
+                Assert.That(controller.CSMSPins.ToJSON().Value<String>("serverKeyPinState"),    Is.EqualTo("Learned"));
+                Assert.That(controller.CSMSPins.ToJSON().Value<String>("serverKeyPinLearned"),  Is.EqualTo(pin.ToHex()));
+                Assert.That(csms.SecurityEvents("KeyPinLearned").Single().Value<String>("techInfo"), Does.Contain(pin.ToString()));
+
+                Assert.That(asked[2]?["getVariableResult"]?[0]?.Value<String>("attributeValue"),  Is.EqualTo(RawPublicKeys), asked.ToString());
+
+            });
+
+            var (payload, id) = PinSet(pin.ToHex(), 1);
+            var confirmed     = await csms.Ask("SetVariables", payload, id);
+
+            await Until(() => csms.SecurityEvents("KeyPinConfirmed").Length > 0, "The CSMS was told the key pin is confirmed");
+
+            var afterwards    = await csms.Ask("GetVariables", GetVariables("DNSClientController", "Servers"));
+
+            Assert.Multiple(() => {
+                Assert.That(confirmed[2]?["setVariableResult"]?.Select(result => result.Value<String>("attributeStatus")), Is.All.EqualTo("Accepted"), confirmed.ToString());
+                Assert.That(controller.CSMSPins.ToJSON().Value<String>("serverKeyPinState"),  Is.EqualTo("Confirmed"));
+                Assert.That(trust?.OnProbation,                                               Is.False);
+                Assert.That(afterwards[0].Value<Int32>(), Is.EqualTo(3), $"a request was refused after the key was confirmed: {afterwards}");
+            });
+
+        }
+
+        #endregion
+
+        #region TheCSMSMayAskForRawPublicKeysAlone()
+
+        /// <summary>
+        /// "Require" is a value of the variable RawPublicKeys as "Prefer" and "Off" are: a CSMS whose key
+        /// was confirmed asks for it in a signed SetVariables, it is taken and written down - the line
+        /// offers raw public keys, so it is not one that could not be dialled any more.
+        /// </summary>
+        [Test]
+        public async Task TheCSMSMayAskForRawPublicKeysAlone()
+        {
+
+            await AControllerThatLearnsTheKeyOfItsCSMS(CSMSShowsItsKeyRaw: RawPublicKeyMode.Prefer);
+
+            var (pinSet, pinSetId)  = PinSet(KeyPin.FromCertificate(csms!.Certificate).ToHex(), 1);
+            await csms.Ask("SetVariables", pinSet, pinSetId);
+
+            await Until(() => csms.SecurityEvents("KeyPinConfirmed").Length > 0, "The CSMS was told the key pin is confirmed");
+
+            var before          = await csms.Ask("GetVariables", GetVariables("TLSClientController", "RawPublicKeys", "csms"));
+
+            var (payload, id)   = Signed(("RawPublicKeys", "Require"));
+            var taken           = await csms.Ask("SetVariables", payload, id);
+
+            var afterwards      = await csms.Ask("GetVariables", GetVariables("TLSClientController", "RawPublicKeys", "csms"));
+
+            Assert.Multiple(() => {
+                Assert.That(before    [2]?["getVariableResult"]?[0]?.Value<String>("attributeValue"),   Is.EqualTo("Off"), before.ToString());
+                Assert.That(taken     [2]?["setVariableResult"]?.Select(result => result.Value<String>("attributeStatus")), Is.All.EqualTo("Accepted"), taken.ToString());
+                Assert.That(afterwards[2]?["getVariableResult"]?[0]?.Value<String>("attributeValue"),   Is.EqualTo("Require"), afterwards.ToString());
+                Assert.That(controller!.CSMSKeyPinning!.TrustOf("csms")?.Policy()?.RawPublicKeys,       Is.EqualTo(RawPublicKeyMode.Require));
+            });
+
+        }
+
+        #endregion
+
+        #region ALineThatPrefersRawPublicKeys_TakesTheCertificateOfACSMSThatHasNone_ByItsKeyPin()
+
+        /// <summary>
+        /// A CSMS that knows no raw public keys shows its certificate, and a line that only prefers them
+        /// believes it by the key pin of the key in it, as before.
+        /// </summary>
+        [Test]
+        public async Task ALineThatPrefersRawPublicKeys_TakesTheCertificateOfACSMSThatHasNone_ByItsKeyPin()
+        {
+
+            await AControllerThatLearnsTheKeyOfItsCSMS(RawPublicKeys: "Prefer");
+
+            var pin   = KeyPin.FromCertificate(csms!.Certificate);
+            var trust = controller!.CSMSKeyPinning!.TrustOf("csms");
+
+            await Until(() => csms.SecurityEvents("KeyPinLearned").Length > 0, "The CSMS was told of the key pin learned");
+
+            Assert.Multiple(() => {
+                Assert.That(trust?.LastValidation?.Outcome,          Is.EqualTo(KeyPinOutcome.Learned));
+                Assert.That(trust?.LastValidation?.CertificateType,  Is.EqualTo(TLSCertificateType.X509));
+                Assert.That(trust?.Learned,                          Is.EqualTo(pin));
+                Assert.That(csms.TLSSessions.First()?.Provider,      Is.EqualTo(TLSProvider.SslStream));
+                Assert.That(controller.CSMSPins.ToJSON().Value<String>("serverKeyPinState"), Is.EqualTo("Learned"));
+            });
+
+        }
+
+        #endregion
+
+        #region ALineThatRequiresRawPublicKeys_DoesNotBelieveACSMSThatShowsACertificate()
+
+        /// <summary>
+        /// A line that requires raw public keys is dialled - and a CSMS that shows a certificate is turned
+        /// away, whatever key is in it: nothing is learned, and the controller says why it has no line.
+        /// </summary>
+        [Test]
+        public async Task ALineThatRequiresRawPublicKeys_DoesNotBelieveACSMSThatShowsACertificate()
+        {
+
+            await AControllerThatLearnsTheKeyOfItsCSMS(RawPublicKeys: "Require", GetsThrough: false);
+
+            await Until(() => controller!.CSMSKeyPinning?.TrustOf("csms")?.LastValidation is not null,
+                        "The controller dialled its CSMS",
+                        () => controller!.CSMSLastProblem ?? "");
+
+            var trust = controller!.CSMSKeyPinning!.TrustOf("csms");
+
+            await Until(() => controller.CSMSLastProblem is not null, "The controller says why it has no line");
+
+            Assert.Multiple(() => {
+                Assert.That(trust?.LastValidation?.Outcome,          Is.EqualTo(KeyPinOutcome.Refused));
+                Assert.That(trust?.LastValidation?.CertificateType,  Is.EqualTo(TLSCertificateType.X509));
+                Assert.That(trust?.LastValidation?.Reason,           Does.Contain("requires a raw public key"));
+                Assert.That(trust?.Learned,                          Is.Null);
+                Assert.That(controller.CSMSConnected,                Is.False);
+                Assert.That(csms!.Connections,                       Is.Zero);
+                Assert.That(controller.CSMSPins.ToJSON().Value<String>("serverKeyPinState"), Is.Not.EqualTo("Learned"));
+            });
+
+        }
+
+        #endregion
+
+        #region APinSetWithAnotherKey_RefusesTheCSMS_WhoseKeyCameRaw()
+
+        /// <summary>
+        /// A signed pin set without the key pin learned refuses a CSMS whose key came raw as it refuses one
+        /// whose key came in a certificate: the line is closed, and dialled again the raw key is turned away
+        /// by the pins that were signed.
+        /// </summary>
+        [Test]
+        public async Task APinSetWithAnotherKey_RefusesTheCSMS_WhoseKeyCameRaw()
+        {
+
+            await AControllerThatLearnsTheKeyOfItsCSMS(RawPublicKeys: "Require", CSMSShowsItsKeyRaw: RawPublicKeyMode.Prefer);
+
+            var pin            = KeyPin.FromCertificate(csms!.Certificate);
+
+            // The controller tells its events in their order, each once the one before was taken: the
+            // pin set is sent once the first one is through, or the line is closed over what waits behind it.
+            await Until(() => csms.SecurityEvents("KeyPinLearned").Length > 0, "The CSMS was told of the key pin learned");
+
+            using var other    = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            var (payload, id)  = PinSet(KeyPin.FromKey(other).ToHex(), 1);
+            var taken          = await csms.Ask("SetVariables", payload, id);
+
+            // Not waited for here: the security event KeyPinRejected. The line is closed once the answer
+            // to the pin set is out, and the event waits in the controller's queue beside it - which of
+            // the two is first is not said (see APinSetWithAnotherKey_RefusesTheCSMS, which asks for it).
+            await Until(() => !controller!.CSMSConnected && csms.Connections == 0, "The line was closed",
+                        () => $"heard: {csms.Heard()}; said: {controller!.CSMSLastProblem}");
+
+            // Dialled again, with its back-off: the key that was learned is none of those pinned now.
+            await Until(() => controller!.CSMSKeyPinning!.TrustOf("csms")?.LastValidation is { Outcome: KeyPinOutcome.Refused },
+                        "The CSMS was dialled again and turned away",
+                        () => controller!.CSMSLastProblem ?? "");
+
+            var refused = controller!.CSMSKeyPinning!.TrustOf("csms")!.LastValidation!;
+
+            Assert.Multiple(() => {
+                Assert.That(taken[2]?["setVariableResult"]?.Select(result => result.Value<String>("attributeStatus")), Is.All.EqualTo("Accepted"), taken.ToString());
+                Assert.That(refused.CertificateType,   Is.EqualTo(TLSCertificateType.RawPublicKey));
+                Assert.That(refused.Pin,               Is.EqualTo(pin));
+                Assert.That(controller.CSMSConnected,  Is.False);
+                Assert.That(controller.CSMSPins.ToJSON()["serverKeyPins"]?.Select(one => one.Value<String>()), Is.EqualTo(new[] { KeyPin.FromKey(other).ToHex() }));
             });
 
         }
