@@ -30,6 +30,8 @@ using cloud.charging.open.protocols.WWCP.NetworkingNode;
 using OCPPv2_1_LC = cloud.charging.open.protocols.OCPPv2_1.LocalController;
 
 using cloud.charging.open.protocols.WWCP.Node;
+using cloud.charging.open.protocols.OCPP.Node;
+using cloud.charging.open.protocols.OCPP.Node.Connections;
 using cloud.charging.open.protocols.WWCP.Node.Logging;
 using cloud.charging.open.protocols.WWCP.Node.Certificates;
 using cloud.charging.open.protocols.WWCP.Node.Configuration;
@@ -68,7 +70,7 @@ namespace cloud.charging.open.LocalController
     /// vehicle and a charging station are built on as well. What is here is
     /// what makes one of those a local controller.
     /// </remarks>
-    public partial class LocalController : WWCPNode
+    public partial class LocalController : OCPPDiallingNode
     {
 
         #region Data
@@ -370,6 +372,11 @@ namespace cloud.charging.open.LocalController
             // configuration file, because what it listens on is written there.
             // Nothing listens yet: Start() does.
             BuildOCPPServer(configuration.OCPPServer);
+
+            // What this controller dials, what it proves itself with there
+            // and whom it believes: the stores a charging station has, beside
+            // the configuration file as everything else it was given.
+            BuildConnectionStores();
 
             // And the line upwards. Nothing is dialled yet either, for the
             // same reason: Start() does.
