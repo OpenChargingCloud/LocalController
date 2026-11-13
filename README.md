@@ -117,6 +117,29 @@ dropped there, and the CSMS's log says so. Either way the controller answers wha
 addressed to it and forwards what is addressed to a station; a change waits for
 the line to be dialled again.
 
+Over `wss://` the CSMS is believed either by its certificate, as a CA vouches
+for it, or - key-pinned, as the charging stations believe their local
+controller - by the key pin of its key and by nothing else of its certificate
+("Key Pins and Raw Public Keys for Local Controllers", sections 5.4 to 5.7).
+The key pins are set under "How it believes the CSMS" on the CSMS connection
+page, with `csmsKeys` at the command line, or with `PUT
+/api/v1/configuration/csms/keypins`; with trust on first use the key pin of the
+first key the CSMS shows is learned, and is on probation until a pin set signed
+by one of the signers of pin sets (`POST`/`DELETE
+/api/v1/configuration/csms/pinSetSigners`, `csmsKeys signer add|remove`)
+confirms it - over OCPP, as `SetVariables` of `TLSClientController` instance
+`csms`, with `ServerKeyPins` and a higher `ServerKeyPinsVersion`. While the line
+is on probation nothing that comes over it is carried out, and nothing is sent
+on to a station: only that pin set, and reads of `TLSClientController`, pass. A
+pin set without the key learned closes the line, which is then held to the
+signed pins; a probation that runs out forgets the key and learns again. Each
+step is told to the CSMS as a security event of this controller's
+(`KeyPinLearned`, `KeyPinConfirmed`, `KeyPinRejected`,
+`KeyPinProbationExpired`, `InvalidCsmsCertificate`). What is learned and signed
+is written to `csms-keypins.json` beside the configuration file; the decisions
+are WWCP_OCPP_Node's key-pin core, which the charging stations use as well.
+Every change needs `csms:edit` and applies from the next dial of the line.
+
 What only a CSMS asks of a node it manages - `InstallSSHKey`, `DeleteSSHKey`,
 `SetVariables`, `GetVariables`, a `Reset`, its files and its signature
 policies, every request of OCPP 2.1 a CSMS sends - comes over this line and

@@ -492,7 +492,13 @@ namespace cloud.charging.open.LocalController.Tests
                                                                                                                    Does.Contain("certificates:edit"));
                 Assert.That(Entry(policy, byTheNameServers, "EVQICtrlr",                 "KeyPins", "read", "TLSServer").Reason ?? "",
                                                                                                                    Does.Contain("certificates:read"));
-                Assert.That(Entry(policy, byTheNameServers, "TLSClientController",       "ServerKeyPins").  Reason ?? "", Does.Contain("csms:edit"));
+                Assert.That(Entry(policy, byTheNameServers, "TLSClientController",       "TrustOnFirstUse", Instance: "csms").Reason ?? "",
+                                                                                                                   Does.Contain("csms:edit"));
+
+                // A pin set is the signers of pin sets' to hold it to, not a role's:
+                // the policy lets it on to the line's own check, whoever signed it.
+                Assert.That(Entry(policy, byTheNameServers, "TLSClientController",       "ServerKeyPins",        Instance: "csms").Applied, Is.True);
+                Assert.That(Entry(policy, byTheNameServers, "TLSClientController",       "ServerKeyPinsVersion", Instance: "csms").Applied, Is.True);
                 Assert.That(Entry(policy, byTheNameServers, "SecurityCtrlr",             "OrganizationName").Reason ?? "", Does.Contain("configuration:edit"));
 
                 Assert.That(Entry(policy, byNobody,         "DNSClientController",       "Servers").        Applied, Is.False, "an unsigned entry was applied");

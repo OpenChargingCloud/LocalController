@@ -339,6 +339,59 @@ namespace cloud.charging.open.LocalController.Tests
         #endregion
 
 
+        #region CSMSKeys_AreSetAndShown_AtTheConsole()
+
+        /// <summary>
+        /// How the controller believes its CSMS, at the console: by its certificate to begin with, then
+        /// key-pinned by trust on first use, its probation, a key pin set and a signer of pin sets - all
+        /// written down, and shown - and what is no key pin, no setting or no key refused.
+        /// </summary>
+        [Test]
+        public async Task CSMSKeys_AreSetAndShown_AtTheConsole()
+        {
+
+            var lc          = AController();
+            using var cli   = new ControllerCLI(lc);
+
+            Assert.That(lc.TryUpdateCSMSConfiguration(new JObject(new JProperty("url", "wss://csms.test/lc001")), out var urlError), Is.True, urlError);
+
+            using var key   = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+            var pin         = KeyPin.FromKey(key).ToHex();
+            var point       = key.ExportParameters(false).Q;
+            var signer      = Convert.ToBase64String([ 4, .. point.X!, .. point.Y! ]);
+
+            var before      = await cli.Execute("csmsKeys");
+            var tofu        = await cli.Execute("csmsKeys tofu on");
+            var probation   = await cli.Execute("csmsKeys probation 120");
+            var pinned      = await cli.Execute($"csmsKeys pins {pin}");
+            var signed      = await cli.Execute($"csmsKeys signer add {signer} The CSMS of the site");
+            var notAPin     = await cli.Execute("csmsKeys pins 1234");
+            var notTrust    = await cli.Execute("csmsKeys tofu maybe");
+            var notAKey     = await cli.Execute("csmsKeys signer add nokey Somebody");
+            var unknown     = await cli.Execute("csmsKeys rotate");
+            var written     = File.ReadAllText(lc.CSMSPins.Path);
+
+            Assert.Multiple(() => {
+
+                Assert.That(before.First(),        Is.EqualTo("The CSMS is believed by its certificate, as a CA vouches for it."));
+                Assert.That(tofu.First(),          Is.EqualTo("The CSMS is believed by the key pin of its key, and by nothing else of its certificate."));
+                Assert.That(probation,             Has.Some.Contains("probation 120 s"));
+                Assert.That(pinned,                Has.Some.StartWith($"key pins          {pin}"));
+                Assert.That(signed,                Has.Some.Contains(signer).And.Contains("The CSMS of the site"));
+
+                Assert.That(notAPin.Single(),      Does.StartWith("Nothing was changed: ").And.Contain("is no key pin"));
+                Assert.That(notTrust.Single(),     Does.StartWith("Nothing was changed: ").And.Contain("trust on first use"));
+                Assert.That(notAKey.Single(),      Does.StartWith("Nothing was changed: "));
+                Assert.That(unknown.Single(),      Does.StartWith("Usage: csmsKeys "));
+
+                Assert.That(written,               Does.Contain(pin).And.Contain(signer).And.Contain("\"trustOnFirstUse\": \"Key\"").And.Contain("\"serverKeyPinProbationTime\": 120"));
+
+            });
+
+        }
+
+        #endregion
+
         #region ServerKeys_AreMadeShownAndSwitched_AtTheConsole()
 
         /// <summary>

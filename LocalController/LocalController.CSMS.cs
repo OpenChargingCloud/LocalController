@@ -156,6 +156,10 @@ namespace cloud.charging.open.LocalController
             if (!CSMSLogin.TryLoad(out var error))
                 Log.Critical($"The CSMS credentials could not be read: {error}", "ocpp", "csms", "auth");
 
+            // How the CSMS is believed beyond what a CA says - see
+            // LocalController.CSMSKeyPins.cs.
+            BuildCSMSKeyPins(directory);
+
             Log.Info(
                 csmsSettings.Enabled == true
                     ? $"This local controller reports to {csmsSettings.URL} (security profile {csmsSettings.SecurityProfile}, " +
@@ -238,7 +242,22 @@ namespace cloud.charging.open.LocalController
 
             RemoteTLSServerCertificateValidationHandler<org.GraphDefined.Vanaheimr.Hermod.WebSocket.IWebSocketClient>? judgeTheCSMS = null;
 
-            if (csmsSettings.WantsTLS)
+            // Key-pinned, the CSMS is known by the key pin of its key and by
+            // nothing else of its certificate - learned on first use where the
+            // line trusts on first use - see LocalController.CSMSKeyPins.cs.
+            var keyPinTrust = KeyPinTrustOfTheCSMS(out var keyPinnedLine, out var notByKeyPin);
+
+            if (notByKeyPin is not null)
+            {
+                csmsLastProblem = $"The line up to the CSMS at {url} is not dialled: it {notByKeyPin}.";
+                Log.Warning(csmsLastProblem, "ocpp", "csms", "keypins");
+                return;
+            }
+
+            if (keyPinTrust is not null)
+                judgeTheCSMS = keyPinTrust.Validator;
+
+            else if (csmsSettings.WantsTLS)
                 judgeTheCSMS = (sender, certificate, chain, client, errors) => {
 
                     var judgement = JudgeServer(CSMSService, host, null, certificate, chain, errors, Evidence: false);
@@ -355,6 +374,11 @@ namespace cloud.charging.open.LocalController
             // Whether the first attempt got through or not: the client is the
             // node's either way, and goes on by itself.
             WireCSMSLogging(url, signedIn);
+
+            // A key pin learned on the connection made now and on every one
+            // after, and a CSMS not believed when it is tried again.
+            if (keyPinTrust is not null && keyPinnedLine is not null && csmsKeyPinning is not null && TheCSMSClient() is org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient keyPinnedClient)
+                csmsKeyPinning.Follow(keyPinnedLine, keyPinnedClient, keyPinTrust, URL.Parse(url), csmsConnected);
 
             csmsAsBuilt = csmsSettings;
 
@@ -774,6 +798,8 @@ namespace cloud.charging.open.LocalController
 
             json.Add("credentials", CSMSLogin.ToJSON());
 
+            json.Add("keyPins",     CSMSKeyPinsJSON());
+
             return json;
 
         }
@@ -815,6 +841,9 @@ namespace cloud.charging.open.LocalController
             }
 
             csmsSettings = wanted;
+
+            // Over TLS or not any more: TLSClientController follows.
+            FollowCSMSKeyPinComponents();
 
             return true;
 

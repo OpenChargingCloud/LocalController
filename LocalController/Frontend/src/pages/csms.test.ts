@@ -34,6 +34,24 @@ function controller({ method, path, body }: Asked): unknown {
         return held;
     }
 
+    if (path === '/configuration/csms/keypins' && method === 'PUT') {
+        const update = body as { serverKeyPins: string; trustOnFirstUse: 'None' | 'Key'; serverKeyPinProbationTime: number };
+        if (update.serverKeyPins.includes('nonsense'))
+            return refused(400, "'nonsense' is no key pin");
+        held = { ...held, keyPins: { ...held.keyPins!,
+                                     serverKeyPins:              update.serverKeyPins.split(',').map(pin => pin.trim()).filter(pin => pin.length > 0),
+                                     trustOnFirstUse:            update.trustOnFirstUse,
+                                     serverKeyPinProbationTime:  update.serverKeyPinProbationTime,
+                                     keyPinned:                  true } };
+        return held;
+    }
+
+    if (path === '/configuration/csms/pinSetSigners' && method === 'POST') {
+        const signer = body as { publicKey: string; description: string };
+        held = { ...held, keyPins: { ...held.keyPins!, pinSetSigners: [ ...held.keyPins!.pinSetSigners, { ...signer, createdAt: '2026-11-13T00:00:00Z' } ] } };
+        return held;
+    }
+
     if (path === '/configuration/csms')
         return held;
 
@@ -53,7 +71,10 @@ async function opened(): Promise<HTMLElement> {
         enabled: true, url: 'wss://csms.example.org/ocpp/lc001', securityProfile: 2, subprotocols: [ 'ocpp2.1' ],
         checkCertificateRevocation: false, pingEvery: 60, requestTimeout: 30, reconnectInitialDelay: 5, reconnectMaxDelay: 300,
         credentials: { file: 'csms.secret', username: null, hasPassword: false, hasTOTP: false, minPasswordLength: 16 },
-        state:       { connected: false, connectedSince: null, lastProblem: null, hasCredentials: false, waitingForARestart: [] }
+        state:       { connected: false, connectedSince: null, lastProblem: null, hasCredentials: false, waitingForARestart: [] },
+        keyPins:     { serverKeyPins: [], serverKeyPinsVersion: 0, serverKeyPinState: 'Learned', rawPublicKeys: 'Off', trustOnFirstUse: 'Key',
+                       serverKeyPinProbationTime: 600, pinSetSigners: [], serverKeyPinLearned: 'ab'.repeat(32), serverKeyPinLearnedAt: '2026-11-13T00:00:00Z',
+                       keyPinned: true, overTLS: true, onProbation: true, keyPinShown: 'ab'.repeat(32) }
     };
     refuseConnection = false;
     return open(csmsPage, '/configuration/csms', [ 'csms:read', 'csms:edit', 'certificates:read' ],
@@ -62,6 +83,67 @@ async function opened(): Promise<HTMLElement> {
 
 
 describe('the CSMS page', () => {
+
+    it('says how the line believes its CSMS: key-pinned, on probation, by the key pin it learned, and that no signer is believed', async () => {
+
+        const root = await opened();
+
+        assert.match(root.querySelector('#keypins-state')?.textContent ?? '',   /key-pinned/);
+        assert.match(root.querySelector('#keypins-state')?.textContent ?? '',   /on probation/);
+        assert.match(root.querySelector('#keypins-learned')?.textContent ?? '', new RegExp('ab'.repeat(32)));
+        assert.ok(root.querySelector('#keypins-no-signer') !== null, 'no word that a pin set would be refused');
+
+    });
+
+    it('saves the key pins as typed, and shows them as the controller took them', async () => {
+
+        const root = await opened();
+        const pin  = 'cd'.repeat(32);
+
+        field(root, '#keypins-form', 'serverKeyPins').value             = pin;
+        field(root, '#keypins-form', 'serverKeyPinProbationTime').value = '120';
+
+        submit(root, '#keypins-form');
+        await until(() => asked.some(one => one.path === '/configuration/csms/keypins'), 'the key pins were not saved');
+        await until(() => (root.querySelector('#keypins-pins')?.textContent ?? '').includes(pin), 'the key pins taken are not shown');
+
+        const sent = asked.find(one => one.path === '/configuration/csms/keypins')?.body as { serverKeyPins: string; trustOnFirstUse: string; serverKeyPinProbationTime: number };
+
+        assert.equal(sent.serverKeyPins,              pin);
+        assert.equal(sent.trustOnFirstUse,            'Key');
+        assert.equal(sent.serverKeyPinProbationTime,  120);
+
+    });
+
+    it('keeps key pins the controller refused, and says why', async () => {
+
+        const root = await opened();
+
+        field(root, '#keypins-form', 'serverKeyPins').value = 'nonsense';
+
+        submit(root, '#keypins-form');
+        await until(() => (root.querySelector('#keypins-error')?.textContent ?? '').length > 0, 'nothing was said of the refusal');
+
+        assert.match(root.querySelector('#keypins-error')?.textContent ?? '', /no key pin/);
+        assert.equal(field(root, '#keypins-form', 'serverKeyPins').value, 'nonsense', 'what was typed went');
+
+    });
+
+    it('adds a signer of pin sets, and lists it', async () => {
+
+        const root = await opened();
+
+        field(root, '#signer-form', 'publicKey').value    = 'BASE64KEY';
+        field(root, '#signer-form', 'description').value  = 'The CSMS of the site';
+
+        submit(root, '#signer-form');
+        await until(() => root.querySelector('#keypins-signers') !== null, 'the signer is not listed');
+
+        assert.deepEqual(asked.find(one => one.path === '/configuration/csms/pinSetSigners')?.body,
+                         { publicKey: 'BASE64KEY', description: 'The CSMS of the site' });
+        assert.match(root.querySelector('#keypins-signers')?.textContent ?? '', /The CSMS of the site/);
+
+    });
 
     it('sends whoever looks for the identity profile 3 signs in with to the Identities, where who the controller is as a client is kept', async () => {
 

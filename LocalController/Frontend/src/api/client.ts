@@ -333,6 +333,47 @@ export interface CSMSCredentials {
     totp?:              TOTPSettings;
 }
 
+/** A key whose pin sets for the line up to the CSMS are believed: the CSMS's signing anchor. */
+export interface PinSetSigner {
+    publicKey:    string;
+    description:  string;
+    createdAt:    string;
+}
+
+/**
+ * How the line up to the CSMS believes its server beyond what a CA says: key pins, one learned on
+ * first use and on probation, and the signers of pin sets.
+ */
+export interface CSMSKeyPins {
+    serverKeyPins:              string[];
+    serverKeyPinsVersion:       number;
+    serverKeyPinState:          'Configured' | 'Learned' | 'Confirmed';
+    rawPublicKeys:              'Off' | 'Prefer' | 'Require';
+    trustOnFirstUse:            'None' | 'Key';
+    /** Seconds a key pin learned waits for a signed pin set. */
+    serverKeyPinProbationTime:  number;
+    pinSetSigners:              PinSetSigner[];
+    serverKeyPinLearned?:       string;
+    serverKeyPinLearnedAt?:     string;
+    /** Whether the CSMS is believed by a key pin, rather than by its certificate. */
+    keyPinned:                  boolean;
+    /** Whether the line goes over TLS at all. */
+    overTLS:                    boolean;
+    /** Whether nothing the CSMS asks is carried out but a signed pin set. */
+    onProbation:                boolean;
+    /** The key pin of the key the CSMS showed last. */
+    keyPinShown?:               string;
+}
+
+/** What the key pins of the line may be changed to. */
+export interface CSMSKeyPinsUpdate {
+    /** Comma separated; empty for none. */
+    serverKeyPins?:              string;
+    trustOnFirstUse?:            'None' | 'Key';
+    rawPublicKeys?:              'Off' | 'Prefer' | 'Require';
+    serverKeyPinProbationTime?:  number;
+}
+
 /** The charging station management system above this local controller. */
 export interface CSMSConfiguration {
     enabled:                     boolean;
@@ -350,6 +391,8 @@ export interface CSMSConfiguration {
     /** That identity as the store has it - or that it has none by that handle. */
     clientCertificateIs?:        { id: string; missing: boolean; label?: string; subject?: string; notAfter?: string; usable?: boolean };
     credentials:                 CSMSCredentials;
+    /** How the line believes the CSMS beyond what a CA says. */
+    keyPins?:                    CSMSKeyPins;
     state: {
         connected:           boolean;
         connectedSince:      string | null;
@@ -536,7 +579,17 @@ export const api = {
                           request<CSMSConfiguration>('PUT', '/configuration/csms/credentials', credentials),
 
         removeCredentials: () =>
-                          request<CSMSConfiguration>('DELETE', '/configuration/csms/credentials')
+                          request<CSMSConfiguration>('DELETE', '/configuration/csms/credentials'),
+
+        /** How the line believes the CSMS: key pins set here are configured, not signed. */
+        saveKeyPins: (update: CSMSKeyPinsUpdate) =>
+                          request<CSMSConfiguration>('PUT', '/configuration/csms/keypins', update),
+
+        addPinSetSigner: (signer: { publicKey: string; description: string }) =>
+                          request<CSMSConfiguration>('POST', '/configuration/csms/pinSetSigners', signer),
+
+        removePinSetSigner: (publicKey: string) =>
+                          request<CSMSConfiguration>('DELETE', '/configuration/csms/pinSetSigners', { publicKey })
 
     },
 

@@ -126,11 +126,12 @@ namespace cloud.charging.open.LocalController
         /// <summary>
         /// Give the node its gate: what only the CSMS asks comes over the controller's line up to it.
         /// </summary>
-        private static void AttachRequestGate(OCPPv2_1_LC.TestLocalControllerNode Node)
+        private void AttachRequestGate(OCPPv2_1_LC.TestLocalControllerNode Node)
         {
 
             // The node's only gate: nothing else of this controller sets one.
-            Node.OCPP.IN.RequestGate = OnlyTheCSMS;
+            Node.OCPP.IN.RequestGate = (connection, action, payload) => OnlyTheCSMS(connection, action, payload) ??
+                                                                        GateOnCSMSProbation(connection, action, payload);
 
         }
 
@@ -193,9 +194,12 @@ namespace cloud.charging.open.LocalController
                                                            NetworkPath                          NetworkPath)
         {
 
-            // Over the controller's line to the CSMS: the CSMS's to send.
+            // Over the controller's line to the CSMS: the CSMS's to send - unless
+            // the line is on probation, or its CSMS is not believed any more.
             if (Connection.Role != ConnectionRole.Server)
-                return null;
+                return WhyNotForwardOnProbation(Connection, Action) is String onProbation
+                           ? (false, onProbation)
+                           : null;
 
             var station = Connection.NetworkingNodeIdOf();
 

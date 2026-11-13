@@ -23,6 +23,7 @@ using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 
 using cloud.charging.open.protocols.WWCP.Node.Web;
+using cloud.charging.open.protocols.OCPP.Node.KeyPins;
 
 #endregion
 
@@ -51,6 +52,10 @@ namespace cloud.charging.open.LocalController
 
             AddHandler(root + "credentials", PutCSMSCredentials,   HTTPMethod.PUT);
             AddHandler(root + "credentials", DeleteCSMSCredentials, HTTPMethod.DELETE);
+
+            AddHandler(root + "keypins",        PutCSMSKeyPins,         HTTPMethod.PUT);
+            AddHandler(root + "pinSetSigners",  PostCSMSPinSetSigner,   HTTPMethod.POST);
+            AddHandler(root + "pinSetSigners",  DeleteCSMSPinSetSigner, HTTPMethod.DELETE);
 
         }
 
@@ -97,6 +102,114 @@ namespace cloud.charging.open.LocalController
                 return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, error, notSaved));
 
             Log.Info($"'{user.Id}' changed the CSMS connection.", "ocpp", "csms", "config", "web");
+
+            return Task.FromResult(
+                       JSONResponse(Request, HTTPStatusCode.OK, Controller.CSMSConfigurationJSON())
+                   );
+
+        }
+
+        #endregion
+
+        #region (private) PutCSMSKeyPins(Request)
+
+        /// <summary>
+        /// PUT .../csms/keypins with any of {"serverKeyPins", "trustOnFirstUse", "rawPublicKeys",
+        /// "serverKeyPinProbationTime"}: how the line believes its CSMS beyond what a CA says.
+        /// </summary>
+        /// <remarks>
+        /// Key pins set here are configured, not signed: they end a probation as a signed pin set does,
+        /// and keep its version. No key pins and no trust on first use: the CSMS is judged by its
+        /// certificate again. Either applies from the next dial of the line.
+        /// </remarks>
+        private Task<HTTPResponse> PutCSMSKeyPins(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.CSMS), true, out var user, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryParseJSONObject(Request, out var json, out var errorResponse))
+                return Task.FromResult(errorResponse);
+
+            var pins = json["serverKeyPins"] switch {
+                           JArray array  => String.Join(",", array.Select(pin => pin.Value<String>())),
+                           JValue value  => value.Value<String>() ?? "",
+                           _             => null
+                       };
+
+            var settings = new ServerKeyPinSettings(json.Value<String>("rawPublicKeys"),
+                                                    json.Value<String>("trustOnFirstUse"),
+                                                    json.Value<Int64?>("serverKeyPinProbationTime"));
+
+            if (settings is { RawPublicKeys: null, TrustOnFirstUse: null, ProbationSeconds: null } && pins is null)
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest,
+                                                 "Nothing to change: 'serverKeyPins', 'trustOnFirstUse', 'rawPublicKeys' or 'serverKeyPinProbationTime'."));
+
+            if (settings is not { RawPublicKeys: null, TrustOnFirstUse: null, ProbationSeconds: null } &&
+                !Controller.CSMSPins.TrySetTrust(settings, out var trustError))
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, trustError));
+
+            if (pins is not null &&
+                !Controller.CSMSPins.TrySetPins(pins, out var pinsError))
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, pinsError));
+
+            Log.Notice($"'{user.Id}' changed how this local controller believes its CSMS: {json.ToString(Newtonsoft.Json.Formatting.None)}.",
+                       "ocpp", "csms", "keypins", "security", "web");
+
+            return Task.FromResult(
+                       JSONResponse(Request, HTTPStatusCode.OK, Controller.CSMSConfigurationJSON())
+                   );
+
+        }
+
+        #endregion
+
+        #region (private) PostCSMSPinSetSigner(Request) / DeleteCSMSPinSetSigner(Request)
+
+        /// <summary>
+        /// POST .../csms/pinSetSigners with {"publicKey", "description"}: believe the pin sets this key
+        /// signs - the CSMS's signing anchor, from commissioning.
+        /// </summary>
+        private Task<HTTPResponse> PostCSMSPinSetSigner(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.CSMS), true, out var user, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryParseJSONObject(Request, out var json, out var errorResponse))
+                return Task.FromResult(errorResponse);
+
+            if (!Controller.CSMSPins.TryAddPinSetSigner(json.Value<String>("publicKey") ?? "",
+                                                        json.Value<String>("description") ?? "",
+                                                        out var error))
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
+
+            Log.Notice($"'{user.Id}' added a signer of pin sets for the line up to the CSMS: '{json.Value<String>("description")}'.",
+                       "ocpp", "csms", "keypins", "security", "web");
+
+            return Task.FromResult(
+                       JSONResponse(Request, HTTPStatusCode.OK, Controller.CSMSConfigurationJSON())
+                   );
+
+        }
+
+        /// <summary>
+        /// DELETE .../csms/pinSetSigners with {"publicKey"}: believe its pin sets no longer.
+        /// </summary>
+        private Task<HTTPResponse> DeleteCSMSPinSetSigner(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.CSMS), true, out var user, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryParseJSONObject(Request, out var json, out var errorResponse))
+                return Task.FromResult(errorResponse);
+
+            if (!Controller.CSMSPins.TryRemovePinSetSigner(json.Value<String>("publicKey") ?? "", out var error))
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest, error));
+
+            Log.Notice($"'{user.Id}' removed a signer of pin sets for the line up to the CSMS.",
+                       "ocpp", "csms", "keypins", "security", "web");
 
             return Task.FromResult(
                        JSONResponse(Request, HTTPStatusCode.OK, Controller.CSMSConfigurationJSON())

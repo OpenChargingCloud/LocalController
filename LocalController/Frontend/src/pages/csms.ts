@@ -1,4 +1,4 @@
-import { api, type Certificate, type CSMSConfiguration } from '../api/client';
+import { api, type Certificate, type CSMSConfiguration, type CSMSKeyPins } from '../api/client';
 import { auth } from '../auth';
 import { toURL } from '@node/basePath';
 import type { Page } from '@node/router';
@@ -76,6 +76,7 @@ export const csmsPage: Page = {
                     ${stateCard(settings)}
                     ${connectionCard(settings)}
                     ${credentialsCard(settings)}
+                    ${settings.keyPins ? keyPinsCard(settings.keyPins) : nothing}
                 </div>
             `);
 
@@ -320,6 +321,206 @@ export const csmsPage: Page = {
 
                 </section>
             `;
+
+        }
+
+
+        /**
+         * How the line believes its CSMS beyond what a CA says ("Key Pins and Raw Public Keys for
+         * Local Controllers"): by the key pin of its key - configured here, learned on first use and on
+         * probation, or confirmed by a pin set the CSMS's signing anchor signed.
+         */
+        function keyPinsCard(pins: CSMSKeyPins): TemplateResult {
+
+            return html`
+                <section class="card">
+
+                    <h2><i class="fa-solid fa-thumbtack"></i> How it believes the CSMS</h2>
+
+                    <p class="hint">
+                        Over wss://, the CSMS is believed either by its certificate, as a CA vouches for it, or by the key
+                        pin of its key and by nothing else of its certificate. A key pin learned on the first connection
+                        is on probation: until a pin set signed by one of the signers below confirms it, nothing the CSMS
+                        asks is carried out or passed on to a station. Changes apply from the next dial of the line.
+                    </p>
+
+                    <p id="keypins-state">
+                        ${!pins.overTLS
+                              ? html`<span class="badge">not over TLS</span>`
+                              : pins.keyPinned
+                                    ? html`<span class="badge ok">key-pinned</span>`
+                                    : html`<span class="badge">by its certificate</span>`}
+                        ${pins.onProbation ? html` <span class="badge warn">on probation</span>` : nothing}
+                        ${pins.serverKeyPins.length > 0
+                              ? html` <span class="badge">${pins.serverKeyPinState.toLowerCase()}, version ${pins.serverKeyPinsVersion}</span>`
+                              : nothing}
+                    </p>
+
+                    <dl class="facts">
+                        <dt>Key pins</dt>
+                        <dd id="keypins-pins">${pins.serverKeyPins.length > 0
+                                                    ? html`${repeat(pins.serverKeyPins, pin => pin, pin => html`<code>${pin}</code><br />`)}`
+                                                    : html`<em>none</em>`}</dd>
+                        ${pins.serverKeyPinLearned ? html`
+                            <dt>Learned</dt>
+                            <dd id="keypins-learned"><code>${pins.serverKeyPinLearned}</code>
+                                ${pins.serverKeyPinLearnedAt ? html`<span class="muted">at ${formatTimestamp(pins.serverKeyPinLearnedAt)}</span>` : nothing}</dd>
+                        ` : nothing}
+                        ${pins.keyPinShown ? html`
+                            <dt>Shown last</dt>
+                            <dd><code>${pins.keyPinShown}</code></dd>
+                        ` : nothing}
+                    </dl>
+
+                    <form id="keypins-form" class="form-stack" @submit=${saveKeyPins}>
+
+                        <label>Key pins
+                            <textarea name="serverKeyPins" rows="2" ?disabled=${!mayChange}
+                                      placeholder="64 hexadecimal digits each, separated by commas"
+                                      .defaultValue=${pins.serverKeyPins.join(', ')}></textarea>
+                            <span class="hint">Configured here, not signed. Empty, with trust on first use off: by its certificate again.</span>
+                        </label>
+
+                        <label class="checkbox">
+                            <input type="checkbox" name="trustOnFirstUse" ?checked=${pins.trustOnFirstUse === 'Key'} ?disabled=${!mayChange} />
+                            Learn the key pin of the first key shown, on probation
+                        </label>
+
+                        <label>Probation in seconds
+                            <input type="number" name="serverKeyPinProbationTime" min="1" max="604800"
+                                   value="${pins.serverKeyPinProbationTime}" ?disabled=${!mayChange} />
+                        </label>
+
+                        <label>Raw public keys
+                            <select name="rawPublicKeys" ?disabled=${!mayChange}>
+                                ${[ 'Off', 'Prefer', 'Require' ].map(mode => html`<option value="${mode}" ?selected=${pins.rawPublicKeys === mode}>${mode}</option>`)}
+                            </select>
+                        </label>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn primary" ?disabled=${!mayChange}>Save</button>
+                            <span id="keypins-error" class="form-error" role="alert"></span>
+                        </div>
+
+                    </form>
+
+                    <h3>Signers of pin sets</h3>
+
+                    ${pins.pinSetSigners.length === 0
+                          ? html`<p class="muted" id="keypins-no-signer">None: a pin set sent over OCPP is refused.</p>`
+                          : html`
+                              <ul class="plain" id="keypins-signers">
+                                  ${repeat(pins.pinSetSigners, signer => signer.publicKey, signer => html`
+                                      <li>
+                                          <strong>${signer.description}</strong> <code>${signer.publicKey}</code>
+                                          <button type="button" class="btn small danger" ?disabled=${!mayChange}
+                                                  @click=${() => void removeSigner(signer.publicKey, signer.description)}>Remove</button>
+                                      </li>
+                                  `)}
+                              </ul>`}
+
+                    <form id="signer-form" class="form-stack" @submit=${addSigner}>
+
+                        <label>Public key
+                            <input type="text" name="publicKey" ?disabled=${!mayChange} required
+                                   placeholder="the CSMS's signing key: a point of P-256, P-384 or P-521, base64 or hexadecimal" />
+                        </label>
+
+                        <label>Whose
+                            <input type="text" name="description" maxlength="100" ?disabled=${!mayChange} required placeholder="The CSMS of the site" />
+                        </label>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn" ?disabled=${!mayChange}>Add</button>
+                            <span id="signer-error" class="form-error" role="alert"></span>
+                        </div>
+
+                    </form>
+
+                </section>
+            `;
+
+        }
+
+
+        function saveKeyPins(event: SubmitEvent): void {
+
+            event.preventDefault();
+
+            const form = event.currentTarget as HTMLFormElement;
+
+            void changeKeyPins(form, () => api.csms.saveKeyPins({
+                serverKeyPins:              field(form, 'serverKeyPins'),
+                trustOnFirstUse:            isChecked(form, 'trustOnFirstUse') ? 'Key' : 'None',
+                serverKeyPinProbationTime:  numberField(form, 'serverKeyPinProbationTime'),
+                rawPublicKeys:              (form.querySelector<HTMLSelectElement>('select[name="rawPublicKeys"]')?.value ?? 'Off') as 'Off' | 'Prefer' | 'Require'
+            }), '#keypins-error');
+
+        }
+
+
+        function addSigner(event: SubmitEvent): void {
+
+            event.preventDefault();
+
+            const form = event.currentTarget as HTMLFormElement;
+
+            void changeKeyPins(form, () => api.csms.addPinSetSigner({
+                publicKey:    field(form, 'publicKey'),
+                description:  field(form, 'description')
+            }), '#signer-error');
+
+        }
+
+
+        async function removeSigner(publicKey: string, description: string): Promise<void> {
+
+            if (!window.confirm(`Believe the pin sets of '${description}' no longer?`))
+                return;
+
+            try
+            {
+                csms = await api.csms.removePinSetSigner(publicKey);
+                if (!cancelled)
+                    draw();
+            }
+            catch (problem)
+            {
+                if (!cancelled)
+                    window.alert(errorMessage(problem));
+            }
+
+        }
+
+
+        /**
+         * Change how the line believes its CSMS: the answer drawn and the form gone back to it - or, where it
+         * was refused, what is typed kept, and why it was said.
+         */
+        async function changeKeyPins(form: HTMLFormElement, change: () => Promise<CSMSConfiguration>, errorAt: string): Promise<void> {
+
+            const error = content.querySelector<HTMLElement>(errorAt);
+
+            if (error)
+                error.textContent = '';
+
+            try
+            {
+
+                csms = await change();
+
+                if (cancelled)
+                    return;
+
+                draw();
+                form.reset();
+
+            }
+            catch (problem)
+            {
+                if (error && !cancelled)
+                    error.textContent = errorMessage(problem);
+            }
 
         }
 
