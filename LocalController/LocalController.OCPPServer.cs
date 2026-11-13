@@ -1004,28 +1004,35 @@ namespace cloud.charging.open.LocalController
 
                 var id = totpAuthentication.Login;
 
-                // Hermod's default is the TLS-bound kind, which needs TLS
-                // exporter material - .NET does not offer that on an SslStream,
-                // so a token of that kind cannot be checked here at all. Said
-                // out loud, because the alternative is a station whose token is
-                // computed correctly and refused anyway, with nothing in the
-                // log to explain it.
-                if (totpAuthentication.Type != TOTPHTTPHeaderType.RAW)
-                    return Refuse(Connection, $"'{id}' sent a TLS-bound one-time token, which this server cannot check: " +
-                                               "it would need TLS exporter material, which .NET does not offer. The station has to send tlscb=false");
+                // A token bound to the TLS session is checked with keying
+                // material of the connection it came over, and only the TLS
+                // of QUIC - a WebSocket over HTTP/3 - exports any: .NET does
+                // not offer it on an SslStream. Over HTTP/1.1 and HTTP/2 such
+                // a token cannot be checked at all. Said out loud, because the
+                // alternative is a station whose token is computed correctly
+                // and refused anyway, with nothing in the log to explain it.
+                var bound     = totpAuthentication.Type != TOTPHTTPHeaderType.RAW;
+                var material  = Connection.TOTPTLSExporterMaterial;
+
+                if (bound && material is not { Length: > 0 })
+                    return Refuse(Connection, $"'{id}' sent a TLS-bound one-time token over a connection whose TLS exports nothing to check it with: " +
+                                               "that is checked over HTTP/3 only. The station has to open its WebSocket over HTTP/3, or send tlscb=false");
 
                 // Derived before the group is consulted, and always, for the
                 // same reason as the password above.
-                var right = StationLogins.VerifyTOTP(id, totpAuthentication.TOTP);
+                var right = StationLogins.VerifyTOTP(id, totpAuthentication.TOTP, bound, material);
 
                 if (!StationLogins.TryGet(id, out var login) || !login.Enabled || !right)
-                    return Refuse(Connection, $"'{id}' is not a charging station that may sign in, or the one-time token is wrong");
+                    return Refuse(Connection, login is { Enabled: true, TOTP.TLSChannelBinding: true } && !bound
+                                                  ? $"'{id}' sent a raw one-time token, and has to show one bound to the TLS session of its connection: " +
+                                                     "the station has to open its WebSocket over HTTP/3 and bind its token"
+                                                  : $"'{id}' is not a charging station that may sign in, or the one-time token is wrong");
 
                 if (!GroupAllows(login, AuthMethod.TOTP, profile, out var why))
                     return Refuse(Connection, $"the charging station '{id}' {why}");
 
                 if (ocppServerSettings.Logging?.Authentication != false)
-                    Log.Info($"The charging station '{id}' signed in from {from} with a one-time token (security profile {profile}" +
+                    Log.Info($"The charging station '{id}' signed in from {from} with a one-time token{(bound ? " bound to its connection" : "")} (security profile {profile}" +
                              $"{(ocppServerTLS ? "" : ", on an unencrypted port, so the token is replayable while it stands")}).",
                              "ocpp", "station", "auth");
 

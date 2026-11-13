@@ -388,19 +388,120 @@ namespace cloud.charging.open.LocalController.Tests
         #region TheConfigHandedToHermodIsNotTheBoundKind()
 
         /// <summary>
-        /// TLS channel binding needs exporter material, which .NET does not
-        /// offer on an SslStream - so everything here is the unbound kind, and
-        /// the config says so rather than leaving it to a default.
+        /// The binding is asked for or it is not, and the config handed to
+        /// Hermod says which rather than leaving it to a default - Hermod's
+        /// is the bound kind.
         /// </summary>
         [Test]
-        public void TheConfigHandedToHermodIsNotTheBoundKind()
+        public void TheConfigHandedToHermodIsOfTheKindThatWasAskedFor()
         {
 
-            var config = Settings().ToTOTPConfig();
+            var raw    = Settings().ToTOTPConfig();
+            var bound  = (Settings() with { TLSChannelBinding = true }).ToTOTPConfig();
 
             Assert.Multiple(() => {
-                Assert.That(config.UseTLSExporterMaterial,  Is.False);
-                Assert.That(config.SharedSecret,            Is.EqualTo(TheSecret));
+                Assert.That(raw.  UseTLSExporterMaterial,  Is.False);
+                Assert.That(bound.UseTLSExporterMaterial,  Is.True);
+                Assert.That(raw.  SharedSecret,            Is.EqualTo(TheSecret));
+            });
+
+        }
+
+        #endregion
+
+        #region ATokenBoundToItsConnectionIsCheckedWithWhatThatConnectionExports()
+
+        /// <summary>
+        /// A token sent as bound is checked with the keying material of the
+        /// connection it arrived on: right with that, wrong with another
+        /// connection's, and no token at all where there is none - never the
+        /// raw one, which is what a token read off another connection and
+        /// called bound would be.
+        /// </summary>
+        [Test]
+        public void ATokenBoundToItsConnectionIsCheckedWithWhatThatConnectionExports()
+        {
+
+            var settings  = Settings();
+            var here      = Enumerable.Range(0, 32).Select(i => (Byte) i).      ToArray();
+            var elsewhere = Enumerable.Range(0, 32).Select(i => (Byte) (i + 1)).ToArray();
+
+            var bound     = TOTPGenerator.GenerateTOTP(settings.SharedSecret, settings.ValidityTime, settings.Length, settings.Alphabet,
+                                                       Noon, here, settings.HashAlgorithm).Current;
+            var raw       = TokenAt(settings, Noon);
+
+            Assert.Multiple(() => {
+                Assert.That(bound,                                           Is.Not.EqualTo(raw));
+                Assert.That(settings.Matches(bound, Noon, true,  here),      Is.True,   "the token bound to this connection");
+                Assert.That(settings.Matches(bound, Noon, true,  elsewhere), Is.False,  "a token bound to another connection");
+                Assert.That(settings.Matches(bound, Noon, true,  null),      Is.False,  "a bound token where the connection exports nothing");
+                Assert.That(settings.Matches(bound, Noon, true,  []),        Is.False,  "a bound token where the connection exports nothing");
+                Assert.That(settings.Matches(bound, Noon, false, here),      Is.False,  "a bound token shown as a raw one");
+                Assert.That(settings.Matches(raw,   Noon, true,  here),      Is.False,  "a raw token shown as a bound one");
+                Assert.That(settings.Matches(raw,   Noon, true,  null),      Is.False,  "a raw token shown as a bound one, where nothing is exported");
+                Assert.That(settings.Matches(raw,   Noon),                   Is.True,   "the raw token, where the binding is not asked for");
+            });
+
+        }
+
+        #endregion
+
+        #region ALoginThatAsksForTheBindingTakesNoRawToken()
+
+        [Test]
+        public void ALoginThatAsksForTheBindingTakesNoRawToken()
+        {
+
+            var settings  = Settings() with { TLSChannelBinding = true };
+            var here      = Enumerable.Range(0, 32).Select(i => (Byte) i).ToArray();
+
+            var bound     = TOTPGenerator.GenerateTOTP(settings.SharedSecret, settings.ValidityTime, settings.Length, settings.Alphabet,
+                                                       Noon, here, settings.HashAlgorithm).Current;
+
+            Assert.Multiple(() => {
+                Assert.That(settings.Matches(TokenAt(settings, Noon), Noon),              Is.False,  "a raw token");
+                Assert.That(settings.Matches(TokenAt(settings, Noon), Noon, false, here), Is.False,  "a raw token, over a connection that could have bound it");
+                Assert.That(settings.Matches(bound, Noon, true, here),                    Is.True,   "the bound one");
+                Assert.That(settings.ToString(),                                          Does.Contain("bound to the TLS session"));
+            });
+
+        }
+
+        #endregion
+
+        #region TheBindingIsWrittenWhereItIsAskedFor_AndReadBack()
+
+        /// <summary>
+        /// A file without the binding reads as it always did, one with it
+        /// reads back bound - and one that says something else than true or
+        /// false is refused: read as false, it would let raw tokens in where
+        /// bound ones were asked for.
+        /// </summary>
+        [Test]
+        public void TheBindingIsWrittenWhereItIsAskedFor_AndReadBack()
+        {
+
+            var raw      = Settings();
+            var bound    = raw with { TLSChannelBinding = true };
+
+            var mistyped = bound.ToJSON(WithSecret: true);
+            mistyped["tlsChannelBinding"] = "yes";
+
+            Assert.Multiple(() => {
+
+                Assert.That(raw.  ToJSON()["tlsChannelBinding"],                         Is.Null);
+                Assert.That(bound.ToJSON()["tlsChannelBinding"]?.Value<Boolean>(),       Is.True);
+
+                Assert.That(TOTPSettings.TryParse(raw.  ToJSON(WithSecret: true), out var readRaw,   out _),  Is.True);
+                Assert.That(TOTPSettings.TryParse(bound.ToJSON(WithSecret: true), out var readBound, out _),  Is.True);
+                Assert.That(readRaw?.  TLSChannelBinding,                                Is.False);
+                Assert.That(readBound?.TLSChannelBinding,                                Is.True);
+                Assert.That(readBound,                                                   Is.EqualTo(bound));
+
+                Assert.That(TOTPSettings.TryParse(mistyped, out var none, out var error), Is.False);
+                Assert.That(none,                                                         Is.Null);
+                Assert.That(error,                                                        Does.Contain("tlsChannelBinding"));
+
             });
 
         }

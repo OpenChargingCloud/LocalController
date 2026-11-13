@@ -74,6 +74,16 @@ function controller({ method, path, body }: Asked): unknown {
         return held;
     }
 
+    const binding = /^\/configuration\/ocpp-server\/stations\/([^/]+)\/totp\/binding$/.exec(path);
+
+    if (binding && method === 'PUT') {
+        const bound = (body as { tlsChannelBinding: boolean }).tlsChannelBinding;
+        held = { ...held, stations: held.stations.map(station => station.id === binding[1]
+                                                                     ? { ...station, totp: { ...station.totp!, tlsChannelBinding: bound } }
+                                                                     : station) };
+        return held;
+    }
+
     const one = /^\/configuration\/ocpp-server\/stations\/([^/]+)$/.exec(path);
 
     if (one && method === 'PUT') {
@@ -177,6 +187,58 @@ describe('the logins and groups', () => {
         assert.equal(field(root, '#station-form', 'id').value,                          '', 'the station added is still in the form');
         assert.equal(field(root, '#station-form', 'note').value,                        '');
         assert.equal(field<HTMLSelectElement>(root, '#station-form', 'group').value,    'default');
+
+    });
+
+    it('ask for the token of a station to be bound to its connection, say so, and stop asking', async () => {
+
+        const root = await opened();
+
+        assert.equal(root.querySelector('.station-totp-binding[data-id="cs001"]'), null, 'a station without a token is offered its binding');
+
+        held = { ...held, stations: held.stations.map(station => station.id === 'cs002'
+                                                                     ? { ...station, hasTOTP: true,
+                                                                         totp: { validitySeconds: 30, length: 12, alphabet: 'ab', hashAlgorithm: 'SHA256' as const } }
+                                                                     : station) };
+
+        // Drawn anew from what the CSMS holds now.
+        change(switchOf(root, 'cs001'), false);
+        await until(() => root.querySelector('.station-totp-binding[data-id="cs002"]') !== null, 'the binding of a token was not offered');
+
+        const asks = window.confirm;
+        let   told = '';
+        window.confirm = (text?: string) => { told = text ?? ''; return true; };
+
+        try {
+
+            const button = () => root.querySelector<HTMLButtonElement>('.station-totp-binding[data-id="cs002"]')!;
+
+            assert.equal(button().textContent!.trim(), 'Bind token');
+            assert.equal(root.querySelector('.station-totp-bound'), null);
+
+            button().click();
+            await until(() => root.querySelector('.station-totp-bound') !== null, 'that the token is bound was not drawn');
+
+            assert.match(told, /over HTTP\/3 only/, 'what binding costs was not said before it was done');
+            const sent = asked.find(one => one.path.endsWith('/totp/binding'));
+
+            assert.equal(sent?.method, 'PUT');
+            assert.equal(sent?.path,   '/configuration/ocpp-server/stations/cs002/totp/binding');
+            assert.deepEqual(sent?.body, { tlsChannelBinding: true });
+            assert.match(root.querySelector('.station-totp-bound')!.textContent!, /over HTTP\/3 only/);
+            assert.equal(button().textContent!.trim(), 'Unbind token');
+
+            told = '';
+            button().click();
+            await until(() => root.querySelector('.station-totp-bound') === null, 'that the token is no longer bound was not drawn');
+
+            assert.equal(told, '', 'taking the binding away was asked about');
+            assert.deepEqual(asked.filter(one => one.path.endsWith('/totp/binding')).at(-1)?.body, { tlsChannelBinding: false });
+
+        }
+        finally {
+            window.confirm = asks;
+        }
 
     });
 

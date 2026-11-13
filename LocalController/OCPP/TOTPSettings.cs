@@ -49,14 +49,15 @@ namespace cloud.charging.open.LocalController.OCPP
     /// which widens the window to three times the validity time. That is the
     /// price of not refusing a station whose clock is two seconds off.
     ///
-    /// <b>No TLS channel binding.</b> Hermod can bind a TOTP to the TLS session
-    /// it arrived on, which makes a stolen token useless elsewhere. It needs
-    /// TLS exporter material (RFC 8446), and .NET does not offer that on an
-    /// SslStream - only Hermod's own QUIC stack has it, and this server does
-    /// not use it. So the tokens here are the unbound kind, and a client that
-    /// uses Hermod's secure-by-default setting sends something this controller
-    /// cannot check. It is turned away with that said out loud rather than with
-    /// a token mismatch.
+    /// <b>TLS channel binding, over HTTP/3.</b> Hermod can bind a TOTP to the
+    /// TLS session it arrived on, which makes a stolen token useless
+    /// elsewhere. It needs TLS exporter material (RFC 8446), and .NET does not
+    /// offer that on an SslStream - only Hermod's own QUIC stack has it, which
+    /// is the TLS of a WebSocket opened over HTTP/3. So a bound token is
+    /// checked where the station came over HTTP/3, and over HTTP/1.1 and
+    /// HTTP/2 it is turned away with that said out loud rather than with a
+    /// token mismatch. A login may ask for the binding
+    /// (<see cref="TLSChannelBinding"/>), and then takes no raw token.
     /// </remarks>
     /// <param name="SharedSecret">The secret both ends derive the token from.</param>
     /// <param name="ValidityTime">How long one token stands.</param>
@@ -118,6 +119,19 @@ namespace cloud.charging.open.LocalController.OCPP
         #endregion
 
         #region Properties
+
+        /// <summary>
+        /// Whether a token of this login has to be bound to the TLS session of
+        /// the connection it is shown on.
+        /// </summary>
+        /// <remarks>
+        /// False by default, and then a raw token is taken, and a bound one
+        /// too where it can be verified - that is more than was asked for.
+        /// True, a raw token is refused: the station has to come over HTTP/3,
+        /// the one connection whose TLS exports what a token is bound with,
+        /// and a token read off its connection is no use on any other.
+        /// </remarks>
+        public Boolean TLSChannelBinding { get; init; }
 
         /// <summary>
         /// The longest token this hash can give without repeating itself. The
@@ -300,16 +314,38 @@ namespace cloud.charging.open.LocalController.OCPP
 
             var seconds = JSON.Value<Double?>("validitySeconds");
 
-            return TryCreate(
-                       secret,
-                       seconds.HasValue ? TimeSpan.FromSeconds(seconds.Value) : null,
-                       JSON.Value<UInt32?>("length"),
-                       JSON.Value<String>("alphabet"),
-                       hash,
-                       out Settings,
-                       out _,
-                       out Error
-                   );
+            if (!TryCreate(
+                     secret,
+                     seconds.HasValue ? TimeSpan.FromSeconds(seconds.Value) : null,
+                     JSON.Value<UInt32?>("length"),
+                     JSON.Value<String>("alphabet"),
+                     hash,
+                     out Settings,
+                     out _,
+                     out Error
+                 ))
+            {
+                return false;
+            }
+
+            if (JSON["tlsChannelBinding"] is JToken binding)
+            {
+
+                // Anything but true or false is refused: read as false, a
+                // typing mistake would let raw tokens in where bound ones
+                // were asked for.
+                if (binding.Type != JTokenType.Boolean)
+                {
+                    Settings  = null;
+                    Error     = "the 'tlsChannelBinding' of a TOTP configuration is true or false.";
+                    return false;
+                }
+
+                Settings = Settings with { TLSChannelBinding = binding.Value<Boolean>() };
+
+            }
+
+            return true;
 
         }
 
@@ -327,10 +363,22 @@ namespace cloud.charging.open.LocalController.OCPP
         /// is guessing how much of the guess was right, and a token is guessed
         /// at, unlike a password that is hashed first.
         /// </remarks>
-        public Boolean Matches(String? Presented, DateTimeOffset Now)
+        /// <param name="Bound">Whether the token was sent as one bound to the TLS session of its connection.</param>
+        /// <param name="TLSExporterMaterial">The keying material of the connection it arrived on, or null where its TLS exports none.</param>
+        public Boolean Matches(String?         Presented,
+                               DateTimeOffset  Now,
+                               Boolean         Bound                = false,
+                               Byte[]?         TLSExporterMaterial  = null)
         {
 
             if (Presented is null || Presented.Length == 0)
+                return false;
+
+            // Held to what it says it is: a token sent as bound is verified
+            // with the keying material of its connection and never as a raw
+            // one, and where there is none it is no token at all. A raw one
+            // is none where the binding is asked for.
+            if (Bound ? TLSExporterMaterial is not { Length: > 0 } : TLSChannelBinding)
                 return false;
 
             var (previous, current, next, _, _) = TOTPGenerator.GenerateTOTPs(
@@ -339,7 +387,7 @@ namespace cloud.charging.open.LocalController.OCPP
                                                       Length,
                                                       Alphabet,
                                                       Now,
-                                                      null,
+                                                      Bound ? TLSExporterMaterial : null,
                                                       HashAlgorithm
                                                   );
 
@@ -373,7 +421,7 @@ namespace cloud.charging.open.LocalController.OCPP
                     ValidityTime,
                     Length,
                     Alphabet,
-                    UseTLSExporterMaterial:  false,
+                    UseTLSExporterMaterial:  TLSChannelBinding,
                     HashAlgorithm:           HashAlgorithm);
 
         #endregion
@@ -400,6 +448,11 @@ namespace cloud.charging.open.LocalController.OCPP
                            new JProperty("hashAlgorithm",    HashAlgorithm.ToString())
                        );
 
+            // Written only where it is asked for: a file without it reads as
+            // it always did.
+            if (TLSChannelBinding)
+                json.Add("tlsChannelBinding", true);
+
             if (WithSecret)
                 json.Add("sharedSecret", SharedSecret);
 
@@ -413,7 +466,8 @@ namespace cloud.charging.open.LocalController.OCPP
 
         public override String ToString()
 
-            => $"{Length} characters of {HashAlgorithm}, every {ValidityTime.TotalSeconds:0} second(s)";
+            => $"{Length} characters of {HashAlgorithm}, every {ValidityTime.TotalSeconds:0} second(s)" +
+               (TLSChannelBinding ? ", bound to the TLS session of its connection" : "");
 
         #endregion
 

@@ -520,6 +520,7 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("PUT stations/{id}, group")]
         [TestCase("PUT stations/{id}/totp")]
         [TestCase("DELETE stations/{id}/totp")]
+        [TestCase("PUT stations/{id}/totp/binding")]
         [TestCase("DELETE stations/{id}/password")]
         [TestCase("DELETE stations/{id}")]
         public async Task AChangeTheStationsFileCannotTakeIsAServerError(String Change)
@@ -548,6 +549,7 @@ namespace cloud.charging.open.LocalController.Tests
                 "PUT stations/{id}, group"       => await http.PutAsync   ($"{Root}/stations/cs001",         JSONBody(new JProperty("group",   "field-test"))),
                 "PUT stations/{id}/totp"         => await http.PutAsync   ($"{Root}/stations/cs001/totp",    JSONBody()),
                 "DELETE stations/{id}/totp"      => await http.DeleteAsync($"{Root}/stations/cs001/totp"),
+                "PUT stations/{id}/totp/binding" => await http.PutAsync   ($"{Root}/stations/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", true))),
                 "DELETE stations/{id}/password"  => await http.DeleteAsync($"{Root}/stations/cs001/password"),
                 "DELETE stations/{id}"           => await http.DeleteAsync($"{Root}/stations/cs001"),
                 _                                => throw new ArgumentException($"No change '{Change}' here.", nameof(Change))
@@ -1119,6 +1121,48 @@ namespace cloud.charging.open.LocalController.Tests
         #endregion
 
         #region ATokenIsTakenAwayAgain()
+
+        /// <summary>
+        /// Whether a token has to be bound to its connection is its own
+        /// request, which hands out no secret: the one there is stays.
+        /// </summary>
+        [Test]
+        public async Task ATokenIsToldToBeBound_AndNoLonger()
+        {
+
+            using var http = await SignedIn();
+
+            await http.PostAsync($"{Root}/stations", JSONBody(new JProperty("id", "cs001")));
+
+            var nothingYet  = await http.PutAsync($"{Root}/stations/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", true)));
+
+            await http.PutAsync ($"{Root}/stations/cs001/totp", JSONBody());
+
+            Controller.StationLogins.TryGet("cs001", out var before);
+
+            var mistyped    = await http.PutAsync($"{Root}/stations/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", "yes")));
+            var bound       = await http.PutAsync($"{Root}/stations/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", true)));
+            var answer      = JObject.Parse(await bound.Content.ReadAsStringAsync());
+
+            Controller.StationLogins.TryGet("cs001", out var after);
+
+            var unbound     = await http.PutAsync($"{Root}/stations/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", false)));
+
+            Controller.StationLogins.TryGet("cs001", out var atLast);
+
+            Assert.Multiple(() => {
+                Assert.That((Int32) nothingYet.StatusCode,           Is.EqualTo(404),  "a token that is not there was bound");
+                Assert.That((Int32) mistyped.  StatusCode,           Is.EqualTo(400));
+                Assert.That(bound.IsSuccessStatusCode,               Is.True);
+                Assert.That(after?.TOTP?.TLSChannelBinding,          Is.True);
+                Assert.That(after?.TOTP?.SharedSecret,               Is.EqualTo(before?.TOTP?.SharedSecret),  "the secret was changed");
+                Assert.That(answer.ToString(),                       Does.Not.Contain(before!.TOTP!.SharedSecret));
+                Assert.That(answer["stations"]?[0]?["totp"]?.Value<Boolean>("tlsChannelBinding"), Is.True);
+                Assert.That(unbound.IsSuccessStatusCode,             Is.True);
+                Assert.That(atLast?.TOTP?.TLSChannelBinding,         Is.False);
+            });
+
+        }
 
         [Test]
         public async Task ATokenIsTakenAwayAgain()

@@ -413,6 +413,8 @@ export interface TOTPSettings {
     length:           number;
     alphabet:         string;
     hashAlgorithm:    'SHA256' | 'SHA384' | 'SHA512';
+    /** There, and true, where the token has to be bound to the TLS session of its connection. */
+    tlsChannelBinding?: boolean;
 }
 
 /** One charging station that may sign in. */
@@ -649,6 +651,15 @@ export const api = {
             saveTOTP: (id: string, update: TOTPUpdate) =>
                           request<{ id: string; sharedSecret?: string; stations: StationLogins }>(
                               'PUT', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/totp`, update),
+
+            /**
+             * Whether a station's token has to be bound to the TLS session of
+             * its connection. Its secret stays as it is.
+             */
+            bindTOTP:       (id: string, bound: boolean) =>
+                          request<StationLogins>(
+                              'PUT', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/totp/binding`,
+                              { tlsChannelBinding: bound }),
 
             removeTOTP:     (id: string) =>
                           request<StationLogins>('DELETE', `/configuration/ocpp-server/stations/${encodeURIComponent(id)}/totp`),
