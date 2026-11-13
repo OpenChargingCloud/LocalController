@@ -25,6 +25,7 @@ using Newtonsoft.Json.Linq;
 using cloud.charging.open.protocols.WWCP.Node.Configuration;
 
 using org.GraphDefined.Vanaheimr.Hermod;
+using org.GraphDefined.Vanaheimr.Hermod.WebSocket;
 
 using WWCPNetworkingMode = cloud.charging.open.protocols.WWCP.NetworkingNode.NetworkingMode;
 
@@ -82,7 +83,8 @@ namespace cloud.charging.open.LocalController.Configuration
                                            TimeSpan?               ReconnectInitialDelay        = null,
                                            TimeSpan?               ReconnectMaxDelay            = null,
                                            String?                 ClientCertificate            = null,
-                                           WWCPNetworkingMode?     NetworkingMode               = null)
+                                           WWCPNetworkingMode?     NetworkingMode               = null,
+                                           WebSocketHTTPVersion?   HTTPVersion                  = null)
     {
 
         #region Data
@@ -240,7 +242,38 @@ namespace cloud.charging.open.LocalController.Configuration
                     ReconnectInitialDelay       ?? DefaultReconnectInitialDelay,
                     ReconnectMaxDelay           ?? DefaultReconnectMaxDelay,
                     ClientCertificate,
-                    NetworkingMode              ?? DefaultNetworkingMode);
+                    NetworkingMode              ?? DefaultNetworkingMode,
+                    HTTPVersion                 ?? WebSocketHTTPVersion.Auto);
+
+        #endregion
+
+        #region HTTPVersionAsText / BindsItsOneTimePassword
+
+        /// <summary>
+        /// The version of HTTP the WebSocket to the CSMS is opened over, as
+        /// the file names it: "auto", "1.1", "2" or "3".
+        /// </summary>
+        public String HTTPVersionAsText
+
+            => HTTPVersion switch {
+                   WebSocketHTTPVersion.HTTP1_1  => "1.1",
+                   WebSocketHTTPVersion.HTTP2    => "2",
+                   WebSocketHTTPVersion.HTTP3    => "3",
+                   _                             => "auto"
+               };
+
+        /// <summary>
+        /// Whether a one-time password can be bound to the TLS session of
+        /// the line to the CSMS: one opened over HTTP/3 and nothing else.
+        /// </summary>
+        /// <remarks>
+        /// Known before it is dialled, which is what is needed: left the
+        /// choice of the version, the line may come to an SslStream, which
+        /// exports nothing to bind a password with.
+        /// </remarks>
+        public Boolean BindsItsOneTimePassword
+
+            => HTTPVersion == WebSocketHTTPVersion.HTTP3;
 
         #endregion
 
@@ -264,7 +297,8 @@ namespace cloud.charging.open.LocalController.Configuration
                     Changes.ReconnectInitialDelay       ?? ReconnectInitialDelay,
                     Changes.ReconnectMaxDelay           ?? ReconnectMaxDelay,
                     Changes.ClientCertificate           ?? ClientCertificate,
-                    Changes.NetworkingMode              ?? NetworkingMode);
+                    Changes.NetworkingMode              ?? NetworkingMode,
+                    Changes.HTTPVersion                 ?? HTTPVersion);
 
         #endregion
 
@@ -295,6 +329,10 @@ namespace cloud.charging.open.LocalController.Configuration
             // Told the CSMS once, in the header of the dial: the frames of a
             // line cannot change their shape under it.
             if (InOverlayNetwork   != AsBuilt.InOverlayNetwork)    yield return "networkingMode";
+
+            // What the WebSocket is opened over is decided when it is dialled.
+            if ((HTTPVersion ?? WebSocketHTTPVersion.Auto) != (AsBuilt.HTTPVersion ?? WebSocketHTTPVersion.Auto))
+                yield return "httpVersion";
 
             if (ChosenClientCertificate != AsBuilt.ChosenClientCertificate)
                 yield return "clientCertificate";
@@ -330,10 +368,49 @@ namespace cloud.charging.open.LocalController.Configuration
                 !ConfigurationReader.TryReadSeconds(JSON, "reconnectInitialDelay",       SectionName, 1, 600,                   out var initialDelay,   out Error) ||
                 !ConfigurationReader.TryReadSeconds(JSON, "reconnectMaxDelay",           SectionName, 1, 3600,                   out var maxDelay,       out Error) ||
                 !ConfigurationReader.TryReadString (JSON, "clientCertificate",           SectionName, MaxHandleLength,  out var identity,       out Error) ||
-                !ConfigurationReader.TryReadString (JSON, "networkingMode",              SectionName, 16,               out var mode,           out Error))
+                !ConfigurationReader.TryReadString (JSON, "networkingMode",              SectionName, 16,               out var mode,           out Error) ||
+                !ConfigurationReader.TryReadString (JSON, "httpVersion",                 SectionName, 8,                out var over,           out Error))
             {
                 return false;
             }
+
+            #region The version of HTTP is one of the four
+
+            // As a connection of a charging station names it: "auto", which
+            // leaves the choice to the CSMS, "1.1", "2" or "3".
+            WebSocketHTTPVersion? httpVersion = null;
+
+            if (over is { Length: > 0 })
+            {
+
+                httpVersion = over.Trim().ToLowerInvariant() switch {
+                                  "auto"  => WebSocketHTTPVersion.Auto,
+                                  "1.1"   => WebSocketHTTPVersion.HTTP1_1,
+                                  "2"     => WebSocketHTTPVersion.HTTP2,
+                                  "3"     => WebSocketHTTPVersion.HTTP3,
+                                  _       => null
+                              };
+
+                if (httpVersion is null)
+                {
+                    Error = $"'{SectionName}.httpVersion' is '{over}', and is no version of HTTP a WebSocket is opened over: " +
+                             "it is \"auto\", \"1.1\", \"2\" or \"3\".";
+                    return false;
+                }
+
+                // HTTP/3 is HTTP over QUIC, and QUIC is TLS and nothing else.
+                if (httpVersion == WebSocketHTTPVersion.HTTP3 &&
+                    url is { Length: > 0 } &&
+                   !url.TrimStart().StartsWith("wss://", StringComparison.OrdinalIgnoreCase))
+                {
+                    Error = $"'{SectionName}.httpVersion' names HTTP/3, which is HTTP over TLS and nothing else: " +
+                             "a WebSocket over HTTP/3 needs a wss:// address.";
+                    return false;
+                }
+
+            }
+
+            #endregion
 
             #region The networking mode is one of the two
 
@@ -474,7 +551,8 @@ namespace cloud.charging.open.LocalController.Configuration
                                 initialDelay,
                                 maxDelay,
                                 identity?.ToLowerInvariant(),
-                                networkingMode
+                                networkingMode,
+                                httpVersion
                             );
 
             return true;
@@ -505,6 +583,7 @@ namespace cloud.charging.open.LocalController.Configuration
             if (ReconnectMaxDelay          is not null)  json.Add("reconnectMaxDelay",           ReconnectMaxDelay.Value.TotalSeconds);
             if (ClientCertificate          is not null)  json.Add("clientCertificate",           ClientCertificate);
             if (NetworkingMode             is not null)  json.Add("networkingMode",              InOverlayNetwork ? OverlayMode : StandardMode);
+            if (HTTPVersion                is not null)  json.Add("httpVersion",                 HTTPVersionAsText);
 
             return json;
 

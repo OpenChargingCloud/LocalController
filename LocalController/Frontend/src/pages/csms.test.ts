@@ -55,6 +55,12 @@ function controller({ method, path, body }: Asked): unknown {
     if (path === '/configuration/csms')
         return held;
 
+    if (path === '/configuration/csms/credentials' && method === 'PUT' && (body as { tlsChannelBinding?: boolean }).tlsChannelBinding !== undefined) {
+        held = { ...held, credentials: { ...held.credentials,
+                                         totp: { ...held.credentials.totp!, tlsChannelBinding: (body as { tlsChannelBinding: boolean }).tlsChannelBinding } } };
+        return held;
+    }
+
     if (path === '/configuration/csms/credentials' && method === 'PUT') {
         const said = body as { username: string; password?: string };
         held = { ...held, credentials: { ...held.credentials, username: said.username, hasPassword: said.password !== undefined },
@@ -209,6 +215,59 @@ describe('the CSMS page', () => {
 
         assert.equal(root.querySelector('#connection-error')!.textContent, 'ws:// is for profile 1 only');
         assert.equal(field(root, '#connection-form', 'url').value, 'ws://csms.example.org/ocpp/lc001', 'what was typed went');
+
+    });
+
+    it('names the version of HTTP the line is opened over, and saves the one chosen', async () => {
+
+        const root   = await opened();
+        const select = root.querySelector<HTMLSelectElement>('#connection-form select[name="httpVersion"]')!;
+
+        assert.equal(select.value, 'auto', 'a line that names no version is not shown as leaving it to the CSMS');
+
+        select.value = '3';
+        submit(root, '#connection-form');
+        await until(() => held.httpVersion === '3', 'the version chosen was not saved');
+
+        assert.equal((asked.find(one => one.method === 'PUT' && one.path === '/configuration/csms')?.body as { httpVersion: string }).httpVersion, '3');
+
+    });
+
+    it('binds the one-time token to the line without its secret, and says where a bound token is not dialled', async () => {
+
+        const root = await opened();
+
+        assert.equal(root.querySelector('#token-bind'), null, 'a line without a one-time token is offered its binding');
+
+        held = { ...held, credentials: { ...held.credentials, username: 'lc001', hasTOTP: true,
+                                         totp: { validitySeconds: 30, length: 12, alphabet: 'ab', hashAlgorithm: 'SHA256' as const } },
+                          state:       { ...held.state, hasCredentials: true } };
+
+        // Drawn anew from what the controller holds now.
+        submit(root, '#connection-form');
+        await until(() => root.querySelector('#token-bind') !== null, 'the binding of the token was not offered');
+
+        const button = () => root.querySelector<HTMLButtonElement>('#token-bind')!;
+
+        assert.equal(button().textContent!.trim(), 'Bind token');
+        assert.match(root.querySelector('#token-binding')!.textContent!, /sent unbound/);
+
+        button().click();
+        await until(() => button().textContent!.trim() === 'Unbind token', 'that the token is bound was not drawn');
+
+        assert.deepEqual(asked.filter(one => one.path === '/configuration/csms/credentials').at(-1)?.body, { tlsChannelBinding: true });
+        assert.match(root.querySelector('#token-binding')!.textContent!, /bound to the TLS session/);
+        assert.match(root.querySelector('#token-binding-warning')!.textContent!, /not dialled/,
+                     'a bound token on a line that does not name HTTP/3 was not said to keep it from being dialled');
+
+        root.querySelector<HTMLSelectElement>('#connection-form select[name="httpVersion"]')!.value = '3';
+        submit(root, '#connection-form');
+        await until(() => root.querySelector('#token-binding-warning') === null, 'the warning stayed once the line names HTTP/3');
+
+        button().click();
+        await until(() => button().textContent!.trim() === 'Bind token', 'that the token is no longer bound was not drawn');
+
+        assert.deepEqual(asked.filter(one => one.path === '/configuration/csms/credentials').at(-1)?.body, { tlsChannelBinding: false });
 
     });
 

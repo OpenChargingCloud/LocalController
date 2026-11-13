@@ -386,6 +386,8 @@ export interface CSMSConfiguration {
     requestTimeout:              number;
     reconnectInitialDelay:       number;
     reconnectMaxDelay:           number;
+    /** The version of HTTP the WebSocket is opened over, as a connection of a charging station names it. */
+    httpVersion?:                'auto' | '1.1' | '2' | '3';
     /** The TLS identity of the certificate store security profile 3 signs in with, by its handle; empty for none. */
     clientCertificate?:          string;
     /** That identity as the store has it - or that it has none by that handle. */
@@ -413,6 +415,8 @@ export interface CSMSUpdate {
     requestTimeout?:              number;
     reconnectInitialDelay?:       number;
     reconnectMaxDelay?:           number;
+    /** The version of HTTP the WebSocket is opened over: "auto" leaves it to the CSMS. */
+    httpVersion?:                 'auto' | '1.1' | '2' | '3';
     /** The TLS identity security profile 3 signs in with; null for none, and left out to leave it alone. */
     clientCertificate?:           string | null;
 }
@@ -577,6 +581,13 @@ export const api = {
          */
         saveCredentials: (credentials: { username: string; password?: string; sharedSecret?: string }) =>
                           request<CSMSConfiguration>('PUT', '/configuration/csms/credentials', credentials),
+
+        /**
+         * Whether the one-time token is bound to the TLS session of the line.
+         * The shared secret stays as it is.
+         */
+        bindToken:    (bound: boolean) =>
+                          request<CSMSConfiguration>('PUT', '/configuration/csms/credentials', { tlsChannelBinding: bound }),
 
         removeCredentials: () =>
                           request<CSMSConfiguration>('DELETE', '/configuration/csms/credentials'),

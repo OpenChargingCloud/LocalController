@@ -245,6 +245,31 @@ namespace cloud.charging.open.LocalController
             var password      = json.Value<String>("password");
             var sharedSecret  = json.Value<String>("sharedSecret");
 
+            // Whether the one-time token is bound to the TLS session: beside a
+            // shared secret, or by itself, which leaves the secret alone.
+            var binding       = json["tlsChannelBinding"] as JValue;
+
+            if (json["tlsChannelBinding"] is not null && binding?.Type != JTokenType.Boolean)
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest,
+                                                 "'tlsChannelBinding' is true or false."));
+
+            if (password is null && sharedSecret is null && binding is not null)
+            {
+
+                var bound = binding.Value<Boolean>();
+
+                if (!Controller.CSMSLogin.TrySetTOTPBinding(bound, out var bindingError, out var bindingNotSaved))
+                    return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, bindingError, bindingNotSaved));
+
+                Log.Notice($"'{user.Id}' {(bound ? "asked for" : "no longer asks for")} the one-time token this local controller signs in to the CSMS with to be bound to its line.",
+                           "ocpp", "csms", "auth", "web");
+
+                return Task.FromResult(
+                           JSONResponse(Request, HTTPStatusCode.OK, Controller.CSMSConfigurationJSON())
+                       );
+
+            }
+
             if (password is null && sharedSecret is null)
                 return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest,
                                                  "Either a 'password' or a 'sharedSecret' is required."));
@@ -282,7 +307,8 @@ namespace cloud.charging.open.LocalController
                          json.Value<String>("alphabet"),
                          hash,
                          out var totpError,
-                         out var totpNotSaved))
+                         out var totpNotSaved,
+                         binding?.Value<Boolean>()))
                 {
                     return Task.FromResult(NotChanged(Request, HTTPStatusCode.BadRequest, totpError, totpNotSaved));
                 }

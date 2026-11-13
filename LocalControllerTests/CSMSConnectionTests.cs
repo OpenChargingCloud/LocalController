@@ -329,6 +329,67 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region TheControllerSignsInWithAOneTimePassword()
+
+        private const String TheSharedSecret = "a-shared-secret-long-enough-for-ocpp";
+
+        /// <summary>
+        /// The controller below, with a one-time password and no password,
+        /// and the CSMS knowing 'lc002' by the same shared secret.
+        /// </summary>
+        private LocalController AControllerThatDialsWithAOneTimePassword(String SharedSecret = TheSharedSecret)
+        {
+
+            if (!upstream.StationLogins.TrySetTOTP("lc002", TheSharedSecret, null, null, null, null, null, null, out _, out var upstreamError))
+                throw new InvalidOperationException($"The test's own upstream TOTP login was refused: {upstreamError}");
+
+            var controller = AControllerThatDials(Password: null);
+
+            if (!controller.CSMSLogin.TrySetTOTP("lc002", SharedSecret, null, null, null, null, out var error))
+                throw new InvalidOperationException($"The test's own one-time password was refused: {error}");
+
+            return controller;
+
+        }
+
+        /// <summary>
+        /// A controller that has a one-time password and no password signs
+        /// in with it: under its name, in "Authorization: TOTP", which is
+        /// what a CSMS verifies.
+        /// </summary>
+        [Test]
+        public async Task TheControllerSignsInWithAOneTimePassword()
+        {
+
+            downstream = await TestPorts.StartedOnFreshPorts(() => AControllerThatDialsWithAOneTimePassword());
+
+            Assert.Multiple(() => {
+                Assert.That(downstream.CSMSConnected,    Is.True, downstream.CSMSLastProblem);
+                Assert.That(downstream.CSMSLastProblem,  Is.Null);
+                Assert.That(upstream.StationServer?.WebSocketConnections.Count(), Is.GreaterThan(0),
+                            "The CSMS end has no connection.");
+            });
+
+        }
+
+        /// <summary>
+        /// And with a one-time password of another secret it is refused.
+        /// </summary>
+        [Test]
+        public async Task AOneTimePasswordOfAnotherSecretIsRefused()
+        {
+
+            downstream = await TestPorts.StartedOnFreshPorts(() => AControllerThatDialsWithAOneTimePassword("another-secret-long-enough-for-ocpp"));
+
+            Assert.Multiple(() => {
+                Assert.That(downstream.CSMSConnected,    Is.False);
+                Assert.That(downstream.CSMSLastProblem,  Does.Contain("refused this local controller"));
+            });
+
+        }
+
+        #endregion
+
         #region AWrongPasswordIsRefusedAndSaidSo()
 
         [Test]

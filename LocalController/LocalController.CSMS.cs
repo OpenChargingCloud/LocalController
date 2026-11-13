@@ -231,6 +231,29 @@ namespace cloud.charging.open.LocalController
                 return;
             }
 
+            // A one-time token that is to be bound to the TLS session is bound
+            // on a line that names HTTP/3 and nothing else: over HTTP/1.1 and
+            // HTTP/2 this controller's TLS exports no keying material to bind
+            // one with, and left the choice, the line may come to either. Not
+            // dialled then, rather than sent unbound: that would be less than
+            // what was configured, quietly.
+            if (authentication is null && totpConfig?.UseTLSExporterMaterial == true && !csmsSettings.BindsItsOneTimePassword)
+            {
+                csmsLastProblem = $"The CSMS at {url} is not dialled: this local controller's one-time token is to be bound to the TLS session, " +
+                                   "and one is bound only on a line that names HTTP/3 and nothing else. " +
+                                   "Name HTTP/3 for it ('csms.httpVersion' is \"3\"), or switch the binding off to have the token sent unbound.";
+                Log.Warning(csmsLastProblem, "ocpp", "csms", "auth");
+                return;
+            }
+
+            // HTTP/3 is HTTP over TLS and nothing else.
+            if (csmsSettings.HTTPVersion == org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketHTTPVersion.HTTP3 && !csmsSettings.WantsTLS)
+            {
+                csmsLastProblem = $"The CSMS at {url} is not dialled: 'csms.httpVersion' names HTTP/3, which needs a wss:// address and security profile 2 or 3.";
+                Log.Warning(csmsLastProblem, "ocpp", "csms");
+                return;
+            }
+
             #endregion
 
             // The CSMS's certificate is judged by the node, as a time server's
@@ -280,7 +303,7 @@ namespace cloud.charging.open.LocalController
                                    );
 
             var signedIn = $"This local controller signed in to the CSMS at {url} " +
-                           $"({(csmsSettings.WantsClientCertificate ? "with its certificate" : totpConfig is not null ? "with a one-time token" : "with a password")}, " +
+                           $"({(csmsSettings.WantsClientCertificate ? "with its certificate" : totpConfig is not null && authentication is null ? totpConfig.UseTLSExporterMaterial == true ? "with a one-time token bound to the TLS session" : "with a one-time token" : "with a password")}, " +
                            $"security profile {csmsSettings.SecurityProfile}).";
 
             var attempted = TimeProvider.GetUtcNow();
@@ -304,6 +327,17 @@ namespace cloud.charging.open.LocalController
 
                                          HTTPAuthentication:        authentication,
                                          TOTPConfig:                totpConfig,
+
+                                         // Under its name, which is what puts the
+                                         // token into "Authorization: TOTP": without
+                                         // one it travels in the "TOTP" request header,
+                                         // which names nobody and which a CSMS that
+                                         // knows its stations by their logins refuses.
+                                         TOTPLogin:                 totpConfig is not null ? CSMSLogin.Username : null,
+
+                                         // Auto unless the file says otherwise, as a
+                                         // connection of a charging station.
+                                         WebSocketOver:             csmsSettings.HTTPVersion,
                                          SecWebSocketProtocols:     csmsSettings.Subprotocols,
 
                                          DisableWebSocketPings:     false,

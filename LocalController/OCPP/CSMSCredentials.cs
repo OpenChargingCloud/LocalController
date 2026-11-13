@@ -320,6 +320,7 @@ namespace cloud.charging.open.LocalController.OCPP
         /// token's.
         /// </summary>
         /// <param name="NotSaved">True where the file could not be written: the credentials are what they were.</param>
+        /// <param name="TLSChannelBinding">Whether the token is to be bound to the TLS session of the line; null leaves it as it was.</param>
         public Boolean TrySetTOTP(String?                           Username,
                                   String?                           SharedSecret,
                                   TimeSpan?                         ValidityTime,
@@ -327,7 +328,8 @@ namespace cloud.charging.open.LocalController.OCPP
                                   String?                           Alphabet,
                                   TOTPHashAlgorithm?                HashAlgorithm,
                                   [NotNullWhen(false)] out String?  Error,
-                                  out Boolean                       NotSaved)
+                                  out Boolean                       NotSaved,
+                                  Boolean?                          TLSChannelBinding  = null)
         {
 
             Error     = null;
@@ -373,7 +375,10 @@ namespace cloud.charging.open.LocalController.OCPP
                 var (wasName, wasTOTP) = (username, totp);
 
                 username  = name;
-                totp      = settings;
+
+                // A new secret does not undo the binding that was asked for:
+                // that would be less than configured, quietly.
+                totp      = settings with { TLSChannelBinding = TLSChannelBinding ?? wasTOTP?.TLSChannelBinding ?? false };
 
                 if (!TrySave(out Error))
                 {
@@ -383,6 +388,64 @@ namespace cloud.charging.open.LocalController.OCPP
                 }
 
                 OnNotice?.Invoke(LogLevel.Notice, $"This local controller will sign in to the CSMS as '{name}' with a one-time token: {settings}.");
+
+            }
+
+            return true;
+
+        }
+
+        #endregion
+
+        #region TrySetTOTPBinding(Bound, out Error [, out NotSaved])
+
+        /// <summary>
+        /// Say whether this controller binds its one-time token to the TLS
+        /// session of its line to the CSMS, leaving the shared secret alone.
+        /// </summary>
+        public Boolean TrySetTOTPBinding(Boolean                           Bound,
+                                         [NotNullWhen(false)] out String?  Error)
+
+            => TrySetTOTPBinding(Bound, out Error, out _);
+
+        /// <summary>
+        /// Say whether this controller binds its one-time token to the TLS
+        /// session of its line to the CSMS - and say whether a refusal was
+        /// the file's.
+        /// </summary>
+        /// <param name="NotSaved">True where the file could not be written: the credentials are what they were.</param>
+        public Boolean TrySetTOTPBinding(Boolean                           Bound,
+                                         [NotNullWhen(false)] out String?  Error,
+                                         out Boolean                       NotSaved)
+        {
+
+            Error     = null;
+            NotSaved  = false;
+
+            lock (updateLock)
+            {
+
+                if (totp is null)
+                {
+                    Error = "This local controller has no one-time token to bind.";
+                    return false;
+                }
+
+                var was  = totp;
+
+                totp     = totp with { TLSChannelBinding = Bound };
+
+                if (!TrySave(out Error))
+                {
+                    totp      = was;
+                    NotSaved  = true;
+                    return false;
+                }
+
+                OnNotice?.Invoke(LogLevel.Notice,
+                                 Bound
+                                     ? "This local controller will bind its one-time token to the TLS session of its line to the CSMS: it signs in over HTTP/3 only."
+                                     : "This local controller will no longer bind its one-time token to the TLS session of its line to the CSMS.");
 
             }
 

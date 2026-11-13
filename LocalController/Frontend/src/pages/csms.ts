@@ -180,6 +180,20 @@ export const csmsPage: Page = {
 
                         ${identityField(settings)}
 
+                        <label>Opened over
+                            <select name="httpVersion" ?disabled=${!mayChange}>
+                                <option value="auto" ?selected=${(settings.httpVersion ?? 'auto') === 'auto'}>whatever the CSMS takes</option>
+                                <option value="1.1"  ?selected=${settings.httpVersion === '1.1'}>HTTP/1.1</option>
+                                <option value="2"    ?selected=${settings.httpVersion === '2'}>HTTP/2</option>
+                                <option value="3"    ?selected=${settings.httpVersion === '3'}>HTTP/3</option>
+                            </select>
+                            <span class="hint">
+                                The version of HTTP the WebSocket is opened over, as a connection of a charging station
+                                names it. HTTP/3 needs a wss:// address, and is the one over which a one-time token
+                                can be bound to the line.
+                            </span>
+                        </label>
+
                         <label>Ping every
                             <input type="number" name="pingEvery" min="5" max="3600"
                                    value="${settings.pingEvery}" ?disabled=${!mayChange} />
@@ -282,6 +296,24 @@ export const csmsPage: Page = {
                             ${settings.credentials.hasPassword ? html`<span class="badge">password</span> ` : nothing}
                             ${settings.credentials.hasTOTP ? html`<span class="badge">one-time token</span>` : nothing}
                         </p>
+                        ${settings.credentials.hasTOTP ? html`
+                            <p id="token-binding">
+                                ${settings.credentials.totp?.tlsChannelBinding
+                                      ? html`The token is <strong>bound to the TLS session</strong> of the line: read off it,
+                                             it is no use on another.`
+                                      : html`The token is sent unbound: read off the line, it can be shown again while it stands.`}
+                                <button type="button" id="token-bind" class="btn small" ?disabled=${!mayChange}
+                                        @click=${() => void bindToken(!settings.credentials.totp?.tlsChannelBinding)}>
+                                    ${settings.credentials.totp?.tlsChannelBinding ? 'Unbind token' : 'Bind token'}
+                                </button>
+                                ${settings.credentials.totp?.tlsChannelBinding && settings.httpVersion !== '3' ? html`
+                                    <span id="token-binding-warning" class="warn">
+                                        A token is bound over HTTP/3 and nothing else, and this line does not name it:
+                                        it is not dialled. Choose HTTP/3 above, or unbind the token.
+                                    </span>
+                                ` : nothing}
+                            </p>
+                        ` : nothing}
                     ` : html`<p class="muted">Nothing set yet.</p>`}
 
                     <form id="credentials-form" class="form-stack" @submit=${saveCredentials}>
@@ -536,6 +568,7 @@ export const csmsPage: Page = {
                 enabled:                isChecked(form, 'enabled'),
                 url:                    field(form, 'url', false),
                 securityProfile:        numberField(form, 'securityProfile'),
+                httpVersion:            form.querySelector<HTMLSelectElement>('select[name="httpVersion"]')!.value as 'auto' | '1.1' | '2' | '3',
                 pingEvery:              numberField(form, 'pingEvery'),
                 reconnectInitialDelay:  numberField(form, 'reconnectInitialDelay'),
                 // Left out where it was not offered, which leaves it alone;
@@ -640,6 +673,33 @@ export const csmsPage: Page = {
             catch (problem)
             {
                 if (error && !cancelled)
+                    error.textContent = errorMessage(problem);
+            }
+
+        }
+
+
+        async function bindToken(bound: boolean): Promise<void> {
+
+            const error = content.querySelector<HTMLElement>('#credentials-error');
+
+            if (error)
+                error.textContent = '';
+
+            try
+            {
+
+                csms = await api.csms.bindToken(bound);
+
+                if (cancelled)
+                    return;
+
+                draw();
+
+            }
+            catch (problem)
+            {
+                if (!cancelled && error)
                     error.textContent = errorMessage(problem);
             }
 
