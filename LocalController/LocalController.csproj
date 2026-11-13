@@ -73,6 +73,10 @@
          here, a new WWCP_Node changed only files the build did not look at,
          the bundle was up to date, and the old one was embedded. -->
     <FrontendInput Include="$(MSBuildProjectDirectory)\..\..\WWCP_Node\Frontend\src\**\*" />
+
+    <!-- And what every node that dials a CSMS shares, bundled in as "@ocpp/...":
+         the pages of its connections, for the same reason. -->
+    <FrontendInput Include="$(MSBuildProjectDirectory)\..\..\WWCP_OCPP\WWCP_OCPP_Node\Frontend\src\**\*" />
   </ItemGroup>
 
   <!-- npm keeps a copy of the lock file it last installed by, in

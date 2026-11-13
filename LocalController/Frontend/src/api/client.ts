@@ -10,6 +10,7 @@
          type NodeResource,
          type NodeStatus,
          type Operation }  from '@node/api/client';
+import { connectionsAPI }  from '@ocpp/api/connections';
 
 
 // What every node answers - the log, name resolution, the time, the store,
@@ -18,6 +19,14 @@
 // controller adds: its resources, what its status and its configuration say
 // beyond every node's, the kinds its store keeps, and its own routes.
 export * from '@node/api/client';
+
+// What a node that dials its back ends keeps - the lines up to the CSMS as
+// connections, what they sign in with and their client keys - and how it is
+// asked are the same on a charging station, and are WWCP_OCPP_Node's: named
+// here as well. Two of its names are this module's own, for something else,
+// and stay so: a StationLogin here is a charging station that may sign in to
+// this controller, and a KeyAlgorithm a kind of key it presents as a server.
+export * from '@ocpp/api/connections';
 
 
 /**
@@ -323,101 +332,60 @@ export interface ClientTrust {
     entries:     TrustedChain[];
 }
 
-/** What this local controller signs in to the CSMS with. */
-export interface CSMSCredentials {
-    file:               string;
-    username:           string | null;
-    hasPassword:        boolean;
-    hasTOTP:            boolean;
-    minPasswordLength:  number;
-    totp?:              TOTPSettings;
-}
-
-/** A key whose pin sets for the line up to the CSMS are believed: the CSMS's signing anchor. */
-export interface PinSetSigner {
-    publicKey:    string;
-    description:  string;
-    createdAt:    string;
-}
-
 /**
- * How the line up to the CSMS believes its server beyond what a CA says: key pins, one learned on
- * first use and on probation, and the signers of pin sets.
+ * The charging station management system above this local controller: whether
+ * it reports to one at all, and how every line up to it is kept. The lines
+ * themselves - where each goes, what it signs in with and how it knows its
+ * server - are connections, as a charging station's are: StationConnections.
  */
-export interface CSMSKeyPins {
-    serverKeyPins:              string[];
-    serverKeyPinsVersion:       number;
-    serverKeyPinState:          'Configured' | 'Learned' | 'Confirmed';
-    rawPublicKeys:              'Off' | 'Prefer' | 'Require';
-    trustOnFirstUse:            'None' | 'Key';
-    /** Seconds a key pin learned waits for a signed pin set. */
-    serverKeyPinProbationTime:  number;
-    pinSetSigners:              PinSetSigner[];
-    serverKeyPinLearned?:       string;
-    serverKeyPinLearnedAt?:     string;
-    /** Whether the CSMS is believed by a key pin, rather than by its certificate. */
-    keyPinned:                  boolean;
-    /** Whether the line goes over TLS at all. */
-    overTLS:                    boolean;
-    /** Whether nothing the CSMS asks is carried out but a signed pin set. */
-    onProbation:                boolean;
-    /** The key pin of the key the CSMS showed last. */
-    keyPinShown?:               string;
-}
-
-/** What the key pins of the line may be changed to. */
-export interface CSMSKeyPinsUpdate {
-    /** Comma separated; empty for none. */
-    serverKeyPins?:              string;
-    trustOnFirstUse?:            'None' | 'Key';
-    rawPublicKeys?:              'Off' | 'Prefer' | 'Require';
-    serverKeyPinProbationTime?:  number;
-}
-
-/** The charging station management system above this local controller. */
 export interface CSMSConfiguration {
     enabled:                     boolean;
-    url?:                        string;
-    securityProfile:             number;
     nextHopNodeId?:              string;
     subprotocols:                string[];
+    /** The oldest version of TLS a line is made over, where the controller says it. */
+    minimumTLSVersion?:          string;
     checkCertificateRevocation:  boolean;
     pingEvery:                   number;
     requestTimeout:              number;
     reconnectInitialDelay:       number;
     reconnectMaxDelay:           number;
-    /** The version of HTTP the WebSocket is opened over, as a connection of a charging station names it. */
-    httpVersion?:                'auto' | '1.1' | '2' | '3';
-    /** The TLS identity of the certificate store security profile 3 signs in with, by its handle; empty for none. */
+    /**
+     * The TLS identity of the certificate store a line over TLS holds up where
+     * its connection names no client key of its own, by its handle; empty for none.
+     */
     clientCertificate?:          string;
     /** That identity as the store has it - or that it has none by that handle. */
     clientCertificateIs?:        { id: string; missing: boolean; label?: string; subject?: string; notAfter?: string; usable?: boolean };
-    credentials:                 CSMSCredentials;
-    /** How the line believes the CSMS beyond what a CA says. */
-    keyPins?:                    CSMSKeyPins;
+    /**
+     * How the messages on a line say where they go and where they come from:
+     * "overlay", in the frame of the overlay network, or "standard", in the
+     * plain OCPP frame.
+     */
+    networkingMode?:             string;
     state: {
         connected:           boolean;
         connectedSince:      string | null;
         lastProblem:         string | null;
-        hasCredentials:      boolean;
+        /** How many lines up to the CSMS are written down, as connections. */
+        connections:         number;
         waitingForARestart:  string[];
     };
 }
 
-/** What the CSMS connection may be changed to. */
+/**
+ * What the CSMS section may be changed to. Where a line goes, the version of
+ * HTTP it is opened over and its security profile are a connection's, and
+ * refused here.
+ */
 export interface CSMSUpdate {
     enabled?:                     boolean;
-    url?:                         string;
-    securityProfile?:             number;
     subprotocols?:                string[];
     checkCertificateRevocation?:  boolean;
     pingEvery?:                   number;
     requestTimeout?:              number;
     reconnectInitialDelay?:       number;
     reconnectMaxDelay?:           number;
-    /** The version of HTTP the WebSocket is opened over: "auto" leaves it to the CSMS. */
-    httpVersion?:                 'auto' | '1.1' | '2' | '3';
-    /** The TLS identity security profile 3 signs in with; null for none, and left out to leave it alone. */
+    /** The TLS identity a line holds up where its connection names none; null for none, and left out to leave it alone. */
     clientCertificate?:           string | null;
 }
 
@@ -568,45 +536,22 @@ export const api = {
     state: () => request<ControllerState>('GET', '/state'),
 
     /**
-     * The charging station server: its socket, the certificates it presents,
-     * the chains it accepts and the stations that may sign in.
+     * Whether this controller reports to a CSMS, and how every line up to it
+     * is kept. The lines themselves are the connections below.
      */
     csms: {
 
         get:          ()  => request<CSMSConfiguration>('GET', '/configuration/csms'),
 
         save:         (update: CSMSUpdate) =>
-                          request<CSMSConfiguration>('PUT', '/configuration/csms', update),
-
-        /**
-         * Neither secret is made up here, unlike the passwords of the charging
-         * stations: both are issued by whoever runs the CSMS and typed in. So
-         * nothing comes back but the state - the secret went the other way.
-         */
-        saveCredentials: (credentials: { username: string; password?: string; sharedSecret?: string }) =>
-                          request<CSMSConfiguration>('PUT', '/configuration/csms/credentials', credentials),
-
-        /**
-         * Whether the one-time token is bound to the TLS session of the line.
-         * The shared secret stays as it is.
-         */
-        bindToken:    (bound: boolean) =>
-                          request<CSMSConfiguration>('PUT', '/configuration/csms/credentials', { tlsChannelBinding: bound }),
-
-        removeCredentials: () =>
-                          request<CSMSConfiguration>('DELETE', '/configuration/csms/credentials'),
-
-        /** How the line believes the CSMS: key pins set here are configured, not signed. */
-        saveKeyPins: (update: CSMSKeyPinsUpdate) =>
-                          request<CSMSConfiguration>('PUT', '/configuration/csms/keypins', update),
-
-        addPinSetSigner: (signer: { publicKey: string; description: string }) =>
-                          request<CSMSConfiguration>('POST', '/configuration/csms/pinSetSigners', signer),
-
-        removePinSetSigner: (publicKey: string) =>
-                          request<CSMSConfiguration>('DELETE', '/configuration/csms/pinSetSigners', { publicKey })
+                          request<CSMSConfiguration>('PUT', '/configuration/csms', update)
 
     },
+
+    // The lines up to the CSMS, what they sign in with and their client keys -
+    // api.connections, api.authentications and api.clientKeys - as every node
+    // that dials has them.
+    ...connectionsAPI,
 
     ocppServer: {
 

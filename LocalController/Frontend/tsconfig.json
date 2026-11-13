@@ -16,11 +16,14 @@
     "newLine": "lf",
 
     // "@node/..." is what every kind of node shares, in the WWCP_Node next to
-    // this repository - where webpack.config.js's alias finds it too. lit-html,
+    // this repository - where webpack.config.js's alias finds it too - and
+    // "@ocpp/..." what the nodes that dial a CSMS share, the pages of their
+    // connections, in the WWCP_OCPP_Node of the WWCP_OCPP next to it. lit-html,
     // which the shared files draw with, is this directory's, as webpack's
     // resolve.modules finds it.
     "paths": {
       "@node/*":     [ "../../../WWCP_Node/Frontend/src/*" ],
+      "@ocpp/*":     [ "../../../WWCP_OCPP/WWCP_OCPP_Node/Frontend/src/*" ],
       "lit-html":    [ "./node_modules/lit-html" ],
       "lit-html/*":  [ "./node_modules/lit-html/*" ]
     }
@@ -28,11 +31,12 @@
 
   // The shared files are checked as this node's own: with these rules, as
   // this node uses them.
-  "include": [ "src/**/*.ts", "../../../WWCP_Node/Frontend/src/**/*.ts" ],
+  "include": [ "src/**/*.ts", "../../../WWCP_Node/Frontend/src/**/*.ts", "../../../WWCP_OCPP/WWCP_OCPP_Node/Frontend/src/**/*.ts" ],
 
   // The tests are read by Node rather than by webpack, and spell their imports
   // the way Node wants them - with the extension - which ts-loader's own
   // settings may not allow. They are checked by tsconfig.test.json instead;
-  // the shared files' tests are WWCP_Node's to run.
-  "exclude": [ "src/**/*.test.ts", "../../../WWCP_Node/Frontend/src/**/*.test.ts" ]
+  // the tests of what every node shares are WWCP_Node's to run, and those of
+  // the connections' pages are run and checked here, with this node's own.
+  "exclude": [ "src/**/*.test.ts", "../../../WWCP_Node/Frontend/src/**/*.test.ts", "../../../WWCP_OCPP/WWCP_OCPP_Node/Frontend/src/**/*.test.ts" ]
 }

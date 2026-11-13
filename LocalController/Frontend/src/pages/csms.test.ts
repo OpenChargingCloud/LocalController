@@ -1,8 +1,11 @@
 /**
  * The CSMS page drawn, in a document of happy-dom, against a stand-in
- * controller: what is typed into one of its two forms - and its focus -
- * outlives the other being saved, a form saved says what the controller took,
- * and one refused keeps what is typed and says why.
+ * controller: it says whether the controller reports to a CSMS and how its
+ * lines are kept, sends whoever looks for a line itself to the Connections,
+ * a form saved says what the controller took, and one refused keeps what is
+ * typed and says why. What is a connection's to say - where a line goes, its
+ * security profile, the version of HTTP it is opened over - is neither shown
+ * nor sent.
  */
 
 import { asked, field, open, refused, said, settled, submit, type, until, type Asked } from '../../test/controller.ts';
@@ -15,143 +18,84 @@ import type { CSMSConfiguration } from '../api/client.ts';
 const { csmsPage } = await import('./csms.ts');
 
 
-let held: CSMSConfiguration;
+/** What a controller set up before its lines were connections may still say in its "csms" section. */
+interface SaidBefore {
+    url?:              string;
+    securityProfile?:  number;
+    httpVersion?:      string;
+}
 
-/** Refuses the connection's settings where told to. */
-let refuseConnection = false;
+let held: CSMSConfiguration & SaidBefore;
+
+/** Refuses the settings where told to. */
+let refuseSettings = false;
 
 function controller({ method, path, body }: Asked): unknown {
 
-    if (path === '/configuration/certificates')
+    if (path === '/certificates')
         return { certificates: { tlsIdentity: [] } };
 
     if (path === '/configuration/csms' && method === 'PUT') {
-        if (refuseConnection)
-            return refused(400, 'ws:// is for profile 1 only');
-        const update = body as Partial<CSMSConfiguration>;
+
+        const update = body as Partial<CSMSConfiguration> & SaidBefore;
+
+        // As the controller refuses them: they are a connection's.
+        if (update.url !== undefined || update.securityProfile !== undefined || update.httpVersion !== undefined)
+            return refused(400, 'The address of a line up to the CSMS is a connection\'s: it is changed under Connections.');
+
+        if (refuseSettings)
+            return refused(400, 'A line is dialled again after 600 seconds at the latest.');
+
         // A controller takes what it takes: a ping every half minute at the most often.
-        held = { ...held, ...update, pingEvery: Math.max(update.pingEvery ?? held.pingEvery, 30) };
-        return held;
-    }
+        held = { ...held, ...update, pingEvery: Math.max(update.pingEvery ?? held.pingEvery, 30) } as CSMSConfiguration & SaidBefore;
 
-    if (path === '/configuration/csms/keypins' && method === 'PUT') {
-        const update = body as { serverKeyPins: string; trustOnFirstUse: 'None' | 'Key'; serverKeyPinProbationTime: number };
-        if (update.serverKeyPins.includes('nonsense'))
-            return refused(400, "'nonsense' is no key pin");
-        held = { ...held, keyPins: { ...held.keyPins!,
-                                     serverKeyPins:              update.serverKeyPins.split(',').map(pin => pin.trim()).filter(pin => pin.length > 0),
-                                     trustOnFirstUse:            update.trustOnFirstUse,
-                                     serverKeyPinProbationTime:  update.serverKeyPinProbationTime,
-                                     keyPinned:                  true } };
         return held;
-    }
 
-    if (path === '/configuration/csms/pinSetSigners' && method === 'POST') {
-        const signer = body as { publicKey: string; description: string };
-        held = { ...held, keyPins: { ...held.keyPins!, pinSetSigners: [ ...held.keyPins!.pinSetSigners, { ...signer, createdAt: '2026-11-13T00:00:00Z' } ] } };
-        return held;
     }
 
     if (path === '/configuration/csms')
         return held;
 
-    if (path === '/configuration/csms/credentials' && method === 'PUT' && (body as { tlsChannelBinding?: boolean }).tlsChannelBinding !== undefined) {
-        held = { ...held, credentials: { ...held.credentials,
-                                         totp: { ...held.credentials.totp!, tlsChannelBinding: (body as { tlsChannelBinding: boolean }).tlsChannelBinding } } };
-        return held;
-    }
-
-    if (path === '/configuration/csms/credentials' && method === 'PUT') {
-        const said = body as { username: string; password?: string };
-        held = { ...held, credentials: { ...held.credentials, username: said.username, hasPassword: said.password !== undefined },
-                          state:       { ...held.state, hasCredentials: true } };
-        return held;
-    }
-
     return undefined;
 
 }
 
-async function opened(): Promise<HTMLElement> {
+async function opened(as: Partial<CSMSConfiguration & SaidBefore> = {}): Promise<HTMLElement> {
     held = {
-        enabled: true, url: 'wss://csms.example.org/ocpp/lc001', securityProfile: 2, subprotocols: [ 'ocpp2.1' ],
+        enabled: true, nextHopNodeId: 'CSMS', subprotocols: [ 'ocpp2.1' ],
         checkCertificateRevocation: false, pingEvery: 60, requestTimeout: 30, reconnectInitialDelay: 5, reconnectMaxDelay: 300,
-        credentials: { file: 'csms.secret', username: null, hasPassword: false, hasTOTP: false, minPasswordLength: 16 },
-        state:       { connected: false, connectedSince: null, lastProblem: null, hasCredentials: false, waitingForARestart: [] },
-        keyPins:     { serverKeyPins: [], serverKeyPinsVersion: 0, serverKeyPinState: 'Learned', rawPublicKeys: 'Off', trustOnFirstUse: 'Key',
-                       serverKeyPinProbationTime: 600, pinSetSigners: [], serverKeyPinLearned: 'ab'.repeat(32), serverKeyPinLearnedAt: '2026-11-13T00:00:00Z',
-                       keyPinned: true, overTLS: true, onProbation: true, keyPinShown: 'ab'.repeat(32) }
+        networkingMode: 'overlay',
+        state: { connected: false, connectedSince: null, lastProblem: null, connections: 1, waitingForARestart: [] },
+        ...as
     };
-    refuseConnection = false;
+    refuseSettings = false;
     return open(csmsPage, '/configuration/csms', [ 'csms:read', 'csms:edit', 'certificates:read' ],
-                controller, root => root.querySelector('#credentials-form') !== null);
+                controller, root => root.querySelector('#connection-form') !== null);
 }
 
 
 describe('the CSMS page', () => {
 
-    it('says how the line believes its CSMS: key-pinned, on probation, by the key pin it learned, and that no signer is believed', async () => {
+    it('sends whoever looks for a line itself to the Connections, and says how many are written down', async () => {
 
         const root = await opened();
 
-        assert.match(root.querySelector('#keypins-state')?.textContent ?? '',   /key-pinned/);
-        assert.match(root.querySelector('#keypins-state')?.textContent ?? '',   /on probation/);
-        assert.match(root.querySelector('#keypins-learned')?.textContent ?? '', new RegExp('ab'.repeat(32)));
-        assert.ok(root.querySelector('#keypins-no-signer') !== null, 'no word that a pin set would be refused');
+        assert.ok(root.querySelector('#lines-are-connections a[href$="/configuration/connections"]') !== null,
+                  'the lines are not looked for under Connections');
+        assert.equal(root.querySelector('#lines')?.textContent, '1');
+        assert.equal(root.querySelector('#no-line'), null, 'a controller with a line is told it has none');
 
     });
 
-    it('saves the key pins as typed, and shows them as the controller took them', async () => {
+    it('says that a controller that is to report to a CSMS has no line written down', async () => {
 
-        const root = await opened();
-        const pin  = 'cd'.repeat(32);
+        const root = await opened({ state: { connected: false, connectedSince: null, lastProblem: null, connections: 0, waitingForARestart: [] } });
 
-        field(root, '#keypins-form', 'serverKeyPins').value             = pin;
-        field(root, '#keypins-form', 'serverKeyPinProbationTime').value = '120';
-
-        submit(root, '#keypins-form');
-        await until(() => asked.some(one => one.path === '/configuration/csms/keypins'), 'the key pins were not saved');
-        await until(() => (root.querySelector('#keypins-pins')?.textContent ?? '').includes(pin), 'the key pins taken are not shown');
-
-        const sent = asked.find(one => one.path === '/configuration/csms/keypins')?.body as { serverKeyPins: string; trustOnFirstUse: string; serverKeyPinProbationTime: number };
-
-        assert.equal(sent.serverKeyPins,              pin);
-        assert.equal(sent.trustOnFirstUse,            'Key');
-        assert.equal(sent.serverKeyPinProbationTime,  120);
+        assert.match(root.querySelector('#no-line')?.textContent ?? '', /no line up to one is written down/);
 
     });
 
-    it('keeps key pins the controller refused, and says why', async () => {
-
-        const root = await opened();
-
-        field(root, '#keypins-form', 'serverKeyPins').value = 'nonsense';
-
-        submit(root, '#keypins-form');
-        await until(() => (root.querySelector('#keypins-error')?.textContent ?? '').length > 0, 'nothing was said of the refusal');
-
-        assert.match(root.querySelector('#keypins-error')?.textContent ?? '', /no key pin/);
-        assert.equal(field(root, '#keypins-form', 'serverKeyPins').value, 'nonsense', 'what was typed went');
-
-    });
-
-    it('adds a signer of pin sets, and lists it', async () => {
-
-        const root = await opened();
-
-        field(root, '#signer-form', 'publicKey').value    = 'BASE64KEY';
-        field(root, '#signer-form', 'description').value  = 'The CSMS of the site';
-
-        submit(root, '#signer-form');
-        await until(() => root.querySelector('#keypins-signers') !== null, 'the signer is not listed');
-
-        assert.deepEqual(asked.find(one => one.path === '/configuration/csms/pinSetSigners')?.body,
-                         { publicKey: 'BASE64KEY', description: 'The CSMS of the site' });
-        assert.match(root.querySelector('#keypins-signers')?.textContent ?? '', /The CSMS of the site/);
-
-    });
-
-    it('sends whoever looks for the identity profile 3 signs in with to the Identities, where who the controller is as a client is kept', async () => {
+    it('sends whoever looks for the identity a line holds up to the Identities, where who the controller is as a client is kept', async () => {
 
         const root = await opened();
 
@@ -160,28 +104,36 @@ describe('the CSMS page', () => {
 
     });
 
-    it('keeps what is typed into the credentials, and its focus, while the connection is saved', async () => {
+    it('neither shows nor sends the address of a line, its security profile or the version of HTTP it is opened over', async () => {
 
-        const root      = await opened();
-        const username  = field(root, '#credentials-form', 'username');
-        const password  = field(root, '#credentials-form', 'password');
+        // As a section written before the lines were connections still says them.
+        const root = await opened({ url: 'wss://csms.example.org/ocpp/lc001', securityProfile: 2, httpVersion: '3',
+                                    state: { connected: false, connectedSince: null, lastProblem: null, connections: 1,
+                                             waitingForARestart: [ 'url', 'securityProfile', 'httpVersion', 'pingEvery' ] } });
 
-        username.value = 'lc001';
-        password.value = 'issued by the CSMS, typed here';
-        password.focus();
+        for (const name of [ 'url', 'securityProfile', 'httpVersion' ])
+            assert.equal(root.querySelector(`[name="${name}"]`), null, `${name} is offered`);
+
+        assert.doesNotMatch(root.textContent ?? '', /csms\.example\.org/, 'the address of the line is shown');
+
+        // What waits for a restart is said of what this page saves, and of nothing else.
+        const waiting = root.querySelector('#waiting-for-a-restart')?.textContent ?? '';
+
+        assert.match(waiting, /pingEvery\s+was changed/);
+        assert.doesNotMatch(waiting, /url|securityProfile|httpVersion/);
 
         submit(root, '#connection-form');
         await until(() => asked.some(one => one.method === 'PUT') && root.querySelector('#connection-note')?.textContent === '',
-                    'the connection was not saved');
+                    'the settings were not saved');
 
-        assert.ok(field(root, '#credentials-form', 'password') === password, 'the field was made anew');
-        assert.equal(username.value,          'lc001');
-        assert.equal(password.value,          'issued by the CSMS, typed here');
-        assert.ok(document.activeElement === password, 'the focus went');
+        const sent = asked.find(one => one.method === 'PUT' && one.path === '/configuration/csms')?.body as Record<string, unknown>;
+
+        assert.deepEqual(Object.keys(sent).sort(), [ 'clientCertificate', 'enabled', 'pingEvery', 'reconnectInitialDelay' ]);
+        assert.equal(root.querySelector('#connection-error')?.textContent, '', 'the controller refused what was sent');
 
     });
 
-    it('shows the connection as the controller took it once it is saved, with nothing left to save', async () => {
+    it('shows the settings as the controller took them once they are saved, with nothing left to save', async () => {
 
         const root = await opened();
         const ping = field(root, '#connection-form', 'pingEvery');
@@ -189,7 +141,7 @@ describe('the CSMS page', () => {
         ping.value = '7';
 
         submit(root, '#connection-form');
-        await until(() => held.pingEvery === 30 && root.querySelector('#connection-note')?.textContent === '', 'the connection was not saved');
+        await until(() => held.pingEvery === 30 && root.querySelector('#connection-note')?.textContent === '', 'the settings were not saved');
 
         assert.equal((asked.find(one => one.method === 'PUT')?.body as { pingEvery: number }).pingEvery, 7);
         assert.equal(field(root, '#connection-form', 'pingEvery').value,         '30', 'the field says what was typed, not what the controller took');
@@ -197,13 +149,13 @@ describe('the CSMS page', () => {
 
     });
 
-    it('keeps what is typed into a connection the controller refused, and says why', async () => {
+    it('keeps what is typed into settings the controller refused, and says why', async () => {
 
-        const root = await opened();
-        const url  = field(root, '#connection-form', 'url');
+        const root  = await opened();
+        const again = field(root, '#connection-form', 'reconnectInitialDelay');
 
-        refuseConnection = true;
-        url.value = 'ws://csms.example.org/ocpp/lc001';
+        refuseSettings = true;
+        again.value = '900';
 
         submit(root, '#connection-form');
         await until(() => root.querySelector('#connection-error')?.textContent !== '', 'the refusal was not said');
@@ -213,77 +165,8 @@ describe('the CSMS page', () => {
                     'the page did not ask what the controller has after the refusal');
         await settled();
 
-        assert.equal(root.querySelector('#connection-error')!.textContent, 'ws:// is for profile 1 only');
-        assert.equal(field(root, '#connection-form', 'url').value, 'ws://csms.example.org/ocpp/lc001', 'what was typed went');
-
-    });
-
-    it('names the version of HTTP the line is opened over, and saves the one chosen', async () => {
-
-        const root   = await opened();
-        const select = root.querySelector<HTMLSelectElement>('#connection-form select[name="httpVersion"]')!;
-
-        assert.equal(select.value, 'auto', 'a line that names no version is not shown as leaving it to the CSMS');
-
-        select.value = '3';
-        submit(root, '#connection-form');
-        await until(() => held.httpVersion === '3', 'the version chosen was not saved');
-
-        assert.equal((asked.find(one => one.method === 'PUT' && one.path === '/configuration/csms')?.body as { httpVersion: string }).httpVersion, '3');
-
-    });
-
-    it('binds the one-time token to the line without its secret, and says where a bound token is not dialled', async () => {
-
-        const root = await opened();
-
-        assert.equal(root.querySelector('#token-bind'), null, 'a line without a one-time token is offered its binding');
-
-        held = { ...held, credentials: { ...held.credentials, username: 'lc001', hasTOTP: true,
-                                         totp: { validitySeconds: 30, length: 12, alphabet: 'ab', hashAlgorithm: 'SHA256' as const } },
-                          state:       { ...held.state, hasCredentials: true } };
-
-        // Drawn anew from what the controller holds now.
-        submit(root, '#connection-form');
-        await until(() => root.querySelector('#token-bind') !== null, 'the binding of the token was not offered');
-
-        const button = () => root.querySelector<HTMLButtonElement>('#token-bind')!;
-
-        assert.equal(button().textContent!.trim(), 'Bind token');
-        assert.match(root.querySelector('#token-binding')!.textContent!, /sent unbound/);
-
-        button().click();
-        await until(() => button().textContent!.trim() === 'Unbind token', 'that the token is bound was not drawn');
-
-        assert.deepEqual(asked.filter(one => one.path === '/configuration/csms/credentials').at(-1)?.body, { tlsChannelBinding: true });
-        assert.match(root.querySelector('#token-binding')!.textContent!, /bound to the TLS session/);
-        assert.match(root.querySelector('#token-binding-warning')!.textContent!, /not dialled/,
-                     'a bound token on a line that does not name HTTP/3 was not said to keep it from being dialled');
-
-        root.querySelector<HTMLSelectElement>('#connection-form select[name="httpVersion"]')!.value = '3';
-        submit(root, '#connection-form');
-        await until(() => root.querySelector('#token-binding-warning') === null, 'the warning stayed once the line names HTTP/3');
-
-        button().click();
-        await until(() => button().textContent!.trim() === 'Bind token', 'that the token is no longer bound was not drawn');
-
-        assert.deepEqual(asked.filter(one => one.path === '/configuration/csms/credentials').at(-1)?.body, { tlsChannelBinding: false });
-
-    });
-
-    it('empties the secret and names who it signs in as, once the credentials are saved', async () => {
-
-        const root = await opened();
-
-        field(root, '#credentials-form', 'username').value = 'lc001';
-        field(root, '#credentials-form', 'password').value = 'issued by the CSMS, typed here';
-
-        submit(root, '#credentials-form');
-        await until(() => held.credentials.username === 'lc001' && root.textContent!.includes('Set for'), 'the credentials were not saved');
-
-        assert.equal(field(root, '#credentials-form', 'password').value,          '', 'the secret saved is still in the form');
-        assert.equal(field(root, '#credentials-form', 'username').value,          'lc001');
-        assert.equal(field(root, '#credentials-form', 'username').defaultValue,   'lc001');
+        assert.equal(root.querySelector('#connection-error')!.textContent, 'A line is dialled again after 600 seconds at the latest.');
+        assert.equal(field(root, '#connection-form', 'reconnectInitialDelay').value, '900', 'what was typed went');
 
     });
 
@@ -292,14 +175,11 @@ describe('the CSMS page', () => {
 
 describe('the Reload of the CSMS page', () => {
 
-    // Whether it asks where nothing is typed is not asked here: happy-dom
-    // takes the security profile's choice for one somebody made, as it keeps
-    // no defaultSelected. In Chrome it asks nothing then.
     it('asks before it throws away what is typed, and then asks the controller again', async () => {
 
         const root = await opened();
 
-        type(field(root, '#credentials-form', 'username'), 'lc001');
+        type(field(root, '#connection-form', 'pingEvery'), '90');
 
         const before = asked.length;
 
@@ -308,7 +188,7 @@ describe('the Reload of the CSMS page', () => {
         await until(() => asked.slice(before).some(one => one.method === 'GET' && one.path === '/configuration/csms'),
                     'the controller was not asked again');
 
-        assert.equal(said.length, 1, `asked ${said.length} times before the typed username was thrown away`);
+        assert.equal(said.length, 1, `asked ${said.length} times before the typed ping was thrown away`);
         assert.match(said[0]!, /not been told about/);
 
     });

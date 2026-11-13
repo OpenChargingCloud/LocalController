@@ -44,7 +44,10 @@ CSMS and the charging station port on top.
 | NTS client | the time servers and the rules for believing them; a synchronisation, and a test of one server step by step | `nts:edit`, `nts:run` |
 | SSH server | whether the command line is served over SSH, on which port, and whether passwords open it - in effect at once; its host key, who is connected, the keys of the accounts and what it offers | `ssh:edit` |
 | Your account (the name at the foot of the menu) | your own name, e-mail address and how to reach you; your API keys and SSH keys - added, switched off and on, removed | your own account, whatever the role |
-| CSMS connection | where the controller reports to, how it dials, and what it signs in with | `csms:edit` |
+| CSMS connection | whether the controller reports to a CSMS at all, and how its lines up are kept: pings, timeouts, the TLS identity a line holds up where it names none | `csms:edit` |
+| Connections | the lines up to the CSMS: where each dials, what it signs in with, how its server is believed, how it is doing - and a test of one | `csms:edit`, `csms:run` |
+| Authentication | the passwords and one-time tokens the connections sign in with | `csms:edit` |
+| Client keys | the keys and certificates a connection holds up, and the key the controller signs in with over SSH | `csms:edit` |
 | Certificate store | the TLS roots of the servers the controller connects to, and their certificates - certificates alone, no private key | `certificates:edit` |
 | Identities | who the controller is as a client, each with its private key: the TLS identity it signs in to the CSMS with | `certificates:edit` |
 | Charging stations | the server the charging stations connect to: its port, the security profiles it accepts, the names it is reachable as, what it logs, and whether they may connect over SSH as well | `stations:edit` |
@@ -76,29 +79,68 @@ deliberately *not* changeable while running: an identification is what a CSMS
 knows this controller by, and changing it under a live connection would not
 rename the controller, it would make it a second one nobody is talking to.
 
-The line up to the CSMS is dialled when the controller starts, and kept up by
-the WebSocket client it was dialled with. A CSMS that is not there yet, or goes
+The lines up to the CSMS are connections, as a charging station's are: each
+with its address, the credentials it names, the certificate it holds up, how
+its server is believed, the version of HTTP it is opened over and how its
+messages are written. They are kept in `ocpp-connections/` beside the
+configuration file - the credentials for their owner alone, and never in the
+configuration file - and looked after on the Connections pages or with
+`/api/v1/configuration/connections`, `.../authentications` and
+`.../certificates`; `GET /api/v1/status/connections` says how each is doing,
+and `POST .../connections/test` tries one without writing anything. It is the
+code a charging station dials with (WWCP_OCPP_Node's `OCPPDiallingNode`), so
+what a connection can do there it can do here. A controller may have several:
+each is dialled by itself, and the next endpoint of a peer where one cannot be
+reached. The oldest that dials by itself leads to the CSMS in charge, which is
+told what the controller says of its own accord.
+
+What the `csms` section of the configuration file says is what a connection
+does not: whether the controller reports to a CSMS at all (`enabled`), the
+frame its lines speak in (`networkingMode`), how they are kept
+(`pingEvery`, `requestTimeout`, `reconnectInitialDelay`,
+`reconnectMaxDelay`), the versions of TLS, and `clientCertificate`. A
+controller configured before its lines were connections had one line there -
+`url`, `securityProfile`, `httpVersion` - with its credentials in
+`csms-credentials.json` and how it believed its CSMS in `csms-keypins.json`.
+At its first start with the store they become a connection: with its password
+or, where it had none, its one-time token - one that had both signs in with
+the password and keeps the token as credentials of their own -, its key pins
+and their version, how it trusts them, and the signers of pin sets. The file of
+the credentials is removed, that of the key pins kept as
+`csms-keypins.json.takenOver`, and the start says what was done. The three
+fields are no longer read, and `PUT /api/v1/configuration/csms` refuses them:
+a line is changed where the connections are. There is no security profile to
+say any more - a connection is profile 1 without TLS, 2 over `wss://`, and 3
+where it holds up a certificate.
+
+A connection is dialled when the controller starts, and kept up by the
+WebSocket client it was dialled with. A CSMS that is not there yet, or goes
 away later - restarted, deployed again - is dialled again by itself: after
 `reconnectInitialDelay` seconds of the `csms` section at first, and twice as
 long after every attempt that fails, up to `reconnectMaxDelay`. So is one that
 answers "not yet" - 408, 429, or a 5xx from a proxy whose CSMS is still
 starting - though not before a `Retry-After` it sends, five minutes at most. An
-answer that means no, such as a wrong password, is not asked again before the
-controller is restarted, whether it comes at the start or on the way back. The
-CSMS page says which of these it is, and since when the line is up.
+answer that means no, such as a wrong password, is final, whether it comes at
+the start or on the way back: the connection is not tried again until it is
+changed or the controller restarted. The Connections page says which of these
+it is for each, and the CSMS page whether a line is up and since when.
 
-Security profile 3 signs in with a TLS identity of the certificate store -
-looked after on the Identities page, chosen on the CSMS page, and kept as `clientCertificate` in the `csms` section
-by its handle - rather than with a password; one that is not chosen, not in the
-store, switched off or out of its validity is said so, and not dialled with.
-Over TLS, the CSMS's certificate is judged by the node as a time server's is:
-issued for the name it is dialled at, and chaining to a root this machine
-trusts or to a TLS root of the store kept for every use. What it was believed
-with is remembered in `known-servers.json`, and another certificate than before
-is said. A CSMS reads who is dialling from the last segment of the address, as
+A connection signs in with a password or a one-time token - bound to the TLS
+session where its credentials say so, which it is over HTTP/3 and nothing
+else - or with a certificate: one of its own, kept with the connections, or
+the TLS identity of the certificate store the `csms` section names by its
+handle as `clientCertificate`, looked after on the Identities page and chosen
+on the CSMS page, which every line over `wss://` that names no certificate of
+its own holds up. One that is not in the store, switched off or out of its
+validity is said so, and the line not dialled with it. Over TLS, the CSMS's
+certificate is judged by the node as a time server's is: issued for the name it
+is dialled at, and chaining to a root this machine trusts or to a TLS root of
+the store kept for every use. What it was believed with is
+remembered in `known-servers.json`, and another certificate than before is
+said. A CSMS reads who is dialling from the last segment of the address, as
 OCPP has every client say it: `wss://csms.example.org/ocpp/lc001`.
 
-The line speaks in the frame of the overlay network unless `networkingMode` in
+The lines speak in the frame of the overlay network unless `networkingMode` in
 the `csms` section says `"standard"`: every frame names where it goes and
 where it comes from, and the dial tells the CSMS so in the header
 `X-OCPP-NetworkingMode: OverlayNetwork`. That is what lets the CSMS see the
@@ -115,30 +157,28 @@ this project's CSMS the controller's login is marked as one -
 logins - and until it is, what the controller forwards of its stations is
 dropped there, and the CSMS's log says so. Either way the controller answers what is
 addressed to it and forwards what is addressed to a station; a change waits for
-the line to be dialled again.
+the lines to be dialled again.
 
 Over `wss://` the CSMS is believed either by its certificate, as a CA vouches
 for it, or - key-pinned, as the charging stations believe their local
 controller - by the key pin of its key and by nothing else of its certificate
 ("Key Pins and Raw Public Keys for Local Controllers", sections 5.4 to 5.7).
-The key pins are set under "How it believes the CSMS" on the CSMS connection
-page, with `csmsKeys` at the command line, or with `PUT
-/api/v1/configuration/csms/keypins`; with trust on first use the key pin of the
-first key the CSMS shows is learned, and is on probation until a pin set signed
-by one of the signers of pin sets (`POST`/`DELETE
-/api/v1/configuration/csms/pinSetSigners`, `csmsKeys signer add|remove`)
-confirms it - over OCPP, as `SetVariables` of `TLSClientController` instance
-`csms`, with `ServerKeyPins` and a higher `ServerKeyPinsVersion`. While the line
-is on probation nothing that comes over it is carried out, and nothing is sent
-on to a station: only that pin set, and reads of `TLSClientController`, pass. A
-pin set without the key learned closes the line, which is then held to the
-signed pins; a probation that runs out forgets the key and learns again. Each
-step is told to the CSMS as a security event of this controller's
-(`KeyPinLearned`, `KeyPinConfirmed`, `KeyPinRejected`,
-`KeyPinProbationExpired`, `InvalidCsmsCertificate`). What is learned and signed
-is written to `csms-keypins.json` beside the configuration file; the decisions
-are WWCP_OCPP_Node's key-pin core, which the charging stations use as well.
-Every change needs `csms:edit` and applies from the next dial of the line.
+The key pins are a connection's, set where the connection is; with trust on
+first use the key pin of the first key the CSMS shows is learned, and is on
+probation until a pin set signed by one of the signers of pin sets (`POST
+/api/v1/configuration/connections/pinSetSigners`, `.../pinSetSigners/remove`)
+confirms it - over OCPP, as `SetVariables` of the `TLSClientController`
+instance named by the connection's id, with `ServerKeyPins` and a higher
+`ServerKeyPinsVersion`. While a connection is on probation nothing that comes
+over it is carried out, and nothing is sent on to a station: only that pin set,
+and reads of `TLSClientController`, pass. A pin set without the key learned
+closes the connection, which is then held to the signed pins; a probation that
+runs out forgets the key and learns again. Each step is told to the CSMS as a
+security event of this controller's (`KeyPinLearned`, `KeyPinConfirmed`,
+`KeyPinRejected`, `KeyPinProbationExpired`, `InvalidCsmsCertificate`). What
+is learned and signed is written down with the connection; the decisions are
+WWCP_OCPP_Node's key-pin core, which the charging stations use as well. Every
+change needs `csms:edit` and applies from the next dial of the connection.
 
 What only a CSMS asks of a node it manages - `InstallSSHKey`, `DeleteSSHKey`,
 `SetVariables`, `GetVariables`, a `Reset`, its files and its signature

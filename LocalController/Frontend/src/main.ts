@@ -15,8 +15,23 @@ import { serverCertificatesPage } from './pages/serverCertificates';
 import { clientTrustPage }        from './pages/clientTrust';
 import { statePage }              from './pages/state';
 
-// What a local controller has pages for beside what every node has: the line
-// up to its CSMS, the server its charging stations connect to, and what is
+import { authenticationPage }     from '@ocpp/pages/authentication';
+import { connectionsPage }        from '@ocpp/pages/connections';
+import { clientKeysPage }         from '@ocpp/pages/clientKeys';
+import { setConnectionsResource, setNodeNoun, setNodeTraits } from '@ocpp/settings';
+
+// The lines up to the CSMS are connections, drawn by the pages a charging
+// station draws its own with. Here whoever may read or change the CSMS
+// section may read or change them; the pages speak of a local controller,
+// which is one OCPP node whatever it speaks upwards, and is dialled itself,
+// by its charging stations.
+setConnectionsResource('csms');
+setNodeNoun('local controller');
+setNodeTraits({ oneNodePerOCPPVersion: false, isDialled: true });
+
+// What a local controller has pages for beside what every node has: whether
+// it reports to a CSMS, the lines up to it with what they sign in with and
+// their client keys, the server its charging stations connect to, and what is
 // going on with both - the State, for whoever may see it and no more (the
 // support, say, whose first page it is). The sign-in,
 // the log, the name servers, the time servers, the certificate store, the
@@ -36,6 +51,11 @@ startNode({
             nodeMenu.nts,
             nodeMenu.ssh,
             { path: '/configuration/csms',                      label: 'CSMS connection',     icon: 'fa-satellite-dish',    permission: [ 'csms:read' ]         },
+            // The lines up to the CSMS, what they sign in with and the keys
+            // they hold up: read by whoever may read the CSMS section.
+            { path: '/configuration/connections',               label: 'Connections',         icon: 'fa-network-wired',     permission: [ 'csms:read' ]         },
+            { path: '/configuration/authentication',            label: 'Authentication',      icon: 'fa-user-lock',         permission: [ 'csms:read' ]         },
+            { path: '/configuration/client-keys',               label: 'Client keys',         icon: 'fa-key',               permission: [ 'csms:read' ]         },
             { ...nodeMenu.certificates,                         label: 'Certificate store',   icon: 'fa-vault'                                                  },
             nodeMenu.identities,
             nodeMenu.serverIdentities,
@@ -69,6 +89,9 @@ startNode({
         '/configuration':                           configurationPage,
 
         '/configuration/csms':                      csmsPage,
+        '/configuration/connections':               connectionsPage,
+        '/configuration/authentication':            authenticationPage,
+        '/configuration/client-keys':               clientKeysPage,
         '/configuration/ocpp-server':               ocppServerPage,
         '/configuration/ocpp-server/logins':        stationLoginsPage,
         '/configuration/ocpp-server/certificates':  serverCertificatesPage,

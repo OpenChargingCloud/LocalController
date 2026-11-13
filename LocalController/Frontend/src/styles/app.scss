@@ -7,6 +7,11 @@
     $color-accent-dark:  #14495f
 );
 
+// The lines up to the CSMS, what they sign in with and their client keys are
+// drawn by the pages of WWCP_OCPP_Node, as on a charging station, and look
+// as they do there.
+@use '@ocpp/styles/connections';
+
 // The charging station server: certificates, accepted chains, station logins.
 //
 // These pages are lists of things that each have a state worth seeing at a
@@ -113,6 +118,34 @@
     font-family:  $font-mono;
     font-size:    0.75rem;
     white-space:  pre;
+}
+
+// What those pages write as it is typed or copied - a URL, a key, a pin - and
+// what of it may break anywhere rather than stand past its card.
+.mono {
+    font-family:  $font-mono;
+    font-size:    0.82rem;
+}
+
+.wrap {
+    word-break: break-all;
+}
+
+textarea.mono {
+    width:          100%;
+    padding:        0.4rem 0.6rem;
+    border:         1px solid $color-border;
+    border-radius:  6px;
+    background:     $color-surface;
+    color:          $color-text;
+    resize:         vertical;
+}
+
+// A notice below one connection, about that connection alone.
+.notice.small {
+    margin-top:  0.6rem;
+    padding:     0.5rem 0.7rem;
+    font-size:   0.8rem;
 }
 
 // A password that is shown once and never again.

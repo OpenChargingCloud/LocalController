@@ -14,12 +14,13 @@
     // finds it. paths are not merged with the ones extended, so all of them.
     "paths": {
       "@node/*":                        [ "../../../WWCP_Node/Frontend/src/*" ],
+      "@ocpp/*":                        [ "../../../WWCP_OCPP/WWCP_OCPP_Node/Frontend/src/*" ],
       "lit-html":                       [ "./node_modules/lit-html" ],
       "lit-html/*":                     [ "./node_modules/lit-html/*" ],
       "@happy-dom/global-registrator":  [ "./node_modules/@happy-dom/global-registrator" ]
     }
   },
 
-  "include": [ "src/**/*.test.ts", "test/**/*.ts" ],
+  "include": [ "src/**/*.test.ts", "../../../WWCP_OCPP/WWCP_OCPP_Node/Frontend/src/**/*.test.ts", "test/**/*.ts" ],
   "exclude": []
 }
