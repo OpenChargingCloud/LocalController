@@ -91,6 +91,7 @@ namespace cloud.charging.open.LocalController
 
             AddHandler(root + "stations/{id}/totp",     PutStationTOTP,         HTTPMethod.PUT);
             AddHandler(root + "stations/{id}/totp",     DeleteStationTOTP,      HTTPMethod.DELETE);
+            AddHandler(root + "stations/{id}/totp/binding", PutStationTOTPBinding, HTTPMethod.PUT);
             AddHandler(root + "stations/{id}/password", DeleteStationPassword,  HTTPMethod.DELETE);
 
             AddHandler(root + "stations/{id}/sshKeys",               PostStationSSHKey,    HTTPMethod.POST);
@@ -908,6 +909,44 @@ namespace cloud.charging.open.LocalController
                 response.Add("sharedSecret", generated);
 
             return Task.FromResult(JSONResponse(Request, HTTPStatusCode.OK, response));
+
+        }
+
+        /// <summary>
+        /// PUT .../stations/{id}/totp/binding with {"tlsChannelBinding": true
+        /// or false}: whether the one-time token of a charging station has to
+        /// be bound to the TLS session of its connection.
+        /// </summary>
+        /// <remarks>
+        /// Its own request, so that it leaves the shared secret alone: the
+        /// secret cannot be read back, and setting the token anew to change
+        /// this would mean carrying a new secret to the station.
+        /// </remarks>
+        private Task<HTTPResponse> PutStationTOTPBinding(HTTPRequest Request)
+        {
+
+            if (!TryAuthorize(Request, Permission.Edit(LocalControllerAccess.Stations), true, out var user, out var refused))
+                return Task.FromResult(refused);
+
+            if (!TryGetId(Request, out var id, out var badRequest))
+                return Task.FromResult(badRequest);
+
+            if (!TryParseJSONObject(Request, out var json, out var errorResponse))
+                return Task.FromResult(errorResponse);
+
+            if (json["tlsChannelBinding"] is not JValue { Type: JTokenType.Boolean } binding)
+                return Task.FromResult(ErrorJSON(Request, HTTPStatusCode.BadRequest,
+                                                 "Say whether the token has to be bound: { \"tlsChannelBinding\": true } or false."));
+
+            var bound = binding.Value<Boolean>();
+
+            if (!Controller.StationLogins.TrySetTOTPBinding(id, bound, out var error, out var notSaved))
+                return Task.FromResult(NotChanged(Request, HTTPStatusCode.NotFound, error, notSaved));
+
+            Log.Notice($"'{user.Id}' {(bound ? "asked for" : "no longer asks for")} the one-time token of the charging station '{id}' to be bound to its connection.",
+                       "ocpp", "station", "auth", "web");
+
+            return Task.FromResult(JSONResponse(Request, HTTPStatusCode.OK, Controller.StationLogins.ToJSON()));
 
         }
 

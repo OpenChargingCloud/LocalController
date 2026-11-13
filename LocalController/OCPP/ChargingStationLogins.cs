@@ -772,7 +772,10 @@ namespace cloud.charging.open.LocalController.OCPP
             if (!TryChange(id,
                            note,
                            GroupId,
-                           login => login with { TOTP = settings },
+                           // A new secret does not undo the binding that was
+                           // asked for: that would be less than configured,
+                           // quietly.
+                           login => login with { TOTP = settings with { TLSChannelBinding = login.TOTP?.TLSChannelBinding ?? false } },
                            existed => existed
                                           ? $"The TOTP configuration of the charging station '{id}' was changed: {settings}."
                                           : $"The charging station '{id}' may now sign in to this local controller with a one-time token.",
@@ -787,6 +790,42 @@ namespace cloud.charging.open.LocalController.OCPP
             return true;
 
         }
+
+        #endregion
+
+        #region TrySetTOTPBinding(Id, Bound, out Error [, out NotSaved])
+
+        /// <summary>
+        /// Say whether the one-time token of a charging station has to be
+        /// bound to the TLS session of its connection, leaving its secret and
+        /// everything else about it alone.
+        /// </summary>
+        public Boolean TrySetTOTPBinding(String                            Id,
+                                         Boolean                           Bound,
+                                         [NotNullWhen(false)] out String?  Error)
+
+            => TrySetTOTPBinding(Id, Bound, out Error, out _);
+
+        /// <summary>
+        /// Say whether the one-time token of a charging station has to be
+        /// bound to the TLS session of its connection - and say whether a
+        /// refusal was the file's rather than the change's.
+        /// </summary>
+        /// <param name="NotSaved">True where the file could not be written: see <see cref="TryRemove(String, out String?, out Boolean)"/>.</param>
+        public Boolean TrySetTOTPBinding(String                            Id,
+                                         Boolean                           Bound,
+                                         [NotNullWhen(false)] out String?  Error,
+                                         out Boolean                       NotSaved)
+
+            => TryClear(Id,
+                        login => login.HasTOTP,
+                        login => login with { TOTP = login.TOTP! with { TLSChannelBinding = Bound } },
+                        Bound
+                            ? $"The one-time token of the charging station '{Id}' has to be bound to the TLS session of its connection from now on: it signs in over HTTP/3 only."
+                            : $"The one-time token of the charging station '{Id}' need no longer be bound to the TLS session of its connection.",
+                        $"The charging station '{Id}' has no TOTP configuration to bind.",
+                        out Error,
+                        out NotSaved);
 
         #endregion
 
@@ -1469,7 +1508,12 @@ namespace cloud.charging.open.LocalController.OCPP
         /// so that the answer takes the same shape of time whether or not the
         /// station exists.
         /// </remarks>
-        public Boolean VerifyTOTP(String Id, String Token)
+        /// <param name="Bound">Whether the token was sent as one bound to the TLS session of its connection.</param>
+        /// <param name="TLSExporterMaterial">The keying material of the connection it arrived on, or null where its TLS exports none.</param>
+        public Boolean VerifyTOTP(String   Id,
+                                  String   Token,
+                                  Boolean  Bound                = false,
+                                  Byte[]?  TLSExporterMaterial  = null)
         {
 
             ChargingStationLogin? login;
@@ -1494,7 +1538,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
             }
 
-            return settings.Matches(Token, TimeProvider.GetUtcNow());
+            return settings.Matches(Token, TimeProvider.GetUtcNow(), Bound, TLSExporterMaterial);
 
         }
 

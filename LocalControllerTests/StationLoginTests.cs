@@ -369,6 +369,64 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region TheBindingOfATokenIsSetWithoutItsSecret_AndOutlivesANewOne()
+
+        /// <summary>
+        /// Whether a token has to be bound is said without touching its
+        /// secret, which cannot be read back; and a new secret does not undo
+        /// it, which would be less than was configured, quietly.
+        /// </summary>
+        [Test]
+        public void TheBindingOfATokenIsSetWithoutItsSecret_AndOutlivesANewOne()
+        {
+
+            const String theSecret = "a-shared-secret-long-enough";
+
+            var here = Enumerable.Range(0, 32).Select(i => (Byte) i).ToArray();
+
+            String Token(String Secret, Byte[]? Material)
+                => org.GraphDefined.Vanaheimr.Hermod.TOTPGenerator.GenerateTOTP(Secret, TOTPSettings.DefaultValidityTime, TOTPSettings.DefaultLength, TOTPSettings.DefaultAlphabet,
+                                              clock.GetUtcNow(), Material, org.GraphDefined.Vanaheimr.Hermod.TOTPHashAlgorithm.SHA256).Current;
+
+            Assert.That(logins.TrySetTOTPBinding("cs001", true, out var nothingToBind), Is.False, "bound what is not there");
+
+            logins.TrySetTOTP("cs001", theSecret, null, null, null, null, null, null, out _, out var error);
+
+            var rawBefore    = logins.VerifyTOTP("cs001", Token(theSecret, null));
+
+            var boundNow     = logins.TrySetTOTPBinding("cs001", true, out var bindingError);
+
+            var rawAfter     = logins.VerifyTOTP("cs001", Token(theSecret, null));
+            var boundAfter   = logins.VerifyTOTP("cs001", Token(theSecret, here), true, here);
+            var shown        = logins.ToJSON();
+
+            logins.TrySetTOTP("cs001", theSecret + "-anew", null, null, null, null, null, null, out _, out var errorAnew);
+
+            var stillBound   = logins.TryGet("cs001", out var anew) && anew.TOTP?.TLSChannelBinding == true;
+            var rawAnew      = logins.VerifyTOTP("cs001", Token(theSecret + "-anew", null));
+
+            var unbound      = logins.TrySetTOTPBinding("cs001", false, out _);
+            var rawAtLast    = logins.VerifyTOTP("cs001", Token(theSecret + "-anew", null));
+
+            Assert.Multiple(() => {
+                Assert.That(nothingToBind,  Is.Not.Null);
+                Assert.That(error,          Is.Null);
+                Assert.That(rawBefore,      Is.True,   "a raw token, before the binding was asked for");
+                Assert.That(boundNow,       Is.True,   bindingError);
+                Assert.That(rawAfter,       Is.False,  "a raw token, where the binding is asked for");
+                Assert.That(boundAfter,     Is.True,   "the token bound to its connection");
+                Assert.That(shown["stations"]?[0]?["totp"]?.Value<Boolean>("tlsChannelBinding"), Is.True, "the page is not told");
+                Assert.That(errorAnew,      Is.Null);
+                Assert.That(stillBound,     Is.True,   "a new secret undid the binding");
+                Assert.That(rawAnew,        Is.False,  "a raw token of the new secret");
+                Assert.That(unbound,        Is.True);
+                Assert.That(rawAtLast,      Is.True,   "a raw token, once the binding is no longer asked for");
+            });
+
+        }
+
+        #endregion
+
         #region WhatThePageIsShownCarriesNoSharedSecretEither()
 
         /// <summary>

@@ -468,7 +468,9 @@ export const stationLoginsPage: Page = {
                         ${station.totp
                               ? html`<div class="small muted">
                                          ${station.totp.length} characters of ${station.totp.hashAlgorithm},
-                                         every ${station.totp.validitySeconds}s
+                                         every ${station.totp.validitySeconds}s${station.totp.tlsChannelBinding
+                                             ? html`, <span class="station-totp-bound">bound to its connection: over HTTP/3 only</span>`
+                                             : nothing}
                                      </div>`
                               : nothing}
                         ${(station.sshKeys ?? []).map(key => html`
@@ -521,6 +523,14 @@ export const stationLoginsPage: Page = {
                             ${station.hasTOTP ? 'New token secret' : 'Give it a token'}
                         </button>
                         ${station.hasTOTP ? html`
+                            <button type="button" class="btn small station-totp-binding" data-id="${station.id}"
+                                    title=${station.totp?.tlsChannelBinding
+                                                ? 'Take a raw token again, which can be replayed while it stands.'
+                                                : 'Take only a token bound to the TLS session of its connection. The station then has to come over HTTP/3, and a token read off its connection is no use on another.'}
+                                    ?disabled=${!mayChange}
+                                    @click=${() => void bindToken(station.id, !station.totp?.tlsChannelBinding)}>
+                                ${station.totp?.tlsChannelBinding ? 'Unbind token' : 'Bind token'}
+                            </button>
                             <button type="button" class="btn small station-totp-remove" data-id="${station.id}"
                                     ?disabled=${!mayChange} @click=${() => void dropToken(station.id)}>
                                 Drop token
@@ -807,6 +817,17 @@ export const stationLoginsPage: Page = {
 
         }
 
+
+        async function bindToken(id: string, bound: boolean): Promise<void> {
+
+            if (bound && !window.confirm(`Take only a one-time token bound to its connection from '${id}'?\n\n` +
+                                         'The station then signs in over HTTP/3 only, and has to bind its token. ' +
+                                         'One that does not is turned away.'))
+                return;
+
+            await change(() => api.ocppServer.stations.bindTOTP(id, bound));
+
+        }
 
         async function dropToken(id: string): Promise<void> {
 
