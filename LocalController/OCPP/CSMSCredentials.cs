@@ -133,6 +133,23 @@ namespace cloud.charging.open.LocalController.OCPP
         /// <summary>
         /// Something happened here that belongs in the log of the controller.
         /// </summary>
+        /// <summary>
+        /// The password of before, for what takes the line of before over
+        /// into the store of connections - see LocalController.Dialling.cs.
+        /// </summary>
+        internal String? PasswordOfBefore
+        {
+            get { lock (updateLock) return password; }
+        }
+
+        /// <summary>
+        /// The one-time token of before, for the same.
+        /// </summary>
+        internal TOTPSettings? TOTPOfBefore
+        {
+            get { lock (updateLock) return totp; }
+        }
+
         public event Action<LogLevel, String>? OnNotice;
 
         #endregion

@@ -385,7 +385,7 @@ namespace cloud.charging.open.LocalController
             BuildCSMSConnection(configuration.CSMS);
 
             // TLSClientController of the line up to the CSMS, and its pin sets.
-            AttachCSMSKeyPins(lc01);
+            AttachUplinkDeviceModel(lc01);
 
             // And the grid operator's VTN. Nothing is asked yet: Start() does.
             BuildOpenADRConnection(configuration.OpenADR);

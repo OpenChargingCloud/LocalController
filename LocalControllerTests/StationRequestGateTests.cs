@@ -608,7 +608,7 @@ namespace cloud.charging.open.LocalController.Tests
                                              )
                                          );
 
-                                Assert.That(lc.CSMSLogin.TrySetPassword("lc002", ThePassword, out var loginError), Is.True, loginError);
+                                Assert.That(lc.TrySetUplinkPassword("lc002", ThePassword, out var loginError), Is.True, loginError);
 
                                 return lc;
 

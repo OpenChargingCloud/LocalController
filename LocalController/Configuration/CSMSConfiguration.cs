@@ -528,16 +528,6 @@ namespace cloud.charging.open.LocalController.Configuration
 
             #endregion
 
-            #region Switched on needs somewhere to dial
-
-            if (enabled == true && (url is null || url.Length == 0))
-            {
-                Error = $"'{SectionName}.enabled' is true, but there is no 'url' to dial.";
-                return false;
-            }
-
-            #endregion
-
             Configuration = new CSMSConfiguration(
                                 enabled,
                                 url is { Length: > 0 } ? url : null,

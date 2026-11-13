@@ -55,21 +55,12 @@ namespace cloud.charging.open.LocalController.Tests
         /// a 400, as if something had been wrong with it.
         /// </summary>
         [TestCase("PUT csms")]
-        [TestCase("PUT csms/credentials, password")]
-        [TestCase("PUT csms/credentials, sharedSecret")]
-        [TestCase("DELETE csms/credentials")]
         public async Task AChangeItsFileCannotTakeIsAServerError(String Change)
         {
 
             using var http  = await SignedIn();
 
-            // What makes the removal a change: something to remove.
-            var set         = await http.PutAsync($"{Root}/credentials", JSONBody(new JProperty("username", "lc001"),
-                                                                                  new JProperty("password", "a password the CSMS issued")));
-
-            Assert.That(set.IsSuccessStatusCode, Is.True, await set.Content.ReadAsStringAsync());
-
-            var file        = Change == "PUT csms" ? Controller.ConfigFile.Path : Controller.CSMSLogin.Path;
+            var file        = Controller.ConfigFile.Path;
             var before      = (await GetJSON(http, Root)).ToString();
 
             // Where the file's next version is written first is a directory.
@@ -77,9 +68,6 @@ namespace cloud.charging.open.LocalController.Tests
 
             var response    = Change switch {
                 "PUT csms"                            => await http.PutAsync   (Root,                   JSONBody(new JProperty("pingEvery", 42))),
-                "PUT csms/credentials, password"      => await http.PutAsync   ($"{Root}/credentials",  JSONBody(new JProperty("username", "lc002"), new JProperty("password",     "another password the CSMS issued"))),
-                "PUT csms/credentials, sharedSecret"  => await http.PutAsync   ($"{Root}/credentials",  JSONBody(new JProperty("username", "lc002"), new JProperty("sharedSecret", "aSharedSecretTheCSMSIssued"))),
-                "DELETE csms/credentials"             => await http.DeleteAsync($"{Root}/credentials"),
                 _                                     => throw new ArgumentException($"No change '{Change}' here.", nameof(Change))
             };
 
@@ -110,16 +98,11 @@ namespace cloud.charging.open.LocalController.Tests
             using var http  = await SignedIn();
 
             System.IO.Directory.CreateDirectory(Controller.ConfigFile.Path + ".tmp");
-            System.IO.Directory.CreateDirectory(Controller.CSMSLogin.Path  + ".tmp");
 
             var profile     = await http.PutAsync(Root,                  JSONBody(new JProperty("securityProfile", 4)));
-            var tooShort    = await http.PutAsync($"{Root}/credentials", JSONBody(new JProperty("username", "lc002"), new JProperty("password",     "short")));
-            var shortSecret = await http.PutAsync($"{Root}/credentials", JSONBody(new JProperty("username", "lc002"), new JProperty("sharedSecret", "short")));
 
             Assert.Multiple(() => {
                 Assert.That(profile.    StatusCode,  Is.EqualTo(HttpStatusCode.BadRequest),  "a security profile there is none of");
-                Assert.That(tooShort.   StatusCode,  Is.EqualTo(HttpStatusCode.BadRequest),  "a password too short");
-                Assert.That(shortSecret.StatusCode,  Is.EqualTo(HttpStatusCode.BadRequest),  "a shared secret too short");
             });
 
         }

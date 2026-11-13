@@ -88,7 +88,7 @@ namespace cloud.charging.open.LocalController
 
             var station = Request.NetworkPath.Source.ToString();
 
-            if (!csmsConnected)
+            if (!CSMSConnected)
             {
 
                 var why = CSMSEnabled

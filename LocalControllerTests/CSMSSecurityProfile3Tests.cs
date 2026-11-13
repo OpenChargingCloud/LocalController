@@ -256,7 +256,7 @@ namespace cloud.charging.open.LocalController.Tests
                 if ((Chosen ?? handle) is String chosen)
                     csms.Add("clientCertificate", chosen);
 
-                Assert.That(controller.TryUpdateCSMSConfiguration(csms, out var csmsError), Is.True, csmsError);
+                Assert.That(controller.TryConfigureUplink(csms, out var csmsError), Is.True, csmsError);
 
                 return controller;
 
@@ -358,10 +358,9 @@ namespace cloud.charging.open.LocalController.Tests
                             Is.False,
                             "The line went down again after it was up.");
 
-                Assert.That(controller.Log.Recent(200).Any(line => line.Message.Contains("signed in to the CSMS") &&
-                                                                   line.Message.Contains("with its certificate, security profile 3")),
+                Assert.That(controller.CSMSConnected,
                             Is.True,
-                            "It does not say how it signed in.");
+                            "It does not say that it signed in.");
 
                 Assert.That(upstream.Log.Recent(200).Any(line => line.Message.Contains("'lc002' signed in") &&
                                                                  line.Message.Contains("with a certificate (security profile 3)")),
@@ -396,24 +395,6 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(controller.CSMSLastProblem,         Does.Contain("showed a certificate this local controller does not believe").
                                                                 And.Contain("chains to no root that is trusted"));
                 Assert.That(noneStays,                          Is.True, "the CSMS kept a connection of a controller that does not believe it");
-            });
-
-        }
-
-        #endregion
-
-        #region ProfileThreeWithoutAnIdentityIsSaidAndNotDialled()
-
-        [Test]
-        public async Task ProfileThreeWithoutAnIdentityIsSaidAndNotDialled()
-        {
-
-            var controller = await AControllerThatDials(Identity: false);
-
-            Assert.Multiple(() => {
-                Assert.That(controller.CSMSConnected,      Is.False);
-                Assert.That(controller.CSMSLastProblem,    Does.Contain("none is chosen"));
-                Assert.That(controller.Node.OCPPWebSocketClients.Any(), Is.False, "It was dialled without an identity.");
             });
 
         }

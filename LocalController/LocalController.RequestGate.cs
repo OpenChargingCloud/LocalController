@@ -131,7 +131,7 @@ namespace cloud.charging.open.LocalController
 
             // The node's only gate: nothing else of this controller sets one.
             Node.OCPP.IN.RequestGate = (connection, action, payload) => OnlyTheCSMS(connection, action, payload) ??
-                                                                        GateOnCSMSProbation(connection, action, payload);
+                                                                        GateOnProbation(connection, action, payload);
 
         }
 

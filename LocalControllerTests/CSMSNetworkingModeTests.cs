@@ -366,7 +366,7 @@ namespace cloud.charging.open.LocalController.Tests
 
                                 lc.Log.OnLogged += entry => said.Enqueue(entry.Message);
 
-                                Assert.That(lc.CSMSLogin.TrySetPassword(ControllerId, ThePassword, out var loginError), Is.True, loginError);
+                                Assert.That(lc.TrySetUplinkPassword(ControllerId, ThePassword, out var loginError), Is.True, loginError);
 
                                 Assert.That(lc.StationLogins.TryAddKeyPin("cs001", KeyPin.FromKey(cs001Key).ToHex(), "bay 1", null, null, null, out _, out var error1), Is.True, error1);
                                 Assert.That(lc.StationLogins.TryAddKeyPin("cs002", KeyPin.FromKey(cs002Key).ToHex(), "bay 2", null, null, null, out _, out var error2), Is.True, error2);

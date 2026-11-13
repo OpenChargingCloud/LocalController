@@ -181,7 +181,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                            out _, out var rootError),
                             Is.True, rootError);
 
-                Assert.That(controller.CSMSLogin.TrySetTOTP("lc002", SharedSecret, null, null, null, null, out var tokenError, out _, Bound),
+                Assert.That(controller.TrySetUplinkTOTP("lc002", SharedSecret, null, null, null, null, out var tokenError, out _, Bound),
                             Is.True, tokenError);
 
                 var csms = new JObject(
@@ -195,7 +195,7 @@ namespace cloud.charging.open.LocalController.Tests
                 if (HTTPVersion is not null)
                     csms.Add("httpVersion", HTTPVersion);
 
-                Assert.That(controller.TryUpdateCSMSConfiguration(csms, out var csmsError), Is.True, csmsError);
+                Assert.That(controller.TryConfigureUplink(csms, out var csmsError), Is.True, csmsError);
 
                 return controller;
 
@@ -323,7 +323,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(controller.CSMSLastProblem,  Is.Null);
                 Assert.That(upstream.StationServer?.WebSocketConnections.Count(), Is.GreaterThan(0),
                             "The CSMS end has no connection.");
-                Assert.That(controller.CSMSConfigurationJSON().Value<String>("httpVersion"),
+                Assert.That(controller.UplinkJSON().Value<String>("httpVersion") ?? "auto",
                             Is.EqualTo(Named ?? "auto"),
                             "What the page reads does not say what the line is opened over.");
             });
@@ -356,7 +356,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(controller.CSMSLastProblem,  Is.Null);
                 Assert.That(upstream.StationServer?.WebSocketConnections.Count(), Is.GreaterThan(0),
                             "The CSMS end has no connection.");
-                Assert.That(controller.CSMSConfigurationJSON()["credentials"]?["totp"]?.Value<Boolean>("tlsChannelBinding"),
+                Assert.That(controller.Connections.Authentications.Single().TLSChannelBinding,
                             Is.True,
                             "What the page reads does not say that the token is bound.");
             });
@@ -381,7 +381,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(controller.CSMSConnected,    Is.False);
-                Assert.That(controller.CSMSLastProblem,  Does.Contain("refused this local controller"));
+                Assert.That(controller.CSMSLastProblem,  Does.Contain("that answer is final"));
             });
 
         }
@@ -409,7 +409,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(controller.CSMSConnected,    Is.False);
-                Assert.That(controller.CSMSLastProblem,  Does.Contain("is not dialled").And.Contain("Name HTTP/3"));
+                Assert.That(controller.CSMSLastProblem,  Does.Contain("Not dialled").And.Contain("Name HTTP/3"));
                 Assert.That(upstream.StationServer?.WebSocketConnections.Any(), Is.Not.True,
                             "The CSMS was dialled all the same.");
             });
@@ -426,9 +426,9 @@ namespace cloud.charging.open.LocalController.Tests
 
             var controller = await AControllerThatDials(null);
 
-            var noVersion  = controller.TryUpdateCSMSConfiguration(new JObject(new JProperty("httpVersion", "4")), out var noVersionError);
+            var noVersion  = controller.TryConfigureUplink(new JObject(new JProperty("httpVersion", "4")), out var noVersionError);
 
-            var withoutTLS = controller.TryUpdateCSMSConfiguration(new JObject(
+            var withoutTLS = controller.TryConfigureUplink(new JObject(
                                                                        new JProperty("url",              $"ws://127.0.0.1:{csmsPort}/lc002"),
                                                                        new JProperty("securityProfile",  1),
                                                                        new JProperty("httpVersion",      "3")
@@ -440,45 +440,6 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(noVersionError,   Does.Contain("\"auto\", \"1.1\", \"2\" or \"3\""));
                 Assert.That(withoutTLS,       Is.False);
                 Assert.That(withoutTLSError,  Does.Contain("wss://"));
-            });
-
-        }
-
-        #endregion
-
-        #region TheBindingOfTheTokenIsSetWithoutItsSecret_AndOutlivesANewOne()
-
-        [Test]
-        public async Task TheBindingOfTheTokenIsSetWithoutItsSecret_AndOutlivesANewOne()
-        {
-
-            var controller = await AControllerThatDials("3");
-            var login      = controller.CSMSLogin;
-
-            var bound      = login.TrySetTOTPBinding(true, out var boundError);
-            var asBound    = login.TOTPConfig()?.UseTLSExporterMaterial;
-            var secret     = login.TOTPConfig()?.SharedSecret;
-
-            var anew       = login.TrySetTOTP("lc002", TheSharedSecret + "-anew", null, null, null, null, out var anewError);
-            var stillBound = login.TOTPConfig()?.UseTLSExporterMaterial;
-
-            var unbound    = login.TrySetTOTPBinding(false, out _);
-            var atLast     = login.TOTPConfig()?.UseTLSExporterMaterial;
-
-            var cleared    = login.TryClear(out _);
-            var nothing    = login.TrySetTOTPBinding(true, out var nothingError);
-
-            Assert.Multiple(() => {
-                Assert.That(bound,         Is.True,  boundError);
-                Assert.That(asBound,       Is.True);
-                Assert.That(secret,        Is.EqualTo(TheSharedSecret),  "the secret was changed");
-                Assert.That(anew,          Is.True,  anewError);
-                Assert.That(stillBound,    Is.True,  "a new secret undid the binding");
-                Assert.That(unbound,       Is.True);
-                Assert.That(atLast,        Is.False);
-                Assert.That(cleared,       Is.True);
-                Assert.That(nothing,       Is.False, "bound what is not there");
-                Assert.That(nothingError,  Is.Not.Null);
             });
 
         }

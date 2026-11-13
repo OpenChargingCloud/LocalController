@@ -319,13 +319,13 @@ namespace cloud.charging.open.LocalController.Tests
                                             )
                                         );
 
-                             Assert.That(made.CSMSLogin.TrySetPassword("lc002", "a-password-of-the-line-to-the-csms", out var loginError), Is.True, loginError);
+                             Assert.That(made.TrySetUplinkPassword("lc002", "a-password-of-the-line-to-the-csms", out var loginError), Is.True, loginError);
 
-                             Assert.That(made.CSMSPins.TrySetTrust(new ServerKeyPinSettings(RawPublicKeys, "Key", ProbationSeconds), out var trustError), Is.True, trustError);
+                             Assert.That(made.TrySetUplinkKeyPinTrust(new ServerKeyPinSettings(RawPublicKeys, "Key", ProbationSeconds), out var trustError), Is.True, trustError);
 
-                             Assert.That(made.CSMSPins.TryAddPinSetSigner(Convert.ToBase64String(signer.PublicKeyBytes), "The CSMS", out var signerError), Is.True, signerError);
+                             Assert.That(made.Connections.TryAddPinSetSigner(Convert.ToBase64String(signer.PublicKeyBytes), "The CSMS", out var signerError, out _), Is.True, signerError);
 
-                             Assert.That(made.TryUpdateCSMSConfiguration(new JObject(
+                             Assert.That(made.TryConfigureUplink(new JObject(
                                                                              new JProperty("enabled",                true),
                                                                              new JProperty("url",                    $"wss://127.0.0.1:{csms.Port}/lc002"),
                                                                              new JProperty("securityProfile",        2),
@@ -388,7 +388,7 @@ namespace cloud.charging.open.LocalController.Tests
             var request  = new OCPPv2_1.CSMS.SetVariablesRequest(
                                SourceRouting.To(NetworkingNode_Id.Parse("lc002")),
                                Variables.Select(one => new OCPPv2_1.SetVariableData(
-                                                           new OCPPv2_1.Component("TLSClientController", "csms"),
+                                                           new OCPPv2_1.Component("TLSClientController", controller!.UplinkId()),
                                                            new OCPPv2_1.Variable(one.Variable),
                                                            one.Value
                                                        )),
@@ -438,13 +438,14 @@ namespace cloud.charging.open.LocalController.Tests
 
             await Until(() => csms.SecurityEvents("KeyPinLearned").Length > 0, "The CSMS was told of the key pin learned");
 
-            var written = controller!.CSMSPins.ToJSON();
+            var written = controller!.UplinkJSON();
 
             Assert.Multiple(() => {
                 Assert.That(written.Value<String>("serverKeyPinState"),    Is.EqualTo("Learned"));
                 Assert.That(written.Value<String>("serverKeyPinLearned"),  Is.EqualTo(pin.ToHex()));
-                Assert.That(File.Exists(controller.CSMSPins.Path),         Is.True, "nothing was written down");
-                Assert.That(controller.CSMSKeyPinning!.TrustOf("csms")?.OnProbation, Is.True);
+                Assert.That(File.Exists(Path.Combine(controller.Connections.Path, cloud.charging.open.protocols.OCPP.Node.Connections.ConnectionStore.PeersFileName)),
+                                                                           Is.True, "nothing was written down");
+                Assert.That(controller.UplinkTrust()?.OnProbation, Is.True);
                 Assert.That(csms.SecurityEvents("KeyPinLearned").Single().Value<String>("techInfo"), Does.Contain(pin.ToString()));
             });
 
@@ -467,7 +468,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var ofTheController  = await csms!.Ask("GetVariables", GetVariables("DNSClientController", "Servers"));
             var forAStation      = await csms.  Ask("GetVariables", GetVariables("DNSClientController", "Servers"), Destination: "cs001");
-            var ofTheLine        = await csms.  Ask("GetVariables", GetVariables("TLSClientController", "LearnedKeyPin", "csms"));
+            var ofTheLine        = await csms.  Ask("GetVariables", GetVariables("TLSClientController", "LearnedKeyPin", controller!.UplinkId()));
 
             Assert.Multiple(() => {
 
@@ -504,10 +505,10 @@ namespace cloud.charging.open.LocalController.Tests
             var pin       = KeyPin.FromCertificate(csms!.Certificate).ToHex();
 
             var unsigned  = await csms.Ask("SetVariables", new JObject(new JProperty("setVariableData", new JArray(
-                                                               new JObject(new JProperty("component", new JObject(new JProperty("name", "TLSClientController"), new JProperty("instance", "csms"))),
+                                                               new JObject(new JProperty("component", new JObject(new JProperty("name", "TLSClientController"), new JProperty("instance", controller!.UplinkId()))),
                                                                            new JProperty("variable",  new JObject(new JProperty("name", "ServerKeyPins"))),
                                                                            new JProperty("attributeValue", pin)),
-                                                               new JObject(new JProperty("component", new JObject(new JProperty("name", "TLSClientController"), new JProperty("instance", "csms"))),
+                                                               new JObject(new JProperty("component", new JObject(new JProperty("name", "TLSClientController"), new JProperty("instance", controller!.UplinkId()))),
                                                                            new JProperty("variable",  new JObject(new JProperty("name", "ServerKeyPinsVersion"))),
                                                                            new JProperty("attributeValue", "1"))))));
 
@@ -526,8 +527,8 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(confirmed[0].Value<Int32>(), Is.EqualTo(3), confirmed.ToString());
                 Assert.That(confirmed[2]?["setVariableResult"]?.Select(result => result.Value<String>("attributeStatus")), Is.All.EqualTo("Accepted"), confirmed.ToString());
 
-                Assert.That(controller!.CSMSPins.ToJSON().Value<String>("serverKeyPinState"),  Is.EqualTo("Confirmed"));
-                Assert.That(controller.CSMSKeyPinning!.TrustOf("csms")?.OnProbation,           Is.False);
+                Assert.That(controller!.UplinkJSON().Value<String>("serverKeyPinState"),  Is.EqualTo("Confirmed"));
+                Assert.That(controller.UplinkTrust()?.OnProbation,           Is.False);
 
                 Assert.That(afterwards[0].Value<Int32>(), Is.EqualTo(3), $"a request was refused after the key was confirmed: {afterwards}");
 
@@ -555,9 +556,9 @@ namespace cloud.charging.open.LocalController.Tests
 
             await Until(() => csms.SecurityEvents("KeyPinLearned").Length > 0, "The CSMS was told of the key pin learned");
 
-            var trust     = controller!.CSMSKeyPinning!.TrustOf("csms");
+            var trust     = controller!.UplinkTrust();
             var session   = csms.TLSSessions.First();
-            var asked     = await csms.Ask("GetVariables", GetVariables("TLSClientController", "RawPublicKeys", "csms"));
+            var asked     = await csms.Ask("GetVariables", GetVariables("TLSClientController", "RawPublicKeys", controller!.UplinkId()));
 
             Assert.Multiple(() => {
 
@@ -572,8 +573,8 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(session?.LocalCertificateType,           Is.EqualTo(TLSCertificateType.RawPublicKey));
 
                 // The key pin rules as for a key in a certificate.
-                Assert.That(controller.CSMSPins.ToJSON().Value<String>("serverKeyPinState"),    Is.EqualTo("Learned"));
-                Assert.That(controller.CSMSPins.ToJSON().Value<String>("serverKeyPinLearned"),  Is.EqualTo(pin.ToHex()));
+                Assert.That(controller.UplinkJSON().Value<String>("serverKeyPinState"),    Is.EqualTo("Learned"));
+                Assert.That(controller.UplinkJSON().Value<String>("serverKeyPinLearned"),  Is.EqualTo(pin.ToHex()));
                 Assert.That(csms.SecurityEvents("KeyPinLearned").Single().Value<String>("techInfo"), Does.Contain(pin.ToString()));
 
                 Assert.That(asked[2]?["getVariableResult"]?[0]?.Value<String>("attributeValue"),  Is.EqualTo(RawPublicKeys), asked.ToString());
@@ -589,7 +590,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(confirmed[2]?["setVariableResult"]?.Select(result => result.Value<String>("attributeStatus")), Is.All.EqualTo("Accepted"), confirmed.ToString());
-                Assert.That(controller.CSMSPins.ToJSON().Value<String>("serverKeyPinState"),  Is.EqualTo("Confirmed"));
+                Assert.That(controller.UplinkJSON().Value<String>("serverKeyPinState"),  Is.EqualTo("Confirmed"));
                 Assert.That(trust?.OnProbation,                                               Is.False);
                 Assert.That(afterwards[0].Value<Int32>(), Is.EqualTo(3), $"a request was refused after the key was confirmed: {afterwards}");
             });
@@ -616,18 +617,18 @@ namespace cloud.charging.open.LocalController.Tests
 
             await Until(() => csms.SecurityEvents("KeyPinConfirmed").Length > 0, "The CSMS was told the key pin is confirmed");
 
-            var before          = await csms.Ask("GetVariables", GetVariables("TLSClientController", "RawPublicKeys", "csms"));
+            var before          = await csms.Ask("GetVariables", GetVariables("TLSClientController", "RawPublicKeys", controller!.UplinkId()));
 
             var (payload, id)   = Signed(("RawPublicKeys", "Require"));
             var taken           = await csms.Ask("SetVariables", payload, id);
 
-            var afterwards      = await csms.Ask("GetVariables", GetVariables("TLSClientController", "RawPublicKeys", "csms"));
+            var afterwards      = await csms.Ask("GetVariables", GetVariables("TLSClientController", "RawPublicKeys", controller!.UplinkId()));
 
             Assert.Multiple(() => {
                 Assert.That(before    [2]?["getVariableResult"]?[0]?.Value<String>("attributeValue"),   Is.EqualTo("Off"), before.ToString());
                 Assert.That(taken     [2]?["setVariableResult"]?.Select(result => result.Value<String>("attributeStatus")), Is.All.EqualTo("Accepted"), taken.ToString());
                 Assert.That(afterwards[2]?["getVariableResult"]?[0]?.Value<String>("attributeValue"),   Is.EqualTo("Require"), afterwards.ToString());
-                Assert.That(controller!.CSMSKeyPinning!.TrustOf("csms")?.Policy()?.RawPublicKeys,       Is.EqualTo(RawPublicKeyMode.Require));
+                Assert.That(controller!.UplinkTrust()?.Policy()?.RawPublicKeys,       Is.EqualTo(RawPublicKeyMode.Require));
             });
 
         }
@@ -647,7 +648,7 @@ namespace cloud.charging.open.LocalController.Tests
             await AControllerThatLearnsTheKeyOfItsCSMS(RawPublicKeys: "Prefer");
 
             var pin   = KeyPin.FromCertificate(csms!.Certificate);
-            var trust = controller!.CSMSKeyPinning!.TrustOf("csms");
+            var trust = controller!.UplinkTrust();
 
             await Until(() => csms.SecurityEvents("KeyPinLearned").Length > 0, "The CSMS was told of the key pin learned");
 
@@ -656,7 +657,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(trust?.LastValidation?.CertificateType,  Is.EqualTo(TLSCertificateType.X509));
                 Assert.That(trust?.Learned,                          Is.EqualTo(pin));
                 Assert.That(csms.TLSSessions.First()?.Provider,      Is.EqualTo(TLSProvider.SslStream));
-                Assert.That(controller.CSMSPins.ToJSON().Value<String>("serverKeyPinState"), Is.EqualTo("Learned"));
+                Assert.That(controller.UplinkJSON().Value<String>("serverKeyPinState"), Is.EqualTo("Learned"));
             });
 
         }
@@ -675,11 +676,11 @@ namespace cloud.charging.open.LocalController.Tests
 
             await AControllerThatLearnsTheKeyOfItsCSMS(RawPublicKeys: "Require", GetsThrough: false);
 
-            await Until(() => controller!.CSMSKeyPinning?.TrustOf("csms")?.LastValidation is not null,
+            await Until(() => controller!.UplinkTrust()?.LastValidation is not null,
                         "The controller dialled its CSMS",
                         () => controller!.CSMSLastProblem ?? "");
 
-            var trust = controller!.CSMSKeyPinning!.TrustOf("csms");
+            var trust = controller!.UplinkTrust();
 
             await Until(() => controller.CSMSLastProblem is not null, "The controller says why it has no line");
 
@@ -690,7 +691,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(trust?.Learned,                          Is.Null);
                 Assert.That(controller.CSMSConnected,                Is.False);
                 Assert.That(csms!.Connections,                       Is.Zero);
-                Assert.That(controller.CSMSPins.ToJSON().Value<String>("serverKeyPinState"), Is.Not.EqualTo("Learned"));
+                Assert.That(controller.UplinkJSON().Value<String>("serverKeyPinState"), Is.Not.EqualTo("Learned"));
             });
 
         }
@@ -727,18 +728,18 @@ namespace cloud.charging.open.LocalController.Tests
                         () => $"heard: {csms.Heard()}; said: {controller!.CSMSLastProblem}");
 
             // Dialled again, with its back-off: the key that was learned is none of those pinned now.
-            await Until(() => controller!.CSMSKeyPinning!.TrustOf("csms")?.LastValidation is { Outcome: KeyPinOutcome.Refused },
+            await Until(() => controller!.UplinkTrust()?.LastValidation is { Outcome: KeyPinOutcome.Refused },
                         "The CSMS was dialled again and turned away",
                         () => controller!.CSMSLastProblem ?? "");
 
-            var refused = controller!.CSMSKeyPinning!.TrustOf("csms")!.LastValidation!;
+            var refused = controller!.UplinkTrust()!.LastValidation!;
 
             Assert.Multiple(() => {
                 Assert.That(taken[2]?["setVariableResult"]?.Select(result => result.Value<String>("attributeStatus")), Is.All.EqualTo("Accepted"), taken.ToString());
                 Assert.That(refused.CertificateType,   Is.EqualTo(TLSCertificateType.RawPublicKey));
                 Assert.That(refused.Pin,               Is.EqualTo(pin));
                 Assert.That(controller.CSMSConnected,  Is.False);
-                Assert.That(controller.CSMSPins.ToJSON()["serverKeyPins"]?.Select(one => one.Value<String>()), Is.EqualTo(new[] { KeyPin.FromKey(other).ToHex() }));
+                Assert.That(controller.UplinkJSON()["serverKeyPins"]?.Select(one => one.Value<String>()), Is.EqualTo(new[] { KeyPin.FromKey(other).ToHex() }));
             });
 
         }
@@ -766,8 +767,8 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(taken[2]?["setVariableResult"]?.Select(result => result.Value<String>("attributeStatus")), Is.All.EqualTo("Accepted"), taken.ToString());
-                Assert.That(controller!.CSMSPins.ToJSON().Value<String>("serverKeyPinState"), Is.EqualTo("Configured"));
-                Assert.That(controller.CSMSPins.ToJSON()["serverKeyPins"]?.Select(pin => pin.Value<String>()), Is.EqualTo(new[] { KeyPin.FromKey(other).ToHex() }));
+                Assert.That(controller!.UplinkJSON().Value<String>("serverKeyPinState"), Is.EqualTo("Configured"));
+                Assert.That(controller.UplinkJSON()["serverKeyPins"]?.Select(pin => pin.Value<String>()), Is.EqualTo(new[] { KeyPin.FromKey(other).ToHex() }));
             });
 
         }

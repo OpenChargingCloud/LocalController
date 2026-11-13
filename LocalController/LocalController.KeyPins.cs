@@ -205,7 +205,7 @@ namespace cloud.charging.open.LocalController
                 // Who, as the page and the command line say it: whom the request
                 // says it comes from, over the line up to the CSMS.
                 var who = Request is not null
-                              ? $"'{Request.NetworkPath.Source}'"
+                              ? $"'{Controller.NameOfTheLine(Request.NetworkPath.Source)}'"
                               : "The CSMS";
 
                 if (RefusalOfTheRight(Request) is OCPPv2_1.StatusInfo refusal)

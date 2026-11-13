@@ -33,6 +33,7 @@ using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.protocols.WWCP.Node.Logging;
 using cloud.charging.open.protocols.WWCP.Node.Certificates;
 using cloud.charging.open.LocalController.OCPP;
+using cloud.charging.open.protocols.OCPP.Node.Connections;
 
 #endregion
 
@@ -64,65 +65,78 @@ namespace cloud.charging.open.LocalController
         #region Data
 
         /// <summary>
-        /// What the CSMS is to this controller where the node judges its
-        /// certificate: a service of its own, whose TLS roots of the store are
-        /// the ones kept for every use.
+        /// The name the lines up to the CSMS go by where a certificate is
+        /// chosen for them in this controller's certificate store.
         /// </summary>
         public const String        CSMSService        = "csms";
 
-        /// <summary>
-        /// What the CSMS connection is configured as, with every field filled in.
-        /// </summary>
+        // What the section "csms" says of every line up: whether this
+        // controller reports to a CSMS at all, and how a line is kept.
         private CSMSConfiguration  csmsSettings       = new CSMSConfiguration().Effective();
 
-        /// <summary>
-        /// What it was configured as when the line was dialled, to tell a change
-        /// that is in effect from one that waits for the next dial.
-        /// </summary>
+        // As it was when the lines were last dialled: what differs from
+        // it waits for a restart.
         private CSMSConfiguration  csmsAsBuilt        = new CSMSConfiguration().Effective();
-
-        private Boolean            csmsConnected;
-        private DateTimeOffset?    csmsConnectedSince;
-        private String?            csmsLastProblem;
 
         #endregion
 
         #region Properties
 
         /// <summary>
-        /// What this local controller says to prove who it is upwards.
-        /// </summary>
-        public CSMSCredentials     CSMSLogin      { get; private set; } = default!;
-
-        /// <summary>
-        /// What the CSMS connection is configured as.
+        /// What the section "csms" says of every line up to the CSMS.
         /// </summary>
         public CSMSConfiguration   CSMSSettings
             => csmsSettings;
 
         /// <summary>
-        /// Whether this local controller is meant to dial a CSMS at all.
+        /// Whether this controller reports to a CSMS at all.
         /// </summary>
         public Boolean             CSMSEnabled
             => csmsSettings.Enabled == true;
 
         /// <summary>
-        /// Whether the line is up right now.
+        /// Whether a line up to the CSMS is up: one of its connections.
         /// </summary>
         public Boolean             CSMSConnected
-            => csmsConnected;
+            => ConnectionStates.Values.Any(state => state.Status == ConnectionStatus.Connected);
 
         /// <summary>
-        /// Since when, or null while it is down.
+        /// Since when, where one is.
         /// </summary>
         public DateTimeOffset?     CSMSConnectedSince
-            => csmsConnectedSince;
+            => ConnectionStates.Values.
+                   Where  (state => state.Status == ConnectionStatus.Connected).
+                   OrderBy(state => state.Since).
+                   Select (state => (DateTimeOffset?) state.Since).
+                   FirstOrDefault();
 
         /// <summary>
-        /// What went wrong the last time, or null when nothing has.
+        /// What the last connection that is not up said of itself, where
+        /// none is.
         /// </summary>
         public String?             CSMSLastProblem
-            => csmsLastProblem;
+        {
+            get
+            {
+
+                if (CSMSConnected)
+                    return null;
+
+                var last = ConnectionStates.Values.
+                               Where            (state => state.Status != ConnectionStatus.Connected && state.Status != ConnectionStatus.Standby).
+                               OrderByDescending(state => state.Since).
+                               FirstOrDefault();
+
+                if (last is null)
+                    return null;
+
+                return last.Status is ConnectionStatus.Trying or ConnectionStatus.Failed or ConnectionStatus.Lost &&
+                       LastJudgementOf(CSMSService, last.URL.Host.ToString()) is { Accepted: false } judged
+                           ? $"{last.Said} It showed a certificate this local controller does not believe: {OutcomeSaid(judged.Outcome)}."
+                           : last.Said;
+
+            }
+        }
 
         #endregion
 
@@ -130,9 +144,9 @@ namespace cloud.charging.open.LocalController
         #region (private) BuildCSMSConnection(Configuration)
 
         /// <summary>
-        /// Take in the settings and the credentials. Nothing is dialled here:
-        /// building and connecting are two different things, and the second is
-        /// not something a constructor should do on the way past.
+        /// What the configuration file says of the lines up to the CSMS, and
+        /// - once, for a controller configured before its lines were
+        /// connections - the line of before taken over into the store.
         /// </summary>
         private void BuildCSMSConnection(CSMSConfiguration? Configuration)
         {
@@ -141,32 +155,20 @@ namespace cloud.charging.open.LocalController
             csmsAsBuilt   = csmsSettings;
 
             // Beside the configuration file, like every other file this
-            // controller keeps: whoever moved the configuration moved the
-            // installation, and the credentials belong with it rather than
-            // with whichever directory the process happens to start in.
-            var directory = System.IO.Path.GetDirectoryName(ConfigFile.Path) ?? ".";
+            // controller keeps.
+            var directory = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(ConfigFile.Path)) ?? ".";
 
-            CSMSLogin     = new CSMSCredentials(
-                                System.IO.Path.Combine(directory, CSMSCredentials.DefaultFileName),
-                                TimeProvider
-                            );
+            TakeOverTheLineOfBefore(Configuration, directory);
 
-            CSMSLogin.OnNotice += (level, message) => Log.Log(level, message, "ocpp", "csms", "auth");
-
-            if (!CSMSLogin.TryLoad(out var error))
-                Log.Critical($"The CSMS credentials could not be read: {error}", "ocpp", "csms", "auth");
-
-            // How the CSMS is believed beyond what a CA says - see
-            // LocalController.CSMSKeyPins.cs.
-            BuildCSMSKeyPins(directory);
+            var dialled = Connections.Connections.Count(connection => connection.AutoConnect);
 
             Log.Info(
                 csmsSettings.Enabled == true
-                    ? $"This local controller reports to {csmsSettings.URL} (security profile {csmsSettings.SecurityProfile}, " +
+                    ? $"This local controller reports to a CSMS over {dialled} connection{(dialled == 1 ? "" : "s")} it dials by itself (" +
                       (csmsSettings.InOverlayNetwork ? "in the overlay network" : "in the plain OCPP frame, which names no station behind it") +
                       // A controller whose file says nothing dials in the overlay network since 2026-11-12, and
                       // dialled in the plain frame before: said, for whoever wonders why its CSMS sees it otherwise.
-                      $"{(Configuration?.NetworkingMode is null ? $" - as nothing says otherwise; \"networkingMode\": \"{CSMSConfiguration.StandardMode}\" is for a CSMS that knows nothing of the overlay network" : "")})."
+                      $"{(Configuration?.NetworkingMode is null ? $" - as nothing says otherwise; \"networkingMode\": \"{CSMSConfiguration.StandardMode}\" is for a CSMS that does not speak it" : "")})."
                     : "This local controller reports to no CSMS; it is switched off under Configuration.",
                 "ocpp", "csms"
             );
@@ -178,14 +180,14 @@ namespace cloud.charging.open.LocalController
         #region (private) ConnectCSMS() / DisconnectCSMS()
 
         /// <summary>
-        /// Dial the CSMS, when this controller is meant to have one.
+        /// Dial the CSMS: every connection of the store that dials by itself,
+        /// peer by peer, the next one of a peer where one cannot be reached -
+        /// as a charging station dials, see OCPPDiallingNode.
         /// </summary>
         /// <remarks>
-        /// A refusal up here is not a reason to refuse to start. A local
-        /// controller whose backend is unreachable still has charging stations
-        /// below it that have to be let in, and the client keeps trying in the
-        /// background - so what a failed first attempt produces is a line in the
-        /// log and a state the page can show, not a controller that will not run.
+        /// Nothing here throws, and a connection that cannot be made is a
+        /// line in the log and a state the page can show: the charging
+        /// stations below have to be let in whether the CSMS is there or not.
         /// </remarks>
         private async Task ConnectCSMS()
         {
@@ -193,407 +195,20 @@ namespace cloud.charging.open.LocalController
             if (csmsSettings.Enabled != true)
                 return;
 
-            #region What has to be there before anything is dialled
-
-            if (csmsSettings.URL is not String url || url.Length == 0)
-            {
-                csmsLastProblem = "There is no CSMS address to dial.";
-                Log.Warning(csmsLastProblem, "ocpp", "csms");
-                return;
-            }
-
-            // Profile 3 signs in with a TLS identity of this controller's own
-            // certificate store. One that is not there, not usable or not an
-            // identity is said plainly rather than dialled without, which the
-            // other end would refuse with a message nobody here could act on.
-            System.Net.Security.SslStreamCertificateContext? identity = null;
-
-            if (csmsSettings.WantsClientCertificate &&
-                !TryCSMSIdentity(out identity, out var identityProblem))
-            {
-                csmsLastProblem = identityProblem;
-                Log.Critical(csmsLastProblem, "ocpp", "csms", "tls");
-                return;
-            }
-
-            var authentication = CSMSLogin.HTTPAuthentication();
-            var totpConfig     = CSMSLogin.TOTPConfig();
-
-            // A password or a token is how profiles 1 and 2 say who is dialling.
-            // Profile 3 says it with the certificate; one given beside it is
-            // sent as well, for a CSMS that asks for both.
-            if (!csmsSettings.WantsClientCertificate &&
-                authentication is null && totpConfig is null)
-            {
-                csmsLastProblem = $"This local controller has no credentials to sign in to {url} with. " +
-                                   "Set them under Configuration.";
-                Log.Warning(csmsLastProblem, "ocpp", "csms", "auth");
-                return;
-            }
-
-            // A one-time token that is to be bound to the TLS session is bound
-            // on a line that names HTTP/3 and nothing else: over HTTP/1.1 and
-            // HTTP/2 this controller's TLS exports no keying material to bind
-            // one with, and left the choice, the line may come to either. Not
-            // dialled then, rather than sent unbound: that would be less than
-            // what was configured, quietly.
-            if (authentication is null && totpConfig?.UseTLSExporterMaterial == true && !csmsSettings.BindsItsOneTimePassword)
-            {
-                csmsLastProblem = $"The CSMS at {url} is not dialled: this local controller's one-time token is to be bound to the TLS session, " +
-                                   "and one is bound only on a line that names HTTP/3 and nothing else. " +
-                                   "Name HTTP/3 for it ('csms.httpVersion' is \"3\"), or switch the binding off to have the token sent unbound.";
-                Log.Warning(csmsLastProblem, "ocpp", "csms", "auth");
-                return;
-            }
-
-            // HTTP/3 is HTTP over TLS and nothing else.
-            if (csmsSettings.HTTPVersion == org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketHTTPVersion.HTTP3 && !csmsSettings.WantsTLS)
-            {
-                csmsLastProblem = $"The CSMS at {url} is not dialled: 'csms.httpVersion' names HTTP/3, which needs a wss:// address and security profile 2 or 3.";
-                Log.Warning(csmsLastProblem, "ocpp", "csms");
-                return;
-            }
-
-            #endregion
-
-            // The CSMS's certificate is judged by the node, as a time server's
-            // and a name server's are: issued for the name it is dialled at,
-            // chaining to a root this machine trusts or to a TLS root of this
-            // controller's store kept for every use - and remembered, so that
-            // one turning up with another certificate than before is said.
-            var host = new Uri(url).Host;
-
-            RemoteTLSServerCertificateValidationHandler<org.GraphDefined.Vanaheimr.Hermod.WebSocket.IWebSocketClient>? judgeTheCSMS = null;
-
-            // Key-pinned, the CSMS is known by the key pin of its key and by
-            // nothing else of its certificate - learned on first use where the
-            // line trusts on first use - see LocalController.CSMSKeyPins.cs.
-            var keyPinTrust = KeyPinTrustOfTheCSMS(out var keyPinnedLine, out var notByKeyPin);
-
-            if (notByKeyPin is not null)
-            {
-                csmsLastProblem = $"The line up to the CSMS at {url} is not dialled: it {notByKeyPin}.";
-                Log.Warning(csmsLastProblem, "ocpp", "csms", "keypins");
-                return;
-            }
-
-            if (keyPinTrust is not null)
-                judgeTheCSMS = keyPinTrust.Validator;
-
-            else if (csmsSettings.WantsTLS)
-                judgeTheCSMS = (sender, certificate, chain, client, errors) => {
-
-                    var judgement = JudgeServer(CSMSService, host, null, certificate, chain, errors, Evidence: false);
-
-                    return judgement.Accepted
-                               ? TLSValidationResult.Success()
-                               : TLSValidationResult.Failed($"The CSMS's certificate was refused: {OutcomeSaid(judgement.Outcome)}.");
-
-                };
-
-            // Before the first attempt, and by the node, which gives it to the
-            // client it makes: a client whose first attempt failed had ended by
-            // the time anything out here could give it a policy, so a controller
-            // started while its CSMS was down stayed away from it until it was
-            // started again. The first attempt is answered at once all the same;
-            // the start is not held while the client goes on trying.
-            lc01.ReconnectPolicy = new org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClientReconnectPolicy(
-                                       InitialDelay:  csmsSettings.ReconnectInitialDelay,
-                                       MaxDelay:      csmsSettings.ReconnectMaxDelay
-                                   );
-
-            var signedIn = $"This local controller signed in to the CSMS at {url} " +
-                           $"({(csmsSettings.WantsClientCertificate ? "with its certificate" : totpConfig is not null && authentication is null ? totpConfig.UseTLSExporterMaterial == true ? "with a one-time token bound to the TLS session" : "with a one-time token" : "with a password")}, " +
-                           $"security profile {csmsSettings.SecurityProfile}).";
-
-            var attempted = TimeProvider.GetUtcNow();
-
-            try
-            {
-
-                var response = await lc01.ConnectOCPPWebSocketClient(
-
-                                         RemoteURL:                 URL.Parse(url),
-                                         NextHopNetworkingNodeId:   NetworkingNode_Id.Parse(csmsSettings.NextHopNodeId ?? CSMSConfiguration.DefaultNextHopNodeId),
-
-                                         // Standard unless the file says overlay: in
-                                         // the overlay network every frame names where
-                                         // it goes and where it comes from, which is
-                                         // what lets the CSMS reach the stations behind
-                                         // this controller rather than only the
-                                         // controller - and what the CSMS is told in
-                                         // the header X-OCPP-NetworkingMode of the dial.
-                                         NetworkingMode:            csmsSettings.NetworkingMode ?? CSMSConfiguration.DefaultNetworkingMode,
-
-                                         HTTPAuthentication:        authentication,
-                                         TOTPConfig:                totpConfig,
-
-                                         // Under its name, which is what puts the
-                                         // token into "Authorization: TOTP": without
-                                         // one it travels in the "TOTP" request header,
-                                         // which names nobody and which a CSMS that
-                                         // knows its stations by their logins refuses.
-                                         TOTPLogin:                 totpConfig is not null ? CSMSLogin.Username : null,
-
-                                         // Auto unless the file says otherwise, as a
-                                         // connection of a charging station.
-                                         WebSocketOver:             csmsSettings.HTTPVersion,
-                                         SecWebSocketProtocols:     csmsSettings.Subprotocols,
-
-                                         DisableWebSocketPings:     false,
-                                         WebSocketPingEvery:        csmsSettings.PingEvery,
-                                         RequestTimeout:            csmsSettings.RequestTimeout,
-
-                                         TLSProtocols:              csmsSettings.MinimumTLSVersion,
-
-                                         RemoteCertificateValidator: judgeTheCSMS,
-                                         ClientCertificateContext:   identity,
-
-                                         DNSClient:                 DNSClient
-
-                                     );
-
-                csmsConnected = response?.HTTPStatusCode == HTTPStatusCode.SwitchingProtocols;
-
-                if (csmsConnected)
-                {
-
-                    csmsConnectedSince  = TimeProvider.GetUtcNow();
-                    csmsLastProblem     = null;
-
-                    Log.Notice(signedIn, "ocpp", "csms", "auth");
-
-                }
-
-                else
-                {
-
-                    // An attempt that found nothing listening, or no address for
-                    // the name, has made no request, and the answer to it is not
-                    // the CSMS's: nobody refused anything. Nor has a CSMS that
-                    // answers "not yet" - 408, 429, a 5xx from a proxy whose CSMS
-                    // is still starting - which the client comes back from.
-                    var why          = response?.HTTPBodyAsJSONObject?["message"]?.Value<String>();
-
-                    // Nor has one whose certificate this controller did not
-                    // believe - but that is worth saying in its own words
-                    // rather than as a CSMS that could not be reached.
-                    var judged       = LastJudgementOf(CSMSService, host);
-                    var unbelieved   = judged is { Accepted: false } && judged.At >= attempted;
-
-                    csmsLastProblem  = (response?.HTTPRequest is null
-                                           ? unbelieved
-                                                 ? $"The CSMS at {url} showed a certificate this local controller does not believe: {OutcomeSaid(judged!.Outcome)}."
-                                                 : $"The CSMS at {url} could not be reached{(why is null ? "" : $": {why.TrimEnd('.')}")}."
-                                           : TheCSMSClient()?.KeepsTrying == true
-                                                 ? $"The CSMS at {url} cannot let this local controller in yet: {response.HTTPStatusCode}."
-                                                 : $"The CSMS at {url} refused this local controller: {response.HTTPStatusCode}.") +
-                                       WhatComesNext();
-
-                    Log.Warning(csmsLastProblem, "ocpp", "csms", "auth");
-
-                }
-
-            }
-            catch (Exception e)
-            {
-
-                csmsConnected    = false;
-                csmsLastProblem  = $"The CSMS at {url} could not be reached: {e.Message.TrimEnd('.')}." + WhatComesNext();
-
-                Log.Warning(csmsLastProblem, "ocpp", "csms");
-
-            }
-
-            // Whether the first attempt got through or not: the client is the
-            // node's either way, and goes on by itself.
-            WireCSMSLogging(url, signedIn);
-
-            // A key pin learned on the connection made now and on every one
-            // after, and a CSMS not believed when it is tried again.
-            if (keyPinTrust is not null && keyPinnedLine is not null && csmsKeyPinning is not null && TheCSMSClient() is org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient keyPinnedClient)
-                csmsKeyPinning.Follow(keyPinnedLine, keyPinnedClient, keyPinTrust, URL.Parse(url), csmsConnected);
+            await DialConfiguredConnections();
 
             csmsAsBuilt = csmsSettings;
-
-
-            // Asked of the client rather than read from the answer: a CSMS that
-            // is not there yet, or not ready, is dialled again by itself; an
-            // answer that means no - a wrong password, a wrong address - is an
-            // answer, and is not.
-            String WhatComesNext()
-
-                => TheCSMSClient()?.KeepsTrying == true
-                       ? " It is dialled again by itself."
-                       : " It is not dialled again before this local controller is restarted.";
 
         }
 
         /// <summary>
         /// Hang up, if there is anything to hang up.
         /// </summary>
-        private async Task DisconnectCSMS()
-        {
+        private Task DisconnectCSMS()
 
-            foreach (var client in lc01.OCPPWebSocketClients.ToArray())
-            {
-                try
-                {
-                    if (client is org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient webSocketClient)
-                    {
-
-                        // Its policy first. A close asked for here ends the
-                        // client's dialling anyway; without a policy it is also
-                        // known afterwards to have been hung up here, so that an
-                        // attempt it cuts off is not taken for the CSMS's no.
-                        webSocketClient.ReconnectPolicy = null;
-
-                        await webSocketClient.Close();
-
-                    }
-                }
-                catch (Exception e)
-                {
-                    Log.Warning($"The connection to the CSMS did not close cleanly: {e.Message}", "ocpp", "csms");
-                }
-            }
-
-            if (csmsConnected)
-                Log.Notice("This local controller signed out of the CSMS.", "ocpp", "csms");
-
-            csmsConnected       = false;
-            csmsConnectedSince  = null;
-
-        }
+            => HangUp();
 
         #endregion
-
-        #region (private) TheCSMSClient()
-
-        /// <summary>
-        /// The client the node made for the line when it was dialled: made
-        /// inside the call, and kept by the node whether it got through or not.
-        /// </summary>
-        private org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient? TheCSMSClient()
-
-            => lc01.OCPPWebSocketClients.
-                   OfType<org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient>().
-                   LastOrDefault();
-
-        #endregion
-
-        #region (private) WireCSMSLogging(URL, SignedIn)
-
-        /// <summary>
-        /// What of the line upwards ends up in the event log.
-        /// </summary>
-        /// <remarks>
-        /// A backend that comes and goes is the thing an operator most needs to
-        /// see, so none of this sits behind a switch: these are a handful of
-        /// lines a day on a healthy connection, and the ones on an unhealthy one
-        /// are the whole point.
-        /// </remarks>
-        /// <param name="URL">Where the line goes.</param>
-        /// <param name="SignedIn">What is said when it gets through.</param>
-        private void WireCSMSLogging(String  URL,
-                                     String  SignedIn)
-        {
-
-            foreach (var client in lc01.OCPPWebSocketClients)
-            {
-
-                if (client is not org.GraphDefined.Vanaheimr.Hermod.WebSocket.WebSocketClient webSocketClient)
-                    continue;
-
-                // Whether the line has been up, so that one that never was is
-                // not said to be lost - and keeps what its first attempt said,
-                // which is more than "not yet".
-                var wasUp = csmsConnected;
-
-                // Told when the line is about to be dialled again rather than
-                // dialling again here: the client already does the waiting, the
-                // backing off and the counting.
-                webSocketClient.OnReconnecting += (timestamp, sender, attempt, delay, cancellationToken) => {
-
-                    csmsConnected       = false;
-                    csmsConnectedSince  = null;
-
-                    if (wasUp)
-                        csmsLastProblem = $"The connection to the CSMS was lost; trying again in {delay.TotalSeconds:0} second(s).";
-
-                    Log.Warning((wasUp
-                                     ? "The connection to the CSMS was lost. "
-                                     : $"The CSMS at {URL} was not reached. ") +
-                                $"Attempt {attempt} follows in {delay.TotalSeconds:0} second(s).",
-                                "ocpp", "csms");
-
-                    return Task.CompletedTask;
-
-                };
-
-                // And told when it has got through: to a CSMS that was not there
-                // when this controller started, or back to one that went away.
-                // Said as a line that got through at once is, or the page went
-                // on saying "lost" of a line long since back.
-                webSocketClient.OnWebSocketConnectionAccepted += (timestamp, sender, connection, response, cancellationToken) => {
-
-                    csmsConnected       = true;
-                    csmsConnectedSince  = TimeProvider.GetUtcNow();
-                    csmsLastProblem     = null;
-
-                    Log.Notice(wasUp
-                                   ? $"This local controller is connected to the CSMS at {URL} again."
-                                   : SignedIn,
-                               "ocpp", "csms", "auth");
-
-                    wasUp = true;
-
-                    return Task.CompletedTask;
-
-                };
-
-                // And told of every answer, for the one that ends the dialling: a
-                // CSMS that turns this controller away - a password changed at
-                // the other end, an address that is no longer there - is not
-                // asked again, and the line went on saying "trying again" of a
-                // client that had stopped. Not for a client this controller has
-                // hung up, which it took the policy away from first: an attempt
-                // that is cut off ends, possibly after the controller has
-                // stopped, with an answer of the client's own making, which is
-                // nobody's refusal.
-                webSocketClient.ResponseLogDelegate += (timestamp, sender, request, response) => {
-
-                    if (webSocketClient.ReconnectPolicy is null                       ||
-                        response.HTTPStatusCode == HTTPStatusCode.SwitchingProtocols  ||
-                        webSocketClient.KeepsTrying)
-                    {
-                        return Task.CompletedTask;
-                    }
-
-                    var refused = $"The CSMS at {URL} refused this local controller: {response.HTTPStatusCode}. " +
-                                   "It is not dialled again before this local controller is restarted.";
-
-                    csmsConnected       = false;
-                    csmsConnectedSince  = null;
-
-                    // Said once: the answer to the first attempt may arrive here
-                    // as well, after ConnectCSMS() has said the same of it.
-                    if (csmsLastProblem != refused)
-                    {
-                        csmsLastProblem = refused;
-                        Log.Warning(refused, "ocpp", "csms", "auth");
-                    }
-
-                    return Task.CompletedTask;
-
-                };
-
-            }
-
-        }
-
-        #endregion
-
 
         #region (private) TryCSMSIdentity(out Identity, out Problem)
 
@@ -823,16 +438,12 @@ namespace cloud.charging.open.LocalController
             }
 
             json.Add("state", new JObject(
-                new JProperty("connected",           csmsConnected),
-                new JProperty("connectedSince",      csmsConnectedSince?.ToString("o")),
-                new JProperty("lastProblem",         csmsLastProblem),
-                new JProperty("hasCredentials",      CSMSLogin.HasPassword || CSMSLogin.HasTOTP),
+                new JProperty("connected",           CSMSConnected),
+                new JProperty("connectedSince",      CSMSConnectedSince?.ToString("o")),
+                new JProperty("lastProblem",         CSMSLastProblem),
+                new JProperty("connections",         Connections.Connections.Count),
                 new JProperty("waitingForARestart",  new JArray(csmsSettings.NeedsARestartFor(csmsAsBuilt)))
             ));
-
-            json.Add("credentials", CSMSLogin.ToJSON());
-
-            json.Add("keyPins",     CSMSKeyPinsJSON());
 
             return json;
 
@@ -865,6 +476,15 @@ namespace cloud.charging.open.LocalController
             if (!CSMSConfiguration.TryParse(JSON, out var changes, out Error))
                 return false;
 
+            // The line itself is a connection of the store, and so is what
+            // it signs in with and whom it believes.
+            if (changes.URL is not null || changes.SecurityProfile is not null || changes.HTTPVersion is not null)
+            {
+                Error = "The address of a line up to the CSMS, the version of HTTP it is opened over and what it signs in with are a connection's: " +
+                        "they are changed under Connections. Its security profile is what its address says, and whether it holds up a certificate.";
+                return false;
+            }
+
             var wanted = csmsSettings.Merge(changes).Effective();
 
             // Everything this refuses is the file's: read, merged, written.
@@ -877,7 +497,7 @@ namespace cloud.charging.open.LocalController
             csmsSettings = wanted;
 
             // Over TLS or not any more: TLSClientController follows.
-            FollowCSMSKeyPinComponents();
+            FollowTLSClientComponents(lc01);
 
             return true;
 

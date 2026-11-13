@@ -203,7 +203,7 @@ namespace cloud.charging.open.LocalController.Tests
                                      )
                                  );
 
-                if (WithACSMS && !controller.CSMSLogin.TrySetPassword("lc002", UplinkPassword, out var loginError))
+                if (WithACSMS && !controller.TrySetUplinkPassword("lc002", UplinkPassword, out var loginError))
                     throw new InvalidOperationException($"The test's own credentials were refused: {loginError}");
 
                 if (!controller.StationLogins.TrySetPassword("cs001", ThePassword, null, "A station", out _, out var error))

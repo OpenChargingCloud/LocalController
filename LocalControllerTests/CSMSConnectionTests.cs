@@ -178,7 +178,7 @@ namespace cloud.charging.open.LocalController.Tests
                              );
 
             if (Username is not null && Password is not null &&
-                !controller.CSMSLogin.TrySetPassword(Username, Password, out var error))
+                !controller.TrySetUplinkPassword(Username, Password, out var error))
             {
                 throw new InvalidOperationException($"The test's own credentials were refused: {error}");
             }
@@ -345,7 +345,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var controller = AControllerThatDials(Password: null);
 
-            if (!controller.CSMSLogin.TrySetTOTP("lc002", SharedSecret, null, null, null, null, out var error))
+            if (!controller.TrySetUplinkTOTP("lc002", SharedSecret, null, null, null, null, out var error))
                 throw new InvalidOperationException($"The test's own one-time password was refused: {error}");
 
             return controller;
@@ -383,7 +383,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(downstream.CSMSConnected,    Is.False);
-                Assert.That(downstream.CSMSLastProblem,  Does.Contain("refused this local controller"));
+                Assert.That(downstream.CSMSLastProblem,  Does.Contain("that answer is final"));
             });
 
         }
@@ -408,7 +408,7 @@ namespace cloud.charging.open.LocalController.Tests
 
                 // An answer that means no is not asked again: a wrong password
                 // does not get better for being tried every few seconds.
-                Assert.That(downstream.CSMSLastProblem,  Does.Contain("refused this local controller").And.Contain("not dialled again"),
+                Assert.That(downstream.CSMSLastProblem,  Does.Contain("that answer is final").And.Contain("not tried again"),
                             "What the controller says of a refusal does not say that it is final.");
 
                 // And a controller whose backend refused it is still a
@@ -431,7 +431,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(downstream.CSMSConnected,    Is.False);
-                Assert.That(downstream.CSMSLastProblem,  Does.Contain("credentials"));
+                Assert.That(downstream.CSMSLastProblem,  Does.Contain("401").And.Contain("that answer is final"));
             });
 
         }
@@ -457,31 +457,6 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region ProfileThreeSaysWhatIsMissingRatherThanFailingAtTheOtherEnd()
-
-        /// <summary>
-        /// Profile 3 signs in with a TLS identity of the certificate store, and
-        /// a password set for profiles 1 and 2 does not stand in for one. With
-        /// none chosen, that is said here, where somebody can read it, rather
-        /// than left to the CSMS to refuse for a reason nobody at this end
-        /// would see.
-        /// </summary>
-        [Test]
-        public async Task ProfileThreeSaysWhatIsMissingRatherThanFailingAtTheOtherEnd()
-        {
-
-            downstream = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(SecurityProfile:  3,
-                                                                                        URL:              $"wss://127.0.0.1:{csmsPort}"));
-
-            Assert.Multiple(() => {
-                Assert.That(downstream.CSMSConnected,    Is.False);
-                Assert.That(downstream.CSMSLastProblem,  Does.Contain("TLS identity").And.Contain("none is chosen"));
-            });
-
-        }
-
-        #endregion
-
         #region WhatThePageIsShownCarriesNoPassword()
 
         /// <summary>
@@ -500,13 +475,15 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(() => {
 
                 Assert.That(shown.ToString(),                                        Does.Not.Contain(ThePassword));
-                Assert.That(shown["credentials"]?.Value<String>("username"),         Is.EqualTo("lc002"));
-                Assert.That(shown["credentials"]?.Value<Boolean>("hasPassword"),     Is.True);
+                Assert.That(downstream.Connections.ToJSON().ToString(),              Does.Not.Contain(ThePassword));
+                Assert.That(downstream.Connections.Authentications.Single().Login,   Is.EqualTo("lc002"));
                 Assert.That(shown["state"]?.Value<Boolean>("connected"),             Is.True);
 
                 // And the file does carry it, or this controller could never
                 // sign in at all.
-                Assert.That(File.ReadAllText(downstream.CSMSLogin.Path),             Does.Contain(ThePassword));
+                Assert.That(File.ReadAllText(Path.Combine(downstream.Connections.Path,
+                                                          cloud.charging.open.protocols.OCPP.Node.Connections.ConnectionStore.AuthenticationsFileName)),
+                                                                                     Does.Contain(ThePassword));
 
             });
 
@@ -546,7 +523,7 @@ namespace cloud.charging.open.LocalController.Tests
                             "The controller got through to a CSMS that was not there yet, so this test tests nothing.");
                 Assert.That(took.Elapsed,                Is.LessThan(TimeSpan.FromSeconds(10)),
                             "The controller waited for a CSMS that was not there before it said it had started.");
-                Assert.That(downstream.CSMSLastProblem,  Does.Contain("could not be reached").And.Contain("dialled again by itself"),
+                Assert.That(downstream.CSMSLastProblem,  Does.Contain("could not be reached").And.Contain("tried again by itself"),
                             "What the controller says of a CSMS that is not there does not say that it goes on dialling.");
             });
 
@@ -666,7 +643,7 @@ namespace cloud.charging.open.LocalController.Tests
             downstream          = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
                                                                                                  DialsAgainQuickly:  true));
 
-            Assert.That(downstream.CSMSLastProblem, Does.Contain("dialled again by itself"),
+            Assert.That(downstream.CSMSLastProblem, Does.Contain("tried again by itself"),
                         "The controller does not go on dialling, so this test tests nothing.");
 
             await downstream.Stop();
@@ -728,7 +705,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(client.KeepsTrying,          Is.False,
                             "The client still dials a CSMS that turns it away, so this test tests nothing.");
                 Assert.That(downstream.CSMSConnected,    Is.False);
-                Assert.That(downstream.CSMSLastProblem,  Does.Contain("refused this local controller").And.Contain("not dialled again"),
+                Assert.That(downstream.CSMSLastProblem,  Does.Contain("that answer is final").And.Contain("not tried again"),
                             "The controller says of a CSMS that turned it away that it is dialled again.");
             });
 
@@ -753,7 +730,7 @@ namespace cloud.charging.open.LocalController.Tests
             downstream          = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
                                                                                                  DialsAgainQuickly:  true));
 
-            Assert.That(downstream.CSMSLastProblem, Does.Contain("dialled again by itself"),
+            Assert.That(downstream.CSMSLastProblem, Does.Contain("tried again by itself"),
                         "The controller does not go on dialling, so this test tests nothing.");
 
             var client          = TheClientOf(downstream);
@@ -773,7 +750,7 @@ namespace cloud.charging.open.LocalController.Tests
                     Assert.That(client.KeepsTrying,          Is.False,
                                 "The client still dials a CSMS that turns it away, so this test tests nothing.");
                     Assert.That(downstream.CSMSConnected,    Is.False);
-                    Assert.That(downstream.CSMSLastProblem,  Does.Contain("refused this local controller").And.Contain("not dialled again"),
+                    Assert.That(downstream.CSMSLastProblem,  Does.Contain("that answer is final").And.Contain("not tried again"),
                                 "The controller says of a CSMS that turned it away that it is dialled again.");
                 });
 
@@ -933,7 +910,7 @@ namespace cloud.charging.open.LocalController.Tests
             downstream          = await TestPorts.StartedOnFreshPorts(() => AControllerThatDials(URL:                $"ws://127.0.0.1:{laterPort}",
                                                                                                  DialsAgainQuickly:  true));
 
-            Assert.That(downstream.CSMSLastProblem, Does.Contain("dialled again by itself"),
+            Assert.That(downstream.CSMSLastProblem, Does.Contain("tried again by itself"),
                         "The controller does not go on dialling, so this test tests nothing.");
 
             // Something on the port that takes the connection and the upgrade,

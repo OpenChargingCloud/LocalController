@@ -175,7 +175,7 @@ namespace cloud.charging.open.LocalController.Tests
             var id                = entry["id"]!.Value<String>()!;
             var path              = $"api/v1/certificates/{id}";
 
-            Assert.That(Controller.TryUpdateCSMSConfiguration(new JObject(new JProperty("clientCertificate", id)), out var chooseError),
+            Assert.That(Controller.TryConfigureUplink(new JObject(new JProperty("clientCertificate", id)), out var chooseError),
                         Is.True, chooseError);
 
             var asServer          = Controller.WhatUses(id, CertificateKind.TLSServer);
@@ -188,7 +188,7 @@ namespace cloud.charging.open.LocalController.Tests
             var (_, _)            = await Send(http, HttpMethod.Patch,  path, new JObject(new JProperty("active", false)));
             var (_, switchedOff)  = await Send(http, HttpMethod.Get,    "api/v1/configuration/csms");
 
-            Assert.That(Controller.TryUpdateCSMSConfiguration(new JObject(new JProperty("clientCertificate", JValue.CreateNull())), out var noneError),
+            Assert.That(Controller.TryConfigureUplink(new JObject(new JProperty("clientCertificate", JValue.CreateNull())), out var noneError),
                         Is.True, noneError);
 
             var (deleted, _)      = await Send(http, HttpMethod.Delete, path);
