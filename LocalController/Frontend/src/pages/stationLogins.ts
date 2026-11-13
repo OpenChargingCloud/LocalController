@@ -8,6 +8,19 @@ import { errorMessage, field, formatTimestamp } from '@node/ui';
 import { anyFormTypedSinceDrawn, unsaved } from '@node/unsaved';
 import { html, keyed, live, nothing, render, repeat, type TemplateResult } from '@node/view';
 
+/** NTS key establishment over SSH: a station's time over the connection it has anyway. */
+const channelNTSKE = 'ntske/1@open.charging.cloud';
+
+/** DNS over SSH: a station's names over the connection it has anyway. */
+const channelDNS   = 'dns@open.charging.cloud';
+
+/** What a channel is called where there is little room. */
+function channelName(channel: string): string {
+    return channel === channelNTSKE ? 'time (NTS-KE)'
+         : channel === channelDNS   ? 'names (DNS)'
+         :                            channel;
+}
+
 /**
  * Who may sign in to the charging station server, with what, and under which
  * group's rules.
@@ -150,6 +163,9 @@ export const stationLoginsPage: Page = {
                         ${group.authMethods.length === 0
                               ? html`<span class="badge warn">nothing</span>`
                               : group.authMethods.map(method => html`<span class="badge">${method}</span> `)}
+                        ${(group.sshChannels ?? []).length === 0 ? nothing : html`
+                            <div class="small muted">over SSH besides OCPP: ${(group.sshChannels ?? []).map(channelName).join(', ')}</div>
+                        `}
                     </td>
 
                     <td>
@@ -185,6 +201,9 @@ export const stationLoginsPage: Page = {
         function groupForm(group: LoginGroup | null): TemplateResult {
 
             const ticked = (method: AuthMethod) => group?.authMethods.includes(method) ?? true;
+
+            // A grant of its own: a new group gives neither until somebody says so.
+            const given  = (channel: string) => group?.sshChannels?.includes(channel) ?? false;
             const onProfile = (profile: number) => group?.securityProfiles.includes(profile) ?? true;
 
             return html`
@@ -231,6 +250,19 @@ export const stationLoginsPage: Page = {
                             <input type="checkbox" name="keypin" ?checked=${ticked('keypin')} />
                             <span>A key pin of a TLS client key (security profile 3, without a certificate authority)</span>
                         </label>
+                    </fieldset>
+
+                    <fieldset>
+                        <legend>What its stations have over their SSH connection besides OCPP</legend>
+                        <label class="check">
+                            <input type="checkbox" name="channelNTSKE" ?checked=${given(channelNTSKE)} />
+                            <span>Their time (NTS key establishment, <code>${channelNTSKE}</code>)</span>
+                        </label>
+                        <label class="check">
+                            <input type="checkbox" name="channelDNS" ?checked=${given(channelDNS)} />
+                            <span>Their names (DNS, <code>${channelDNS}</code>)</span>
+                        </label>
+                        <span class="hint">For stations that sign in with an SSH key, and only where this local controller serves it. A key for OCPP has neither by itself.</span>
                     </fieldset>
 
                     <fieldset>
@@ -589,6 +621,11 @@ export const stationLoginsPage: Page = {
             if (ticked('sshkey'))       methods.push('sshkey');
             if (ticked('keypin'))       methods.push('keypin');
 
+            const channels: string[] = [];
+
+            if (ticked('channelNTSKE'))  channels.push(channelNTSKE);
+            if (ticked('channelDNS'))    channels.push(channelDNS);
+
             const profiles: number[] = [];
 
             if (ticked('profile1'))  profiles.push(1);
@@ -604,6 +641,7 @@ export const stationLoginsPage: Page = {
                     enabled:           ticked('enabled'),
                     authMethods:       methods,
                     securityProfiles:  profiles,
+                    sshChannels:       channels,
                     note:              field(form, 'note', false)
                 });
 

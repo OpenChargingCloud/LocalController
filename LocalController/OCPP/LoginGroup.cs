@@ -149,13 +149,15 @@ namespace cloud.charging.open.LocalController.OCPP
     /// <param name="SecurityProfiles">The OCPP security profiles its members may come in on.</param>
     /// <param name="AddedAt">When the group was made.</param>
     /// <param name="Note">What it is for, for whoever reads the list later.</param>
+    /// <param name="SSHChannels">What its members have over their SSH connection besides OCPP, of <see cref="KnownSSHChannels"/>: their time, their names. Null or none: OCPP alone.</param>
     public sealed record LoginGroup(String                    Id,
                                     String                    Name,
                                     Boolean                   Enabled,
                                     IReadOnlySet<AuthMethod>  AuthMethods,
                                     IReadOnlySet<Byte>        SecurityProfiles,
                                     DateTimeOffset            AddedAt,
-                                    String?                   Note)
+                                    String?                   Note,
+                                    IReadOnlySet<String>?     SSHChannels = null)
     {
 
         #region Data
@@ -187,6 +189,28 @@ namespace cloud.charging.open.LocalController.OCPP
         /// </summary>
         public const Int32   MaxGroups      = 100;
 
+        /// <summary>
+        /// NTS key establishment over SSH, of the white paper "NTS Key
+        /// Establishment over SSH": a station has its time over the SSH
+        /// connection it has anyway.
+        /// </summary>
+        public const String  NTSKE          = "ntske/1@open.charging.cloud";
+
+        /// <summary>
+        /// DNS over SSH, of the white paper "DNS over SSH": a station has its
+        /// names over the SSH connection it has anyway.
+        /// </summary>
+        public const String  DNS            = "dns@open.charging.cloud";
+
+        /// <summary>
+        /// What a group may give its members over their SSH connection besides
+        /// OCPP. Nothing else: the command line, SFTP and the subsystems of the
+        /// accounts are no station's, whatever a group says.
+        /// </summary>
+        public static readonly IReadOnlySet<String> KnownSSHChannels = new HashSet<String>(StringComparer.Ordinal) { NTSKE, DNS };
+
+        private static readonly IReadOnlySet<String> noChannels = new HashSet<String>(StringComparer.Ordinal);
+
         #endregion
 
         #region Properties
@@ -196,6 +220,18 @@ namespace cloud.charging.open.LocalController.OCPP
         /// </summary>
         public Boolean IsBuiltIn
             => Id == DefaultId;
+
+        /// <summary>
+        /// What its members have over their SSH connection besides OCPP - where
+        /// the node serves it, and while the group is switched on.
+        /// </summary>
+        /// <remarks>
+        /// A grant of its own, as the white papers have it: a key admitted for
+        /// OCPP does not obtain cookies or resolve names by itself. A group
+        /// written before there was such a thing gives none.
+        /// </remarks>
+        public IReadOnlySet<String> Channels
+            => SSHChannels ?? noChannels;
 
         #endregion
 
@@ -232,7 +268,8 @@ namespace cloud.charging.open.LocalController.OCPP
                     new HashSet<AuthMethod> { AuthMethod.Basic, AuthMethod.TOTP, AuthMethod.Certificate, AuthMethod.SSHKey, AuthMethod.KeyPin },
                     new HashSet<Byte>       { 1, 2, 3 },
                     Now,
-                    null);
+                    null,
+                    KnownSSHChannels);
 
         #endregion
 
@@ -323,6 +360,41 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
+        #region (static) TryChannels(Names, out Channels, out Error)
+
+        /// <summary>
+        /// The given names as what a group gives its members over their SSH
+        /// connection besides OCPP: each one of <see cref="KnownSSHChannels"/>.
+        /// </summary>
+        public static Boolean TryChannels(IEnumerable<String?>?                         Names,
+                                          [NotNullWhen(true)]  out IReadOnlySet<String>?  Channels,
+                                          [NotNullWhen(false)] out String?                Error)
+        {
+
+            var channels = new HashSet<String>(StringComparer.Ordinal);
+
+            foreach (var name in Names ?? [])
+            {
+
+                if (name is null || !KnownSSHChannels.Contains(name.Trim()))
+                {
+                    Channels  = null;
+                    Error     = $"'{name}' is nothing a login group gives its stations over SSH besides OCPP; there are {String.Join(" and ", KnownSSHChannels.Order(StringComparer.Ordinal))}.";
+                    return false;
+                }
+
+                channels.Add(name.Trim());
+
+            }
+
+            Channels  = channels;
+            Error     = null;
+            return true;
+
+        }
+
+        #endregion
+
         #region (static) TryParse(JSON, out Group, out Error)
 
         /// <summary>
@@ -377,17 +449,45 @@ namespace cloud.charging.open.LocalController.OCPP
                                     System.Globalization.DateTimeStyles.RoundtripKind,
                                     out addedAt);
 
-            return TryCreate(
-                       JSON.Value<String>("id"),
-                       JSON.Value<String>("name"),
-                       JSON.Value<Boolean?>("enabled") ?? true,
-                       methods,
-                       profiles,
-                       JSON.Value<String>("note"),
-                       addedAt,
-                       out Group,
-                       out Error
-                   );
+            if (!TryCreate(
+                     JSON.Value<String>("id"),
+                     JSON.Value<String>("name"),
+                     JSON.Value<Boolean?>("enabled") ?? true,
+                     methods,
+                     profiles,
+                     JSON.Value<String>("note"),
+                     addedAt,
+                     out Group,
+                     out Error
+                 ))
+            {
+                return false;
+            }
+
+            // A file written before there was such a thing says nothing of it,
+            // and gives none: the file said what its stations get.
+            if (JSON["sshChannels"] is JToken said)
+            {
+
+                if (said is not JArray names ||
+                    names.Any(name => name.Type != JTokenType.String))
+                {
+                    Group  = null;
+                    Error  = "'sshChannels' must be a list of the names of SSH subsystems.";
+                    return false;
+                }
+
+                if (!TryChannels(names.Select(name => name.Value<String>()), out var channels, out Error))
+                {
+                    Group  = null;
+                    return false;
+                }
+
+                Group = Group with { SSHChannels = channels };
+
+            }
+
+            return true;
 
         }
 
@@ -427,7 +527,8 @@ namespace cloud.charging.open.LocalController.OCPP
                            new JProperty("builtIn",           IsBuiltIn),
                            new JProperty("addedAt",           AddedAt.ToString("o")),
                            new JProperty("authMethods",       new JArray(AuthMethods.Select(method => method.AsText()).Order())),
-                           new JProperty("securityProfiles",  new JArray(SecurityProfiles.Order().Select(profile => (Int32) profile)))
+                           new JProperty("securityProfiles",  new JArray(SecurityProfiles.Order().Select(profile => (Int32) profile))),
+                           new JProperty("sshChannels",       new JArray(Channels.Order(StringComparer.Ordinal)))
                        );
 
             if (Note is not null)
@@ -448,7 +549,8 @@ namespace cloud.charging.open.LocalController.OCPP
 
             => $"{Id} ({(Enabled ? "on" : "off")}): " +
                $"{(AuthMethods.Count == 0 ? "nothing" : String.Join(", ", AuthMethods.Select(method => method.AsText()).Order()))}, " +
-               $"profile(s) {(SecurityProfiles.Count == 0 ? "none" : String.Join(", ", SecurityProfiles.Order()))}";
+               $"profile(s) {(SecurityProfiles.Count == 0 ? "none" : String.Join(", ", SecurityProfiles.Order()))}" +
+               (Channels.Count > 0 ? $", over SSH besides OCPP {String.Join(", ", Channels.Order(StringComparer.Ordinal))}" : "");
 
         #endregion
 

@@ -32,7 +32,8 @@ namespace cloud.charging.open.LocalController.OCPP
     /// <summary>
     /// The charging stations, as logins of this local controller's SSH server:
     /// a station signs in under its identification with one of its SSH keys,
-    /// for OCPP over SSH and nothing else.
+    /// for OCPP over SSH and for what else a station has over its connection:
+    /// its time and its names.
     /// </summary>
     /// <remarks>
     /// <b>The station logins decide, as over the WebSocket port.</b> A station
@@ -41,10 +42,22 @@ namespace cloud.charging.open.LocalController.OCPP
     /// security profiles of the group are not asked: SSH is no OCPP security
     /// profile, see <see cref="AuthMethod.SSHKey"/>.
     ///
-    /// <b>Only OCPP, and only while it is served.</b> The node confines every
-    /// such login to the subsystems named here - no terminal, no command line,
-    /// no SFTP - and names none while OCPP over SSH is switched off, which is
-    /// also when no station is let in at all.
+    /// <b>OCPP - and its time and its names, where its group gives them.</b>
+    /// The SSH connection is the station's, and OCPP one channel of it: NTS
+    /// key establishment (<see cref="NTSKE"/>) and DNS (<see cref="DNS"/>) are
+    /// further channels of the same connection, under the same key. They are
+    /// a grant of their own, which the station's login group makes
+    /// (<see cref="LoginGroup.Channels"/>): a key admitted for OCPP does not
+    /// obtain cookies or resolve names by itself. And only what the node
+    /// serves now is named at all.
+    ///
+    /// <b>Nothing else, and nothing while OCPP is switched off.</b> The node
+    /// confines every such login to the subsystems named here - no terminal,
+    /// no command line, no SFTP, and no subsystem the node serves to its
+    /// accounts - and none is named while OCPP over SSH is switched off, which
+    /// is also when no station is let in at all. From where a station may
+    /// have which of them is for the SSH access rules besides:
+    /// "principal=station:* service=subsystem:...".
     ///
     /// <b>Asked again while a session lasts.</b> Every few seconds, and at once
     /// when the station logins change: a key taken away, a station or its
@@ -69,8 +82,19 @@ namespace cloud.charging.open.LocalController.OCPP
         /// </summary>
         public static readonly TimeSpan SayAgainAfter = TimeSpan.FromMinutes(1);
 
+        /// <summary>
+        /// NTS key establishment over SSH: see <see cref="LoginGroup.NTSKE"/>.
+        /// </summary>
+        public const String NTSKE = LoginGroup.NTSKE;
+
+        /// <summary>
+        /// DNS over SSH: see <see cref="LoginGroup.DNS"/>.
+        /// </summary>
+        public const String DNS   = LoginGroup.DNS;
+
         private readonly ChargingStationLogins                         logins;
         private readonly Func<Boolean>                                 served;
+        private readonly Func<IEnumerable<String>>                     servedBesides;
         private readonly TimeProvider                                  timeProvider;
         private readonly ConcurrentDictionary<String, DateTimeOffset>  said = [];
 
@@ -111,16 +135,19 @@ namespace cloud.charging.open.LocalController.OCPP
         /// <param name="Logins">The station logins.</param>
         /// <param name="Subsystem">The subsystem of OCPP over SSH.</param>
         /// <param name="Served">Whether OCPP over SSH is served now.</param>
+        /// <param name="ServedBesides">The names of the subsystems the node serves now: of them a station gets those its login group gives it, and no other.</param>
         /// <param name="TimeProvider">The clock keys are held to.</param>
         public StationSSHSignIns(ChargingStationLogins  Logins,
                                  String                 Subsystem,
                                  Func<Boolean>          Served,
-                                 TimeProvider?          TimeProvider = null)
+                                 TimeProvider?          TimeProvider = null,
+                                 Func<IEnumerable<String>>? ServedBesides = null)
         {
 
             this.logins        = Logins;
             this.Subsystem     = Subsystem;
             this.served        = Served;
+            this.servedBesides = ServedBesides ?? (() => []);
             this.timeProvider  = TimeProvider ?? System.TimeProvider.System;
 
         }
@@ -171,13 +198,34 @@ namespace cloud.charging.open.LocalController.OCPP
         #region SubsystemsFor(Username) / GroupsOf(Username)
 
         /// <summary>
-        /// OCPP over SSH while it is served, and nothing otherwise.
+        /// OCPP over SSH while it is served, with what the station's login
+        /// group gives it besides, where the node serves that; and nothing
+        /// otherwise.
         /// </summary>
         public IReadOnlySet<String> SubsystemsFor(String Username)
+        {
 
-            => served()
-                   ? new HashSet<String> { Subsystem }
-                   : new HashSet<String>();
+            if (!served())
+                return new HashSet<String>(StringComparer.Ordinal);
+
+            var subsystems = new HashSet<String>(StringComparer.Ordinal) { Subsystem };
+
+            if (logins.TryGet(Username, out var login) &&
+                logins.GroupOf(login) is LoginGroup { Enabled: true, Channels.Count: > 0 } group)
+            {
+
+                var servedNow = new HashSet<String>(servedBesides(), StringComparer.Ordinal);
+
+                // Only what a group may give at all, whatever a group says.
+                foreach (var channel in group.Channels)
+                    if (LoginGroup.KnownSSHChannels.Contains(channel) && servedNow.Contains(channel))
+                        subsystems.Add(channel);
+
+            }
+
+            return subsystems;
+
+        }
 
         /// <summary>
         /// The login group of the station: what "group:..." in the SSH access

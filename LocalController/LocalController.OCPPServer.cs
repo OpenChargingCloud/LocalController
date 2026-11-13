@@ -433,7 +433,8 @@ namespace cloud.charging.open.LocalController
                                     StationLogins,
                                     OCPPSshServer.OCPPSubsystem,
                                     () => ocppOverSSHServed,
-                                    TimeProvider
+                                    TimeProvider,
+                                    () => SSHSubsystems.Select(subsystem => subsystem.Name)
                                 );
 
             stationSSHSignIns.OnNotice += (level, message) => {

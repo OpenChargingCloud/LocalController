@@ -29,6 +29,7 @@ using org.GraphDefined.Vanaheimr.Hermod.SSH.Client;
 using org.GraphDefined.Vanaheimr.Illias;
 
 using cloud.charging.open.protocols.WWCP.NetworkingNode;
+using cloud.charging.open.protocols.WWCP.Node.SecureShell;
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 using cloud.charging.open.LocalController.OCPP;
@@ -361,6 +362,125 @@ namespace cloud.charging.open.LocalController.Tests
             {
                 return true;
             }
+        }
+
+        #endregion
+
+        #region AStation_IsGivenItsTimeAndItsNames_WhereItsGroupGivesThem_AndTheyAreServed()
+
+        /// <summary>
+        /// The connection is the station's, and OCPP one channel of it: NTS key
+        /// establishment and DNS are further channels - a grant of their own,
+        /// which the station's login group makes, and only of what the node
+        /// serves. A key admitted for OCPP has neither by itself, and a
+        /// subsystem the node serves to its accounts is no station's, whatever
+        /// a group says.
+        /// </summary>
+        [Test]
+        public async Task AStation_IsGivenItsTimeAndItsNames_WhereItsGroupGivesThem_AndTheyAreServed()
+        {
+
+            const String Other = "other@test.open.charging.cloud";
+
+            SshSubsystemHandler serving = async (context, token) => {
+                await Task.Delay(Timeout.Infinite, context.Closed).ContinueWith(_ => { }, TaskScheduler.Default);
+            };
+
+            async Task<SshClient> SignedIn(String Id, ISshHostKey Key)
+                => await SshClient.ConnectAsync("127.0.0.1",
+                                                Controller.SSHPort!.Value.ToUInt16(),
+                                                SSHAs(Id, Key)).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+
+            Boolean Group(String Id, IEnumerable<String>? Channels, out String? Error)
+                => Controller.StationLogins.TryAddOrUpdateGroup(Id, Id, true, [ AuthMethod.SSHKey ], [ 1 ], null, Channels, out Error, out _);
+
+            Assert.That(Group("with-time",  [ StationSSHSignIns.NTSKE ],                         out var error), Is.True, error);
+            Assert.That(Group("with-both",  [ StationSSHSignIns.NTSKE, StationSSHSignIns.DNS ],  out error),     Is.True, error);
+            Assert.That(Group("ocpp-only",  [],                                                  out error),     Is.True, error);
+
+            // Nothing but its time and its names is a group's to give.
+            Assert.That(Group("with-more",  [ Other ],  out var refused), Is.False, "A group gave its stations a subsystem that is no station's.");
+            Assert.That(Group("with-sftp",  [ "sftp" ], out _),           Is.False, "A group gave its stations SFTP.");
+            Assert.That(refused,                                          Does.Contain(Other));
+
+            GiveAKey("cs001", cs001Key,    "with-time");
+            GiveAKey("cs002", cs002Key,    "with-both");
+            GiveAKey("cs003", strangerKey, "ocpp-only");
+
+            // Given, but served by nobody yet.
+            await using (var early = await SignedIn("cs002", cs002Key))
+            {
+                Assert.That(await Refused(early, StationSSHSignIns.NTSKE),  Is.True,  "A station got NTS-KE that nobody serves.");
+                Assert.That(await Refused(early, StationSSHSignIns.DNS),    Is.True,  "A station got DNS that nobody serves.");
+                Assert.That(await Refused(early, Subsystem),                Is.False, "A station did not get OCPP.");
+            }
+
+            Controller.AddSSHSubsystem(new SSHSubsystem(StationSSHSignIns.NTSKE,  "NTS-KE",  serving));
+            Controller.AddSSHSubsystem(new SSHSubsystem(StationSSHSignIns.DNS,    "DNS",     serving));
+            Controller.AddSSHSubsystem(new SSHSubsystem(Other,                    "Other",   serving));
+
+            await using (var withTime = await SignedIn("cs001", cs001Key))
+            {
+                Assert.That(await Refused(withTime, Subsystem),                Is.False, "A station did not get OCPP.");
+                Assert.That(await Refused(withTime, StationSSHSignIns.NTSKE),  Is.False, "A station did not get NTS-KE, which its group gives it and the node serves.");
+                Assert.That(await Refused(withTime, StationSSHSignIns.DNS),    Is.True,  "A station got DNS, which its group does not give it.");
+                Assert.That(await Refused(withTime, Other),                    Is.True,  "A station got a subsystem that is no station's.");
+            }
+
+            await using (var withBoth = await SignedIn("cs002", cs002Key))
+            {
+                Assert.That(await Refused(withBoth, Subsystem),                Is.False, "A station did not get OCPP.");
+                Assert.That(await Refused(withBoth, StationSSHSignIns.NTSKE),  Is.False, "A station did not get NTS-KE, which its group gives it and the node serves.");
+                Assert.That(await Refused(withBoth, StationSSHSignIns.DNS),    Is.False, "A station did not get DNS, which its group gives it and the node serves.");
+                Assert.That(await Refused(withBoth, Other),                    Is.True,  "A station got a subsystem that is no station's.");
+                Assert.That(await Refused(withBoth, "sftp"),                   Is.True,  "A station got SFTP.");
+                Assert.That(await Asks(withBoth, "shell", []),                 Is.False, "A station got the command line.");
+            }
+
+            // A key admitted for OCPP has neither by itself.
+            await using (var ocppOnly = await SignedIn("cs003", strangerKey))
+            {
+                Assert.That(await Refused(ocppOnly, Subsystem),                Is.False, "A station did not get OCPP.");
+                Assert.That(await Refused(ocppOnly, StationSSHSignIns.NTSKE),  Is.True,  "A station got NTS-KE with its key for OCPP alone.");
+                Assert.That(await Refused(ocppOnly, StationSSHSignIns.DNS),    Is.True,  "A station got DNS with its key for OCPP alone.");
+            }
+
+            // Taken away again: the next connection has it no more. And a
+            // change that says nothing of it leaves it as it is.
+            Assert.That(Controller.StationLogins.TryAddOrUpdateGroup("with-both", "with-both", true, [ AuthMethod.SSHKey ], [ 1 ], null, out error), Is.True, error);
+            Assert.That(Controller.StationLogins.GetGroup("with-both")?.Channels, Is.EquivalentTo(new[] { StationSSHSignIns.NTSKE, StationSSHSignIns.DNS }));
+
+            // A channel that lasts when the grant is taken away ends with it.
+            await using var lasting = await SignedIn("cs002", cs002Key);
+            var channel = await lasting.OpenSubsystemAsync(StationSSHSignIns.NTSKE).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.That(Group("with-both", [], out error), Is.True, error);
+
+            var ended = false;
+
+            try
+            {
+                var buffer = new Byte[16];
+                ended = await Task.Run(async () => await channel.Input.ReadAsync(buffer, CancellationToken.None) == 0).WaitAsync(TimeSpan.FromSeconds(30));
+            }
+            catch (TimeoutException)
+            {
+                ended = false;
+            }
+            catch (Exception)
+            {
+                ended = true;
+            }
+
+            Assert.That(ended, Is.True, "A channel of NTS-KE lasted after its group gave it no more.");
+
+            await using (var noMore = await SignedIn("cs002", cs002Key))
+            {
+                Assert.That(await Refused(noMore, Subsystem),                Is.False, "A station did not get OCPP.");
+                Assert.That(await Refused(noMore, StationSSHSignIns.NTSKE),  Is.True,  "A station kept NTS-KE its group gives no more.");
+                Assert.That(await Refused(noMore, StationSSHSignIns.DNS),    Is.True,  "A station kept DNS its group gives no more.");
+            }
+
         }
 
         #endregion
