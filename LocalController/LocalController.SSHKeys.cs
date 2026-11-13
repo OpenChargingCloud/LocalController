@@ -52,15 +52,16 @@ namespace cloud.charging.open.LocalController
         #region (private) AttachSSHKeyMessages(Node)
 
         /// <summary>
-        /// Answer the CSMS's SSH key messages from the stations' logins. Only keys of OCPP are taken: this
-        /// local controller serves its stations ocpp@open.charging.cloud and nothing else over SSH.
+        /// Answer the CSMS's SSH key messages from the stations' logins. Only the station's own key is taken, the
+        /// one of the purpose Station: its connection to this local controller is one, and OCPP, its
+        /// time and its names are channels of it.
         /// </summary>
         private void AttachSSHKeyMessages(OCPPv2_1_LC.TestLocalControllerNode Node)
         {
 
             Node.OCPP.IN.OnInstallSSHKey += (timestamp, sender, connection, request, cancellationToken) => {
 
-                if (request.Purpose != OCPPv2_1.SSHKeyPurpose.OCPP)
+                if (request.Purpose != OCPPv2_1.SSHKeyPurpose.Station)
                     return Task.FromResult(new OCPPv2_1.CS.InstallSSHKeyResponse(request, OCPPv2_1.GenericStatus.Rejected,
                                                                                  new OCPPv2_1.StatusInfo("NotSupported", "This local controller lets its stations in over SSH for OCPP only."),
                                                                                  HostKeys: HostKeyFingerprints));
@@ -109,12 +110,12 @@ namespace cloud.charging.open.LocalController
 
             Node.OCPP.IN.OnGetInstalledSSHKeys += (timestamp, sender, connection, request, cancellationToken) => {
 
-                var keys = request.Purpose is OCPPv2_1.SSHKeyPurpose purpose && purpose != OCPPv2_1.SSHKeyPurpose.OCPP
+                var keys = request.Purpose is OCPPv2_1.SSHKeyPurpose purpose && purpose != OCPPv2_1.SSHKeyPurpose.Station
                                ? []
                                : StationLogins.Logins.
                                      Where     (login => request.NetworkingNodeId is null || login.Id == request.NetworkingNodeId.Value.ToString()).
                                      SelectMany(login => login.Keys.Select(key => new OCPPv2_1.InstalledSSHKey(protocols.WWCP.NetworkingNode.NetworkingNode_Id.Parse(login.Id),
-                                                                                                               OCPPv2_1.SSHKeyPurpose.OCPP,
+                                                                                                               OCPPv2_1.SSHKeyPurpose.Station,
                                                                                                                key.Line,
                                                                                                                key.Fingerprint))).
                                      ToArray   ();
