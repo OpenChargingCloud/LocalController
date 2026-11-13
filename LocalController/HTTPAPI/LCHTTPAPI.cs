@@ -24,6 +24,7 @@ using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 using cloud.charging.open.protocols.WWCP.Node.Logging;
 
 using cloud.charging.open.protocols.WWCP.Node.Web;
+using cloud.charging.open.protocols.OCPP.Node;
 
 #endregion
 
@@ -42,7 +43,7 @@ namespace cloud.charging.open.LocalController
     /// have its own copy of all of them. What is left here is registered on
     /// top: see LCHTTPAPI.CSMS.cs and LCHTTPAPI.OCPPServer.cs.
     /// </remarks>
-    public partial class LCHTTPAPI : NodeHTTPAPI
+    public partial class LCHTTPAPI : OCPPDiallingHTTPAPI
     {
 
         #region Properties
@@ -72,10 +73,14 @@ namespace cloud.charging.open.LocalController
                          HTTPPath?        APIPath   = null,
                          String?          Version   = null)
 
+            // The connections of this controller - its line up to the CSMS -
+            // are read, changed and tested by whoever has that right to the
+            // CSMS: the routes are those of every node that dials one.
             : base(HTTPServer,
                    Controller,
                    ExtAPI,
                    Log,
+                   LocalControllerAccess.CSMS,
                    APIPath,
                    Version ?? typeof(LCHTTPAPI).Assembly.GetName().Version?.ToString(3) ?? "0.0.0")
 
