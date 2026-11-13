@@ -78,12 +78,12 @@ namespace cloud.charging.open.LocalController
 
             = CSMSRequestTypes().
                   Concat([
-                      typeof(OCPPv2_1.NetworkingNode.AddSignaturePolicyRequest),
-                      typeof(OCPPv2_1.NetworkingNode.UpdateSignaturePolicyRequest),
-                      typeof(OCPPv2_1.NetworkingNode.DeleteSignaturePolicyRequest),
-                      typeof(OCPPv2_1.NetworkingNode.AddUserRoleRequest),
-                      typeof(OCPPv2_1.NetworkingNode.UpdateUserRoleRequest),
-                      typeof(OCPPv2_1.NetworkingNode.DeleteUserRoleRequest),
+                      typeof(OCPPv2_1.NetworkingNode.SetSignaturePolicyRequest),
+                      typeof(OCPPv2_1.NetworkingNode.GetSignaturePolicyRequest),
+                      typeof(OCPPv2_1.NetworkingNode.AddSignerRoleRequest),
+                      typeof(OCPPv2_1.NetworkingNode.UpdateSignerRoleRequest),
+                      typeof(OCPPv2_1.NetworkingNode.DeleteSignerRoleRequest),
+                      typeof(OCPPv2_1.NetworkingNode.GetSignerRolesRequest),
                       typeof(OCPPv2_1.NetworkingNode.GetFileRequest),
                       typeof(OCPPv2_1.NetworkingNode.SendFileRequest),
                       typeof(OCPPv2_1.NetworkingNode.DeleteFileRequest),

@@ -413,7 +413,7 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("GetBaseReport",       """{"requestId":1,"reportBase":"FullInventory"}""")]
         [TestCase("Reset",               """{"type":"Immediate"}""")]
         [TestCase("ListDirectory",       """{"directoryPath":"/"}""")]
-        [TestCase("AddSignaturePolicy",  """{"signaturePolicy":{}}""")]
+        [TestCase("SetSignaturePolicy",  """{"signaturePolicy":{}}""")]
         public async Task AStation_CannotAskTheControllerWhatOnlyTheCSMSAsks(String  Action,
                                                                             String  Payload)
         {
@@ -508,7 +508,7 @@ namespace cloud.charging.open.LocalController.Tests
 
                 foreach (var action in new[] { "InstallSSHKey", "DeleteSSHKey", "GetInstalledSSHKeys", "SetVariables", "GetVariables", "GetBaseReport",
                                                "GetReport", "Reset", "UpdateFirmware", "GetLog", "InstallCertificate", "CertificateSigned", "SetNetworkProfile",
-                                               "TriggerMessage", "ChangeAvailability", "RequestStartTransaction", "AddSignaturePolicy", "AddUserRole",
+                                               "TriggerMessage", "ChangeAvailability", "RequestStartTransaction", "SetSignaturePolicy", "AddSignerRole",
                                                "GetFile", "SendFile", "DeleteFile", "ListDirectory" })
                     Assert.That(LocalController.CSMSOnlyActions, Does.Contain(action), action);
 
