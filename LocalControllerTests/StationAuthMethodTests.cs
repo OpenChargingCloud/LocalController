@@ -76,14 +76,13 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region AStationThatIsTurnedAwayIsToldItMayComeWithAPasswordOrAOneTimeToken()
+        #region AStationThatIsTurnedAwayIsToldWhatThisServerTakes()
 
         /// <summary>
-        /// The 401 names both schemes, whatever the station has: a password
-        /// and a one-time token, in one WWW-Authenticate.
+        /// The WWW-Authenticate of the 401 a station without credentials is
+        /// answered with, or null where there is none.
         /// </summary>
-        [Test]
-        public async Task AStationThatIsTurnedAwayIsToldItMayComeWithAPasswordOrAOneTimeToken()
+        private async Task<String?> TheChallengeOfARefusal()
         {
 
             using var tcp = new System.Net.Sockets.TcpClient();
@@ -119,13 +118,62 @@ namespace cloud.charging.open.LocalController.Tests
 
             }
 
-            var challenge = answer.ToString().
-                                   Split("\r\n").
-                                   FirstOrDefault(line => line.StartsWith("WWW-Authenticate:", StringComparison.OrdinalIgnoreCase));
+            Assert.That(answer.ToString(), Does.StartWith("HTTP/1.1 401"));
+
+            return answer.ToString().
+                          Split("\r\n").
+                          FirstOrDefault(line => line.StartsWith("WWW-Authenticate:", StringComparison.OrdinalIgnoreCase));
+
+        }
+
+        /// <summary>
+        /// The 401 names what this server takes on this port - the schemes
+        /// its enabled login groups allow for the security profile of the
+        /// port - and nothing about who asked: both where a group takes a
+        /// password and one a one-time token, the one where only one is
+        /// taken, and none where nothing but a certificate is.
+        /// </summary>
+        [Test]
+        public async Task AStationThatIsTurnedAwayIsToldWhatThisServerTakes()
+        {
+
+            void TheDefaultGroupTakes(Boolean Enabled, params AuthMethod[] Methods)
+                => Assert.That(Controller.StationLogins.TryAddOrUpdateGroup(LoginGroup.DefaultId, "Default", Enabled, Methods, [1, 2, 3], null, out var error),
+                               Is.True, error);
+
+            var asItIsMade      = await TheChallengeOfARefusal();
+
+            TheDefaultGroupTakes(true, AuthMethod.TOTP);
+            var tokensOnly      = await TheChallengeOfARefusal();
+
+            TheDefaultGroupTakes(true, AuthMethod.Basic);
+            var passwordsOnly   = await TheChallengeOfARefusal();
+
+            TheDefaultGroupTakes(true, AuthMethod.Certificate);
+            var certificates    = await TheChallengeOfARefusal();
+
+            // What another group takes counts as well - where it is enabled,
+            // and for the profile of this port, which is 1.
+            Assert.That(Controller.StationLogins.TryAddOrUpdateGroup("field", "Field test", true, [AuthMethod.TOTP], [1, 2, 3], null, out var fieldError),
+                        Is.True, fieldError);
+            var anotherGroup    = await TheChallengeOfARefusal();
+
+            Assert.That(Controller.StationLogins.TryAddOrUpdateGroup("field", "Field test", true, [AuthMethod.TOTP], [2, 3], null, out fieldError),
+                        Is.True, fieldError);
+            var anotherProfile  = await TheChallengeOfARefusal();
+
+            Assert.That(Controller.StationLogins.TryAddOrUpdateGroup("field", "Field test", false, [AuthMethod.TOTP], [1, 2, 3], null, out fieldError),
+                        Is.True, fieldError);
+            var switchedOff     = await TheChallengeOfARefusal();
 
             Assert.Multiple(() => {
-                Assert.That(answer.ToString(),  Does.StartWith("HTTP/1.1 401"));
-                Assert.That(challenge,          Is.EqualTo("WWW-Authenticate: Basic realm=\"OCPP\", charset=\"UTF-8\", TOTP realm=\"OCPP\""));
+                Assert.That(asItIsMade,      Is.EqualTo("WWW-Authenticate: Basic realm=\"OCPP\", charset=\"UTF-8\", TOTP realm=\"OCPP\""));
+                Assert.That(tokensOnly,      Is.EqualTo("WWW-Authenticate: TOTP realm=\"OCPP\""));
+                Assert.That(passwordsOnly,   Is.EqualTo("WWW-Authenticate: Basic realm=\"OCPP\", charset=\"UTF-8\""));
+                Assert.That(certificates,    Is.Null,  "a server that takes certificates alone offered something else");
+                Assert.That(anotherGroup,    Is.EqualTo("WWW-Authenticate: TOTP realm=\"OCPP\""));
+                Assert.That(anotherProfile,  Is.Null,  "what a group takes on another security profile was offered on this port");
+                Assert.That(switchedOff,     Is.Null,  "what a group that is switched off takes was offered");
             });
 
         }

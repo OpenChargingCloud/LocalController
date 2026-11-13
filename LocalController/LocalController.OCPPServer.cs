@@ -1112,17 +1112,32 @@ namespace cloud.charging.open.LocalController
                               "A charging station connection reached the validator without an HTTP request; refusing it."
                           );
 
-                return Task.FromResult<HTTPResponse?>(
-                           new HTTPResponse.Builder(Connection.HTTPRequest) {
-                               HTTPStatusCode  = HTTPStatusCode.Unauthorized,
-                               Server          = Server.HTTPServiceName,
-                               // Both, whatever this station has: which of
-                               // them a login may use is nobody's to learn
-                               // from a refusal.
-                               WWWAuthenticate = WWWAuthenticate.Basic("OCPP").And(WWWAuthenticate.TOTP("OCPP")),
-                               Connection      = ConnectionType.Close
-                           }.AsImmutable
-                       );
+                var refusal = new HTTPResponse.Builder(Connection.HTTPRequest) {
+                                  HTTPStatusCode  = HTTPStatusCode.Unauthorized,
+                                  Server          = Server.HTTPServiceName,
+                                  Connection      = ConnectionType.Close
+                              };
+
+                // What this server takes on this port, and nothing about who
+                // asked: the schemes its enabled login groups allow for the
+                // security profile a credential here would be. A port that
+                // takes certificates and nothing else challenges with nothing.
+                var asProfile = (Byte) (ocppServerTLS ? 2 : 1);
+
+                var taken     = profiles.Contains(asProfile)
+                                    ? StationLogins.Groups.
+                                          Where     (group => group.Enabled && group.SecurityProfiles.Contains(asProfile)).
+                                          SelectMany(group => group.AuthMethods).
+                                          ToHashSet ()
+                                    : [];
+
+                var basic     = taken.Contains(AuthMethod.Basic) ? WWWAuthenticate.Basic("OCPP") : null;
+                var totp      = taken.Contains(AuthMethod.TOTP)  ? WWWAuthenticate.TOTP ("OCPP") : null;
+
+                if ((basic is not null && totp is not null ? basic.And(totp) : basic ?? totp) is WWWAuthenticate challenge)
+                    refusal.WWWAuthenticate = challenge;
+
+                return Task.FromResult<HTTPResponse?>(refusal.AsImmutable);
 
             }
 
