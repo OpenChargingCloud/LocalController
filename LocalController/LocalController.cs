@@ -333,6 +333,13 @@ namespace cloud.charging.open.LocalController
 
             // What OCPP shows of the name servers and the time servers follows
             // this node from now on, whichever OCPP node is given it below.
+            // What this controller dials, what it proves itself with there
+            // and whom it believes: the stores a charging station has, beside
+            // the configuration file as everything else it was given. Before
+            // anything that asks for them - the device model asks which name
+            // servers share a connection over SSH while it is configured.
+            BuildConnectionStores();
+
             deviceModelBridge = NewDeviceModelBridge();
 
             lc01 = BuildOCPPNode(this.OCPP);
@@ -372,11 +379,6 @@ namespace cloud.charging.open.LocalController
             // configuration file, because what it listens on is written there.
             // Nothing listens yet: Start() does.
             BuildOCPPServer(configuration.OCPPServer);
-
-            // What this controller dials, what it proves itself with there
-            // and whom it believes: the stores a charging station has, beside
-            // the configuration file as everything else it was given.
-            BuildConnectionStores();
 
             // And the line upwards. Nothing is dialled yet either, for the
             // same reason: Start() does.
