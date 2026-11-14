@@ -29,6 +29,7 @@ using OCPPv2_1 = cloud.charging.open.protocols.OCPPv2_1;
 
 using cloud.charging.open.protocols.WWCP;
 using cloud.charging.open.protocols.WWCP.NetworkingNode;
+using cloud.charging.open.protocols.WWCP.Node.Certificates;
 
 using cloud.charging.open.protocols.OCPP.Node.Connections;
 using cloud.charging.open.protocols.OCPP.Node.KeyPins;
@@ -44,8 +45,8 @@ namespace cloud.charging.open.LocalController
     /// <summary>
     /// What a local controller says of itself to the dialling it shares with
     /// every node that dials a CSMS: that it is a local controller, that it
-    /// speaks OCPP 2.1 upwards and no OCPP 1.6, where its connections, its
-    /// client certificates and its SSH key are kept, and what it says of a
+    /// speaks OCPP 2.1 upwards and no OCPP 1.6, where its connections and
+    /// its SSH key are kept, and what it says of a
     /// line beyond what a charging station says - its networking mode, its
     /// pings and timeouts, its versions of TLS.
     /// </summary>
@@ -103,21 +104,19 @@ namespace cloud.charging.open.LocalController
 
         /// <summary>
         /// The stores of what this controller dials - the connections and
-        /// their credentials, the keys and certificates it holds up, the key
-        /// it signs in with over SSH - beside the configuration file, and
-        /// how it believes the servers of its connections by their key pins.
+        /// their credentials, the key it signs in with over SSH - beside the
+        /// configuration file, and how it believes the servers of its
+        /// connections by their key pins.
         /// </summary>
+        /// <remarks>
+        /// The keys and certificates a connection holds up have no store
+        /// here: they are TLS identities of the certificate store, as the
+        /// one the section "csms" chooses for every line that names none is.
+        /// </remarks>
         private void BuildConnectionStores()
         {
 
             var directory = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(ConfigFile.Path)) ?? ".";
-
-            ClientCertificates = new ClientCertificateStore(
-                                     System.IO.Path.Combine(directory, ClientCertificateStore.DefaultDirectoryName),
-                                     TimeProvider
-                                 );
-
-            ClientCertificates.OnNotice += (level, message) => Log.Log(level, message, "ocpp", "certificates");
 
             Connections = new ConnectionStore(
                               System.IO.Path.Combine(directory, ConnectionStore.DefaultDirectoryName),
@@ -127,8 +126,17 @@ namespace cloud.charging.open.LocalController
             keyPinning       = NewKeyPinning();
             tlsClientSource  = NewTLSClientSource();
 
-            Connections.KnownCertificateIds   = () => ClientCertificates.Entries.Select(entry => entry.Id);
+            // Which identities exist is the certificate store's business and
+            // changes while this one is alive, so it is asked rather than
+            // told once.
+            Connections.KnownCertificateIds   = () => Certificates.ByKind(CertificateKind.TLSIdentity).Select(entry => entry.Id);
             Connections.OnNotice             += (level, message) => Log.Log(level, message, "ocpp", "connections");
+
+            // What a controller of before kept in a directory of its own:
+            // its keys and their certificates, into the certificate store -
+            // and its connections with them. Once, and before anything dials
+            // or follows a change of the connections.
+            MoveClientKeysIntoTheStore(System.IO.Path.Combine(directory, FormerClientKeysDirectoryName));
 
             // After every change the store wrote: the device model first, so
             // that a connection dialled again has its TLSClientController by

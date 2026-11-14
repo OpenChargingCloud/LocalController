@@ -47,9 +47,8 @@ CSMS and the charging station port on top.
 | CSMS connection | whether the controller reports to a CSMS at all, and how its lines up are kept: pings, timeouts, the TLS identity a line holds up where it names none | `csms:edit` |
 | Connections | the lines up to the CSMS: where each dials, what it signs in with, how its server is believed, how it is doing - and a test of one | `csms:edit`, `csms:run` |
 | Authentication | the passwords and one-time tokens the connections sign in with | `csms:edit` |
-| Client keys | the keys and certificates a connection holds up, and the key the controller signs in with over SSH | `csms:edit` |
 | Certificate store | the TLS roots of the servers the controller connects to, and their certificates - certificates alone, no private key | `certificates:edit` |
-| Identities | who the controller is as a client, each with its private key: the TLS identity it signs in to the CSMS with | `certificates:edit` |
+| Identities | who the controller is as a client, each with its private key: the TLS identities its lines up to the CSMS hold up - brought with their key, or whose key is made here (tab **New key**) and waits for its certificate | `certificates:edit` |
 | Charging stations | the server the charging stations connect to: its port, the security profiles it accepts, the names it is reachable as, what it logs, and whether they may connect over SSH as well | `stations:edit` |
 | Logins and groups | which charging stations may sign in, with what - a password, a one-time token, an SSH key - and what their group allows them | `stations:edit` |
 | Server certificates | the keys this controller presents, and the certificates that answer them | `certificates:edit` |
@@ -569,6 +568,13 @@ alone, with no private key: the TLS roots and the server certificates - an
 upload there leaves a key in the box out, and says where it goes.
 **Identities** keeps who the controller is as a client, each with its key: the
 TLS identities, and the one the CSMS connection signs in with is marked there.
+An identity is brought with its key, or its key is made on the controller - on
+the **New key** tab - and only its signing request and the certificate that
+answers it ever travel; the Connections page says which one each line up to
+the CSMS shows. A controller of before kept such keys in `ocpp-client-keys/`
+beside the configuration file: they are moved into the store at the first
+start that finds them, and a connection that showed one shows the identity it
+became.
 **Server identities**, in the menu only then, keeps who the web interface is,
 with its key - not to be mixed up with **Server certificates**, what the
 charging station port presents, which is a store of its own. Each page has

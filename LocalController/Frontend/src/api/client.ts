@@ -21,7 +21,7 @@ import { connectionsAPI }  from '@ocpp/api/connections';
 export * from '@node/api/client';
 
 // What a node that dials its back ends keeps - the lines up to the CSMS as
-// connections, what they sign in with and their client keys - and how it is
+// connections, and what they sign in with - and how it is
 // asked are the same on a charging station, and are WWCP_OCPP_Node's: named
 // here as well. Two of its names are this module's own, for something else,
 // and stay so: a StationLogin here is a charging station that may sign in to
@@ -548,9 +548,8 @@ export const api = {
 
     },
 
-    // The lines up to the CSMS, what they sign in with and their client keys -
-    // api.connections, api.authentications and api.clientKeys - as every node
-    // that dials has them.
+    // The lines up to the CSMS and what they sign in with - api.connections
+    // and api.authentications - as every node that dials has them.
     ...connectionsAPI,
 
     ocppServer: {

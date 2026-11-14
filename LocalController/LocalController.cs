@@ -272,6 +272,11 @@ namespace cloud.charging.open.LocalController
                    CertificatesPath:   CertificatesPath,
                    CertificateKinds:   CertificateKinds,
 
+                   // Who the controller is to a CSMS it dials may be made
+                   // here: a key, a signing request, and the certificate
+                   // that comes back for it. The key never leaves.
+                   CertificateRequestKinds: [ CertificateKind.TLSIdentity ],
+
                    Log:                Log,
                    LogToConsole:       LogToConsole,
                    ConsoleLogLevel:    ConsoleLogLevel,

@@ -23,7 +23,7 @@ const saidByAConnection: readonly string[] = [ 'url', 'securityProfile', 'httpVe
  * The lines themselves are connections, as a charging station's are: where
  * each goes, what it signs in with and how it knows its server are written
  * down on the Connections page, the credentials on the Authentication page
- * and the keys on the Client keys page. This page says where to find them.
+ * and the keys on the Identities page. This page says where to find them.
  *
  * Drawn by view.ts: a draw changes only what differs, so that what is typed
  * into its form - and its focus - outlives a draw.
