@@ -39,6 +39,12 @@ namespace cloud.charging.open.LocalController
     /// is decided twice in the life of the box.
     /// </para>
     /// <para>
+    /// One thing in the store is no such decision, and is its "run": making a
+    /// key the controller dials its CSMS with, bringing the certificate that
+    /// came back for it, and taking a key back that still waits for one.
+    /// Whoever runs the site keeps its lines up, and does that as well.
+    /// </para>
+    /// <para>
     /// The configuration file may add roles to these and say differently what
     /// one of them may do - see the node's "roles" section. What is written
     /// here is what a local controller is when its file says nothing.
@@ -88,7 +94,11 @@ namespace cloud.charging.open.LocalController
         /// Whoever runs the site: may point this controller at other name and
         /// time servers and ask whether they work, may change the line up to
         /// the CSMS and the grid operator's VTN, and adds and takes out charging
-        /// stations - but may not touch the certificates.
+        /// stations. It makes the keys the lines up to the CSMS hold up and
+        /// brings the certificates that come back for them - and is not let
+        /// at the certificates beyond that: whom this controller believes,
+        /// and who it is to its charging stations, is the system
+        /// administrator's to say.
         /// </summary>
         /// <remarks>
         /// <para>
@@ -113,6 +123,7 @@ namespace cloud.charging.open.LocalController
                                                      Permission.Edit(NodeResources.NTS),
                                                      Permission.Run (NodeResources.NTS),
                                                      Permission.Edit(CSMS),
+                                                     Permission.Run (NodeResources.Certificates),
                                                      Permission.Edit(Stations),
                                                      Permission.Edit(OpenADR),
                                                      Permission.Run (OpenADR),
@@ -121,7 +132,7 @@ namespace cloud.charging.open.LocalController
                                                      Permission.Run (NodeResources.ResetImmediate),
                                                      Permission.Run (NodeResources.State),
                                                      Permission.Edit(NodeResources.Firmware) ],
-                                                   "runs the site: its name and time servers, the line up to the CSMS, the grid operator's VTN and the charging stations - and restarts the controller and installs its firmware");
+                                                   "runs the site: its name and time servers, the line up to the CSMS and the keys it dials with, the grid operator's VTN and the charging stations - and restarts the controller and installs its firmware");
 
         /// <summary>
         /// The one role a local controller adds to the node's.

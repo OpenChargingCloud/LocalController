@@ -224,7 +224,8 @@ namespace cloud.charging.open.LocalController.Tests
         /// What each role could do before roles were data, permission by
         /// permission: the viewer looks, the CPO runs the site - its name and
         /// time servers, the line up to the CSMS and the charging stations -
-        /// and only the administrators touch the certificates.
+        /// and only the administrators touch the certificates, but for the
+        /// keys the lines up are dialled with, which the CPO makes.
         /// </summary>
         [TestCase("viewer",       "configuration:read",  true)]
         [TestCase("viewer",       "dns:read",            true)]
@@ -238,6 +239,7 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("viewer",       "openadr:read",        true)]
         [TestCase("viewer",       "openadr:edit",        false)]
         [TestCase("viewer",       "certificates:edit",   false)]
+        [TestCase("viewer",       "certificates:run",    false)]
 
         [TestCase("cpo",          "certificates:read",   true)]
         [TestCase("cpo",          "dns:edit",            true)]
@@ -248,6 +250,7 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("cpo",          "stations:edit",       true)]
         [TestCase("cpo",          "openadr:edit",        true)]
         [TestCase("cpo",          "certificates:edit",   false)]
+        [TestCase("cpo",          "certificates:run",    true)]
         [TestCase("cpo",          "configuration:edit",  false)]
         [TestCase("cpo",          "node:run",            true)]
         [TestCase("cpo",          "reset:run",           true)]
@@ -311,7 +314,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(requested.StatusCode,            Is.EqualTo(HttpStatusCode.Forbidden));
                 Assert.That(refusal,                         Does.Contain("This needs the systemadmin role."));
                 Assert.That(me["roles"]!.Values<String>(),   Is.EqualTo(new[] { "cpo" }));
-                Assert.That(permissions,                     Does.Contain("stations:edit").And.Contain("csms:edit").And.Contain("dns:run").And.Contain("certificates:read"));
+                Assert.That(permissions,                     Does.Contain("stations:edit").And.Contain("csms:edit").And.Contain("dns:run").And.Contain("certificates:read").And.Contain("certificates:run"));
                 Assert.That(permissions,                     Does.Not.Contain("certificates:edit").And.Not.Contain("configuration:edit"));
                 Assert.That(permissions.Any(permission => permission.StartsWith('*')),
                             Is.False,
@@ -449,6 +452,9 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("GET",     "api/v1/certificates/c1",                                   "certificates:read")]
         [TestCase("PATCH",   "api/v1/certificates/c1",                                   "certificates:edit")]
         [TestCase("DELETE",  "api/v1/certificates/c1",                                   "certificates:edit")]
+        [TestCase("POST",    "api/v1/certificates/requests",                             "certificates:run")]
+        [TestCase("POST",    "api/v1/certificates/requests/answer",                      "certificates:run")]
+        [TestCase("DELETE",  "api/v1/certificates/requests/r1",                          "certificates:run")]
         [TestCase("GET",     "api/v1/logs",                                              "log:read")]
         [TestCase("GET",     "api/v1/state",                                             "state:read")]
         public async Task EveryRouteAsksForItsOwnPermission(String Method, String Path, String Permission)

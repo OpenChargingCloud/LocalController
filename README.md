@@ -48,7 +48,7 @@ CSMS and the charging station port on top.
 | Connections | the lines up to the CSMS: where each dials, what it signs in with, how its server is believed, how it is doing - and a test of one | `csms:edit`, `csms:run` |
 | Authentication | the passwords and one-time tokens the connections sign in with | `csms:edit` |
 | Certificate store | the TLS roots of the servers the controller connects to, and their certificates - certificates alone, no private key | `certificates:edit` |
-| Identities | who the controller is as a client, each with its private key: the TLS identities its lines up to the CSMS hold up - brought with their key, or whose key is made here (tab **New key**) and waits for its certificate | `certificates:edit` |
+| Identities | who the controller is as a client, each with its private key: the TLS identities its lines up to the CSMS hold up - brought with their key, or whose key is made here (tab **New key**) and waits for its certificate | `certificates:edit`; `certificates:run` to make a key and bring its certificate |
 | Charging stations | the server the charging stations connect to: its port, the security profiles it accepts, the names it is reachable as, what it logs, and whether they may connect over SSH as well | `stations:edit` |
 | Logins and groups | which charging stations may sign in, with what - a password, a one-time token, an SSH key - and what their group allows them | `stations:edit` |
 | Server certificates | the keys this controller presents, and the certificates that answer them | `certificates:edit` |
@@ -673,13 +673,19 @@ the CSMS, `stations`, the charging stations and which of them may sign in, and
 |------|-----|
 | `viewer` | read everything: `*:read` |
 | `support` | see what is going on and have it reported again (`state:read`, `state:run`), and restart the controller once it is idle (`reset:run`) - nothing else: no configuration, no log |
-| `cpo` | read everything, and run the site: change the name and time servers and ask them (`dns` and `nts`, `edit` and `run`), change the line up to the CSMS and the charging stations (`csms:edit`, `stations:edit`), and the grid operator's VTN and ask it (`openadr:edit`, `openadr:run`); restart the controller, once idle and at once, have it send a message and report its state again, and install its firmware (`reset:run`, `reset-immediate:run`, `node:run`, `state:run`, `firmware:edit`) |
+| `cpo` | read everything, and run the site: change the name and time servers and ask them (`dns` and `nts`, `edit` and `run`), change the line up to the CSMS and the charging stations (`csms:edit`, `stations:edit`), make the keys the lines up are dialled with and bring their certificates (`certificates:run`), and the grid operator's VTN and ask it (`openadr:edit`, `openadr:run`); restart the controller, once idle and at once, have it send a message and report its state again, and install its firmware (`reset:run`, `reset-immediate:run`, `node:run`, `state:run`, `firmware:edit`) |
 | `systemadmin` | everything this controller can be told, the certificates and who may sign what (`signatures:edit`) included |
 
 The viewer, the support and the administrators are the node's, the CPO is the
 local controller's. The certificates are the one resource only the administrators may
 change: somebody who can add a certificate authority can let in a charging
-station that nobody issued a password to.
+station that nobody issued a password to. One thing in the store is no such
+decision, and is `certificates:run`, which the CPO holds as well: making a key
+the controller dials its CSMS with (the **New key** tab of the identities),
+bringing the certificate that came back for it - pasted beside the key, which
+is matched to it - and taking a key back that still waits for one. The upload,
+where a certificate comes with its key and a root comes at all, is the
+administrators', and so are the charging station port's keys.
 
 The same roles say who may sign what is sent to the controller itself over
 OCPP (white paper "Signed OCPP Messages and Signer Roles", section 5.3): a key
