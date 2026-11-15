@@ -126,14 +126,17 @@ namespace cloud.charging.open.LocalController.Tests
 
                 Assert.That(store["trustAnchors"]!.Values<String>(),         Is.EqualTo(new[] { "tlsRoot" }),
                             "the roots a server it connects to may chain to");
-                Assert.That(store["credentials"]!.Values<String>(),          Is.EqualTo(new[] { "tlsIdentity" }),
-                            "what it presents in TLS itself");
+                Assert.That(store["credentials"]!.Values<String>(),          Is.EqualTo(new[] { "tlsIdentity", "tlsServerIdentity" }),
+                            "what it presents in TLS itself: to a server it dials, and as its own web interface");
                 Assert.That(store["recognised"]!.Values<String>(),           Is.EqualTo(new[] { "tlsServer" }),
                             "a server certificate is recognised, neither believed nor presented");
 
                 Assert.That(((JObject) store["kinds"]!).Properties().Select(kind => kind.Name),
-                            Is.EquivalentTo(new[] { "tlsRoot", "tlsServer", "tlsIdentity" }),
+                            Is.EquivalentTo(new[] { "tlsRoot", "tlsServer", "tlsIdentity", "tlsServerIdentity" }),
                             "none of ISO 15118's, which are a vehicle's");
+
+                Assert.That(store["requests"]?["kinds"]?.Values<String>(),   Is.EquivalentTo(new[] { "tlsIdentity", "tlsServerIdentity" }),
+                            "a key is made here for who it is as a client, and for who its web interface is - as a charging station makes them");
 
                 Assert.That(store["usages"]!.Values<String>(),               Is.EqualTo(new[] { "dns", "nts" }), "what a page may offer");
                 Assert.That(store["keysAreUnencrypted"]!.Value<Boolean>(),   Is.False);

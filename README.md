@@ -549,20 +549,19 @@ to - a time server, a name server over TLS or HTTPS - beside the ones this
 machine trusts; the **server certificates** of such servers, kept so that one
 can be held to its fingerprint; and the **TLS identities** this controller
 presents itself, each with its private key - the one it signs in to the CSMS
-with under security profile 3 among them. Where the web interface is served
-over HTTPS from the store - `"web": { "tls": { "certificate": "store" } }` in
-the configuration file, or `--https` - it also keeps a **TLS server
-identity**, who the web interface is. `--import-certificate
-tlsServerIdentity=<file>` puts one in with `--https` on the same command line;
-where only the configuration file asks for it, it goes in on the Server
-identities page or by copying it in. The store lives in `certificates/` beside
+with under security profile 3 among them. It also keeps a **TLS server
+identity**, who the web interface is where that is served over HTTPS from the
+store - `"web": { "tls": { "certificate": "store" } }` in the configuration
+file, or `--https`. `--import-certificate tlsServerIdentity=<file>` puts one
+in with `--https` on the same command line; otherwise it goes in on the Server
+identities page - brought with its key, or its key made there before HTTPS is
+switched on - or by copying it in. The store lives in `certificates/` beside
 `configuration.json`, one file per certificate and an `index.json` saying what
 each is called, whether it is switched on and what it is kept for; a file
 copied into the right directory by hand is taken in at the next start. One
 certificate may be kept as several kinds - a TLS root and a kind made up, say.
 
-It is looked after on two pages, and on a third where the web interface is
-served over HTTPS from the store. **Certificate store** keeps certificates
+It is looked after on three pages. **Certificate store** keeps certificates
 alone, with no private key: the TLS roots and the server certificates - an
 upload there leaves a key in the box out, and says where it goes.
 **Client identities** keeps who the controller is as a client, each with its key: the
@@ -574,8 +573,9 @@ the CSMS shows. A controller of before kept such keys in `ocpp-client-keys/`
 beside the configuration file: they are moved into the store at the first
 start that finds them, and a connection that showed one shows the identity it
 became.
-**Server identities**, in the menu only then, keeps who the web interface is,
-with its key - not to be mixed up with **Server certificates**, what the
+**Server identities** keeps who the web interface is, with its key - brought
+with it, or made on its **New key** tab, as a charging station makes it, so
+that a key need not be carried to the controller - not to be mixed up with **Server certificates**, what the
 charging station port presents, which is a store of its own. Each page has
 three tabs: by usage, every certificate once, and the upload, where
 certificates are pasted or files dropped and every one of them is kept as

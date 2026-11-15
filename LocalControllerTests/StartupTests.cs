@@ -181,9 +181,11 @@ namespace cloud.charging.open.LocalController.Tests
         /// The node below keeps the certificates its kind asks for, and a
         /// local controller asks for TLS's: the roots of the servers it
         /// connects to, their certificates, and what it presents itself - and
-        /// none of ISO 15118's, which are a vehicle's. No server identity
-        /// either, over plain HTTP: "me" names no page for one, so the menu
-        /// offers none.
+        /// none of ISO 15118's, which are a vehicle's. Who its web interface
+        /// is, is among what it presents, over plain HTTP as well: its key is
+        /// made on the controller before HTTPS is switched on, as a charging
+        /// station makes it, so "me" names a page for it and the menu offers
+        /// one.
         /// </summary>
         /// <remarks>
         /// Until it had a use for them it asked for none, and nothing was made
@@ -203,12 +205,16 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(() => {
 
                 Assert.That(pages,
-                            Is.EqualTo(new[] { "certificates", "identities" }),
-                            "The menu would offer a page of server identities, which a controller over plain HTTP does not keep.");
+                            Is.EqualTo(new[] { "certificates", "identities", "serverIdentities" }),
+                            "The menu offers no page of server identities, where the key of the web interface is made before HTTPS is switched on.");
 
                 Assert.That(controller.Certificates.Kinds,
-                            Is.EquivalentTo(new[] { CertificateKind.TLSRoot, CertificateKind.TLSServer, CertificateKind.TLSIdentity }),
+                            Is.EquivalentTo(new[] { CertificateKind.TLSRoot, CertificateKind.TLSServer, CertificateKind.TLSIdentity, CertificateKind.TLSServerIdentity }),
                             "The node's store keeps other kinds of certificate than a controller has use for.");
+
+                Assert.That(controller.Certificates.RequestKinds,
+                            Is.EquivalentTo(new[] { CertificateKind.TLSIdentity, CertificateKind.TLSServerIdentity }),
+                            "A key is made on the controller for who it is as a client and for who its web interface is, as on a charging station.");
 
                 Assert.That(Path.GetFullPath(controller.Certificates.Directory),
                             Is.EqualTo(Path.GetFullPath(Path.Combine(directory, "certificates"))),

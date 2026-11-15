@@ -135,13 +135,15 @@ namespace cloud.charging.open.LocalController
         /// the stores of their own they have always had: ocpp-server-keys and
         /// ocpp-client-trust. Who its web interface is, where that is served
         /// over HTTPS from the store - "web": { "tls": { "certificate":
-        /// "store" } }, or --https - is a TLS server identity, a kind the node
-        /// below keeps then all the same.
+        /// "store" } }, or --https - is a TLS server identity: kept whether
+        /// or not HTTPS is served yet, as a charging station keeps it, so
+        /// that its key can be made here before anything is switched over.
         /// </remarks>
         public static readonly IReadOnlyList<CertificateKind>  CertificateKinds  = [
                                                                                      CertificateKind.TLSRoot,
                                                                                      CertificateKind.TLSServer,
-                                                                                     CertificateKind.TLSIdentity
+                                                                                     CertificateKind.TLSIdentity,
+                                                                                     CertificateKind.TLSServerIdentity
                                                                                  ];
 
         /// <summary>
@@ -274,8 +276,13 @@ namespace cloud.charging.open.LocalController
 
                    // Who the controller is to a CSMS it dials may be made
                    // here: a key, a signing request, and the certificate
-                   // that comes back for it. The key never leaves.
-                   CertificateRequestKinds: [ CertificateKind.TLSIdentity ],
+                   // that comes back for it. The key never leaves. And
+                   // who its own web interface is, as a charging station
+                   // does it: a key made here need not be carried to the
+                   // controller. What the charging station port presents is
+                   // not among them - that is a store of its own, see
+                   // ServerCertificateStore.
+                   CertificateRequestKinds: [ CertificateKind.TLSIdentity, CertificateKind.TLSServerIdentity ],
 
                    Log:                Log,
                    LogToConsole:       LogToConsole,
