@@ -45,10 +45,9 @@ CSMS and the charging station port on top.
 | SSH server | whether the command line is served over SSH, on which port, and whether passwords open it - in effect at once; its host key, who is connected, the keys of the accounts and what it offers | `ssh:edit` |
 | Your account (the name at the foot of the menu) | your own name, e-mail address and how to reach you; your API keys and SSH keys - added, switched off and on, removed | your own account, whatever the role |
 | CSMS connection | whether the controller reports to a CSMS at all, and how its lines up are kept: pings, timeouts, the TLS identity a line holds up where it names none | `csms:edit` |
-| Connections | the lines up to the CSMS: where each dials, what it signs in with, how its server is believed, how it is doing - and a test of one | `csms:edit`, `csms:run` |
-| Authentication | the passwords and one-time tokens the connections sign in with | `csms:edit` |
+| Connections | the lines up to the CSMS: where each dials, what it signs in with, how its server is believed, how it is doing - and a test of one; on its tab **Credentials**, the passwords and one-time tokens the connections sign in with | `csms:edit`, `csms:run` |
 | Certificate store | the TLS roots of the servers the controller connects to, and their certificates - certificates alone, no private key | `certificates:edit` |
-| Identities | who the controller is as a client, each with its private key: the TLS identities its lines up to the CSMS hold up - brought with their key, or whose key is made here (tab **New key**) and waits for its certificate | `certificates:edit`; `certificates:run` to make a key and bring its certificate |
+| Client identities | who the controller is as a client, each with its private key: the TLS identities its lines up to the CSMS hold up - brought with their key, or whose key is made here (tab **New key**) and waits for its certificate - and, under **SSH keys**, the keys an `ssh://` line signs in with beside the controller's own | `certificates:edit`; `certificates:run` to make a key and bring its certificate, and to make or remove an SSH key |
 | Charging stations | the server the charging stations connect to: its port, the security profiles it accepts, the names it is reachable as, what it logs, and whether they may connect over SSH as well | `stations:edit` |
 | Logins and groups | which charging stations may sign in, with what - a password, a one-time token, an SSH key - and what their group allows them | `stations:edit` |
 | Server certificates | the keys this controller presents, and the certificates that answer them | `certificates:edit` |
@@ -85,7 +84,7 @@ messages are written. They are kept in `ocpp-connections/` beside the
 configuration file - the credentials for their owner alone, and never in the
 configuration file - and looked after on the Connections pages or with
 `/api/v1/configuration/connections`, `.../authentications` and
-`.../certificates`; `GET /api/v1/status/connections` says how each is doing,
+`.../sshKeys`; `GET /api/v1/status/connections` says how each is doing,
 and `POST .../connections/test` tries one without writing anything. It is the
 code a charging station dials with (WWCP_OCPP_Node's `OCPPDiallingNode`), so
 what a connection can do there it can do here. A controller may have several:
@@ -128,7 +127,7 @@ A connection signs in with a password or a one-time token - bound to the TLS
 session where its credentials say so, which it is over HTTP/3 and nothing
 else - or with a certificate: one of its own, kept with the connections, or
 the TLS identity of the certificate store the `csms` section names by its
-handle as `clientCertificate`, looked after on the Identities page and chosen
+handle as `clientCertificate`, looked after on the Client identities page and chosen
 on the CSMS page, which every line over `wss://` that names no certificate of
 its own holds up. One that is not in the store, switched off or out of its
 validity is said so, and the line not dialled with it. Over TLS, the CSMS's
@@ -566,7 +565,7 @@ It is looked after on two pages, and on a third where the web interface is
 served over HTTPS from the store. **Certificate store** keeps certificates
 alone, with no private key: the TLS roots and the server certificates - an
 upload there leaves a key in the box out, and says where it goes.
-**Identities** keeps who the controller is as a client, each with its key: the
+**Client identities** keeps who the controller is as a client, each with its key: the
 TLS identities, and the one the CSMS connection signs in with is marked there.
 An identity is brought with its key, or its key is made on the controller - on
 the **New key** tab - and only its signing request and the certificate that

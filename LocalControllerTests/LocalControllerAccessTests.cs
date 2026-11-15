@@ -414,6 +414,8 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("PUT",     "api/v1/configuration/csms",                                "csms:edit")]
         [TestCase("POST",    "api/v1/configuration/connections",                         "csms:edit")]
         [TestCase("POST",    "api/v1/configuration/authentications",                     "csms:edit")]
+        [TestCase("POST",    "api/v1/configuration/sshKeys",                             "certificates:run")]
+        [TestCase("POST",    "api/v1/configuration/sshKeys/remove",                      "certificates:run")]
         [TestCase("GET",     "api/v1/configuration/openADR",                             "openadr:read")]
         [TestCase("PUT",     "api/v1/configuration/openADR",                             "openadr:edit")]
         [TestCase("PUT",     "api/v1/configuration/openADR/credentials",                 "openadr:edit")]

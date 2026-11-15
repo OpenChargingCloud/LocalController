@@ -15,7 +15,7 @@ import { serverCertificatesPage } from './pages/serverCertificates';
 import { clientTrustPage }        from './pages/clientTrust';
 import { statePage }              from './pages/state';
 
-import { authenticationPage }     from '@ocpp/pages/authentication';
+import { sshKeysSection }         from '@ocpp/sshKeys';
 import { connectionsPage }        from '@ocpp/pages/connections';
 import { setConnectionsResource, setNodeNoun, setNodeTraits } from '@ocpp/settings';
 
@@ -50,12 +50,12 @@ startNode({
             nodeMenu.nts,
             nodeMenu.ssh,
             { path: '/configuration/csms',                      label: 'CSMS connection',     icon: 'fa-satellite-dish',    permission: [ 'csms:read' ]         },
-            // The lines up to the CSMS and what they sign in with: read by
-            // whoever may read the CSMS section. The keys they hold up have
-            // no page: they are TLS identities of the certificate store,
-            // made, waiting for their certificate and kept on Identities.
+            // The lines up to the CSMS and, on a tab of the same page, what
+            // they sign in with: read by whoever may read the CSMS section.
+            // The keys they hold up have no page: they are TLS identities of
+            // the certificate store, made, waiting for their certificate and
+            // kept on Client identities - where the SSH keys are as well.
             { path: '/configuration/connections',               label: 'Connections',         icon: 'fa-network-wired',     permission: [ 'csms:read' ]         },
-            { path: '/configuration/authentication',            label: 'Authentication',      icon: 'fa-user-lock',         permission: [ 'csms:read' ]         },
             { ...nodeMenu.certificates,                         label: 'Certificate store',   icon: 'fa-vault'                                                  },
             nodeMenu.identities,
             nodeMenu.serverIdentities,
@@ -72,12 +72,18 @@ startNode({
     // as well - the charging station server's. And the certificate the line up
     // to the CSMS signs in with, which the controller does not let go of until
     // another one is chosen on the CSMS page: a TLS identity, marked on the
-    // Identities page, where who the controller is as a client is kept.
+    // Client identities page, where who the controller is as a client is kept.
     certificates: {
         title:   'Certificate store',
         chosen:  {
             csmsClientCertificate:  { label: 'signs in to the CSMS', title: 'Chosen on the CSMS page; deleted only once another one is' }
-        }
+        },
+
+        // And who it is where it dials over ssh://: the keys it signs in
+        // with, which are no certificates and stand among what it presents
+        // all the same.
+        sections: context => [ sshKeysSection(context) ]
+
     },
 
     // "/" is every node's: the first page of the menu the person signed in may
@@ -90,9 +96,11 @@ startNode({
 
         '/configuration/csms':                      csmsPage,
         '/configuration/connections':               connectionsPage,
-        '/configuration/authentication':            authenticationPage,
+        // Where the credentials were while they had a page of their own:
+        // they are a tab of the connections, which is where they are used.
+        '/configuration/authentication':            movedTo('/configuration/connections?tab=credentials', 'Connections'),
         // Where the keys were while they had a page of their own.
-        '/configuration/client-keys':               movedTo('/configuration/identities', 'Identities'),
+        '/configuration/client-keys':               movedTo('/configuration/identities', 'Client identities'),
         '/configuration/ocpp-server':               ocppServerPage,
         '/configuration/ocpp-server/logins':        stationLoginsPage,
         '/configuration/ocpp-server/certificates':  serverCertificatesPage,

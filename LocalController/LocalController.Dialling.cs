@@ -154,6 +154,11 @@ namespace cloud.charging.open.LocalController
 
             SshKey.OnNotice += (level, message) => Log.Log(level, message, "ocpp", "connections", "ssh", "security");
 
+            // And the keys somebody made beside it, on the page of the client
+            // identities: read now, so that a connection that names one is
+            // checked against what is there from the first one written down.
+            _ = SshKeys;
+
         }
 
         #endregion
