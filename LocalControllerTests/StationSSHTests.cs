@@ -521,6 +521,178 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region AStationWithATOTPSecret_SignsInWithAOneTimePasswordOfItsSession()
+
+        private const String TheSecret      = "the-secret-cs001-shares-with-the-controller";
+        private const String AnotherSecret  = "a-secret-nobody-here-has-ever-heard-about";
+
+        private void GiveASecret(String Id, String Secret, String? Group = null)
+        {
+
+            Assert.That(Controller.StationLogins.TrySetTOTP(Id, Secret, null, null, null, null, Group, "tests", out _, out var error),
+                        Is.True, error);
+
+        }
+
+        /// <summary>
+        /// A station connecting over SSH with no key at all, and a one-time
+        /// password of the given secret that is bound to the session: the
+        /// connection, or why it was not let in.
+        /// </summary>
+        private async Task<(SshMessageConnection? Connection, String? Why)> ConnectWithTotp(String Id, String Secret)
+        {
+
+            var config = new TOTPSettings(Secret,
+                                          TOTPSettings.DefaultValidityTime,
+                                          TOTPSettings.DefaultLength,
+                                          TOTPSettings.DefaultAlphabet,
+                                          org.GraphDefined.Vanaheimr.Hermod.TOTPHashAlgorithm.SHA256).ToTOTPConfig();
+
+            var client = new SshMessageClient(new SshMessageClientOptions {
+                                                  Host          = "127.0.0.1",
+                                                  Port          = Controller.SSHPort!.Value.ToUInt16(),
+                                                  Ssh           = new SshClientOptions {
+                                                                      Username          = Id,
+                                                                      VerifyHostKey     = blob => Controller.SSHHostKey == $"ssh-ed25519 {SshFingerprint.Sha256(blob)}",
+                                                                      Credentials       = [],
+                                                                      SessionBoundTotp  = sessionId => SshSessionBoundTotp.Generate(config, sessionId)
+                                                                  },
+                                                  Subsystem     = Subsystem,
+                                                  Subprotocols  = [ "ocpp2.1" ]
+                                              });
+
+            try
+            {
+                return (await client.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(15)), null);
+            }
+            catch (TimeoutException)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                return (null, e.Message);
+            }
+
+        }
+
+        /// <summary>
+        /// totp@open.charging.cloud at the controller's SSH server: the token
+        /// of the secret a station has here, bound to the session it is sent
+        /// in, lets the station in with no key - and it is a station of the
+        /// controller then, as with a key. Another secret does not, and
+        /// neither does the right one for a station that has none.
+        /// </summary>
+        [Test]
+        public async Task AStationWithATOTPSecret_SignsInWithAOneTimePasswordOfItsSession()
+        {
+
+            GiveASecret("cs001", TheSecret);
+            GiveAKey   ("cs002", cs002Key);
+
+            var (wrongSecret, _)  = await ConnectWithTotp("cs001", AnotherSecret);
+            var (noSecret,    _)  = await ConnectWithTotp("cs002", TheSecret);
+            var (nobody,      _)  = await ConnectWithTotp("cs003", TheSecret);
+
+            var (cs001, why)      = await ConnectWithTotp("cs001", TheSecret);
+
+            Assert.Multiple(() => {
+                Assert.That(wrongSecret,  Is.Null,      "A one-time password of another secret let the station in.");
+                Assert.That(noSecret,     Is.Null,      "A one-time password let a station in that has no TOTP secret here.");
+                Assert.That(nobody,       Is.Null,      "A one-time password let a station in that is not listed.");
+                Assert.That(cs001,        Is.Not.Null,  $"The one-time password of its session did not let the station in: {why}");
+            });
+
+            Assert.That(await RegisteredWithin("cs001", TimeSpan.FromSeconds(10)), Is.True,
+                        "A station that signed in with a one-time password is no station of the controller.");
+
+        }
+
+        #endregion
+
+        #region TheGroup_Decides_WhetherAOneTimePasswordLetsAStationIn()
+
+        /// <summary>
+        /// The group has to accept one-time passwords, as over the WebSocket
+        /// port - accepting SSH keys is not it - and a group switched off ends
+        /// the session.
+        /// </summary>
+        [Test]
+        public async Task TheGroup_Decides_WhetherAOneTimePasswordLetsAStationIn()
+        {
+
+            Assert.That(Controller.StationLogins.TryAddOrUpdateGroup("field-test", "Field test", true, [ AuthMethod.Basic, AuthMethod.SSHKey ], [ 1, 2 ], null, out var error),
+                        Is.True, error);
+
+            GiveASecret("cs001", TheSecret, "field-test");
+
+            var (before, _) = await ConnectWithTotp("cs001", TheSecret);
+
+            Assert.That(before, Is.Null, "A group that accepts no one-time passwords let a station in with one.");
+
+            Assert.That(Controller.StationLogins.TryAddOrUpdateGroup("field-test", "Field test", true, [ AuthMethod.TOTP ], [ 1 ], null, out error),
+                        Is.True, error);
+
+            var (after, why) = await ConnectWithTotp("cs001", TheSecret);
+
+            Assert.That(after, Is.Not.Null,
+                        $"A group that accepts one-time passwords - and no SSH keys - did not let the station in: {why}");
+
+            Assert.That(Controller.StationLogins.TryAddOrUpdateGroup("field-test", "Field test", false, [ AuthMethod.TOTP ], [ 1 ], null, out error),
+                        Is.True, error);
+
+            Assert.That(await EndsWithin(after!, TimeSpan.FromSeconds(10)), Is.True, "A station of a group switched off stayed connected.");
+
+        }
+
+        #endregion
+
+        #region AStationWhoseSecretIsChangedOrTakenAway_IsSignedOutAtOnce()
+
+        /// <summary>
+        /// A session that came with a one-time password is held to the
+        /// secret it came with, as one that came with a key is to its key.
+        /// </summary>
+        [Test]
+        public async Task AStationWhoseSecretIsChangedOrTakenAway_IsSignedOutAtOnce()
+        {
+
+            // Longer than the test, so that only the store's own news can do it.
+            Controller.SSHSessionRecheckEvery = TimeSpan.FromMinutes(10);
+
+            GiveASecret("cs001", TheSecret);
+            GiveASecret("cs002", TheSecret);
+
+            var (cs001, why1) = await ConnectWithTotp("cs001", TheSecret);
+            var (cs002, why2) = await ConnectWithTotp("cs002", TheSecret);
+
+            Assert.That(cs001, Is.Not.Null, why1);
+            Assert.That(cs002, Is.Not.Null, why2);
+
+            GiveASecret("cs001", AnotherSecret);
+
+            Assert.That(await EndsWithin(cs001!, TimeSpan.FromSeconds(10)), Is.True, "A station whose TOTP secret was changed stayed connected over SSH.");
+            Assert.That(cs002!.IsAlive, Is.True, "Changing one station's secret ended another's session.");
+
+            var (old,  _)    = await ConnectWithTotp("cs001", TheSecret);
+            var (anew, why)  = await ConnectWithTotp("cs001", AnotherSecret);
+
+            Assert.Multiple(() => {
+                Assert.That(old,   Is.Null,      "The secret a station had before still let it in.");
+                Assert.That(anew,  Is.Not.Null,  $"The secret a station has now did not let it in: {why}");
+            });
+
+            Assert.That(Controller.StationLogins.TryClearTOTP("cs002", out var error), Is.True, error);
+            Assert.That(await EndsWithin(cs002, TimeSpan.FromSeconds(10)), Is.True, "A station whose TOTP secret was taken away stayed connected over SSH.");
+
+            var (again, _) = await ConnectWithTotp("cs002", TheSecret);
+
+            Assert.That(again, Is.Null, "A secret taken away still let its station in.");
+
+        }
+
+        #endregion
+
         #region AKeysOwnFromOption_IsHeldTo()
 
         /// <summary>

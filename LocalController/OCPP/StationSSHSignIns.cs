@@ -32,8 +32,9 @@ namespace cloud.charging.open.LocalController.OCPP
     /// <summary>
     /// The charging stations, as logins of this local controller's SSH server:
     /// a station signs in under its identification with one of its SSH keys,
-    /// for OCPP over SSH and for what else a station has over its connection:
-    /// its time and its names.
+    /// or with a one-time password of its TOTP secret that is bound to the
+    /// SSH session, for OCPP over SSH and for what else a station has over
+    /// its connection: its time and its names.
     /// </summary>
     /// <remarks>
     /// <b>The station logins decide, as over the WebSocket port.</b> A station
@@ -41,6 +42,16 @@ namespace cloud.charging.open.LocalController.OCPP
     /// and valid, in a group that is switched on and accepts SSH keys. The
     /// security profiles of the group are not asked: SSH is no OCPP security
     /// profile, see <see cref="AuthMethod.SSHKey"/>.
+    ///
+    /// <b>Or its one-time password, where its group accepts those.</b> The
+    /// SSH method totp@open.charging.cloud (<see cref="SshSessionBoundTotp"/>):
+    /// the token of the secret the station has here for HTTP TOTP, bound to
+    /// the session identifier of the SSH connection it is sent in, so that
+    /// it is good in that session and nowhere else. The group has to accept
+    /// <see cref="AuthMethod.TOTP"/>, as it has to over the WebSocket port.
+    /// A one-time password that is not bound to the session is a password,
+    /// and a password opens no station's login: the node never asks about
+    /// one. What such a session may do is what a key's may, and no more.
     ///
     /// <b>OCPP - and its time and its names, where its group gives them.</b>
     /// The SSH connection is the station's, and OCPP one channel of it: NTS
@@ -60,12 +71,14 @@ namespace cloud.charging.open.LocalController.OCPP
     /// "principal=station:* service=subsystem:...".
     ///
     /// <b>Asked again while a session lasts.</b> Every few seconds, and at once
-    /// when the station logins change: a key taken away, a station or its
-    /// group switched off, ends the session it opened.
+    /// when the station logins change: a key taken away, a TOTP secret taken
+    /// away or changed, a station or its group switched off, ends the session
+    /// it opened.
     ///
-    /// Only stations with an SSH key are logins here, so that a station that
-    /// only ever signs in over the WebSocket port does not take a name away
-    /// from an account of the same name on the SSH server.
+    /// Only stations with an SSH key or a TOTP secret are logins here, so
+    /// that a station that only ever signs in over the WebSocket port with a
+    /// password or a certificate does not take a name away from an account
+    /// of the same name on the SSH server.
     /// </remarks>
     public sealed class StationSSHSignIns : ISSHSignIns
     {
@@ -97,6 +110,20 @@ namespace cloud.charging.open.LocalController.OCPP
         private readonly Func<IEnumerable<String>>                     servedBesides;
         private readonly TimeProvider                                  timeProvider;
         private readonly ConcurrentDictionary<String, DateTimeOffset>  said = [];
+
+        /// <summary>
+        /// The TOTP settings that last let a station in: a session that came
+        /// with a one-time password is held to them, as one that came with a
+        /// key is held to its key.
+        /// </summary>
+        /// <remarks>
+        /// By station, not by session: the node asks about a session by what
+        /// it signed in as, and the settings of a station change for all its
+        /// sessions at once. The station logins say so when they change, and
+        /// every session is asked again then - before a new one can sign in
+        /// with what they are now.
+        /// </remarks>
+        private readonly ConcurrentDictionary<String, TOTPSettings>    letInWith = new (StringComparer.Ordinal);
 
         #endregion
 
@@ -158,12 +185,13 @@ namespace cloud.charging.open.LocalController.OCPP
         #region Knows(Username)
 
         /// <summary>
-        /// Whether the name is a charging station that has an SSH key.
+        /// Whether the name is a charging station that has an SSH key, or a
+        /// TOTP secret.
         /// </summary>
         public Boolean Knows(String Username)
 
             => logins.TryGet(Username, out var login) &&
-               login.HasSSHKey;
+               (login.HasSSHKey || login.HasTOTP);
 
         #endregion
 
@@ -192,6 +220,59 @@ namespace cloud.charging.open.LocalController.OCPP
                    logins.FindSSHKey(Request.Username, Request.PublicKeyBlob, timeProvider.GetUtcNow())?.Key.Key.Restrictions
                        ?? SshSessionRestrictions.None
                );
+
+        #endregion
+
+        #region TakesSessionBoundTotp / AuthorizeSessionBoundTotpAsync(Username, Totp, SessionId, Client, CancellationToken)
+
+        /// <summary>
+        /// Whether a station can sign in with a one-time password bound to
+        /// its SSH session now: while OCPP over SSH is served, and some
+        /// station has a TOTP secret. The node offers the method then.
+        /// </summary>
+        public Boolean TakesSessionBoundTotp
+
+            => served() &&
+               logins.Logins.Any(login => login.HasTOTP);
+
+        /// <summary>
+        /// Whether the one-time password lets the station in, in the session
+        /// with the given identifier: see the remarks of this class.
+        /// </summary>
+        /// <remarks>
+        /// The token is checked first, and for a station that is not here as
+        /// well (<see cref="ChargingStationLogins.VerifyTOTP"/>), so that the
+        /// answer takes the same shape of time whoever asks; why a station
+        /// that showed the right one is turned away all the same is said in
+        /// the log, as for a key.
+        /// </remarks>
+        public ValueTask<Boolean> AuthorizeSessionBoundTotpAsync(String                 Username,
+                                                                 String                 Totp,
+                                                                 ReadOnlyMemory<Byte>   SessionId,
+                                                                 System.Net.IPAddress?  Client,
+                                                                 CancellationToken      CancellationToken = default)
+        {
+
+            // Bound to the session identifier, where a TLS connection has its
+            // exporter material: the same token, see SshSessionBoundTotp.
+            if (SessionId.IsEmpty ||
+                !logins.VerifyTOTP(Username, Totp, Bound: true, TLSExporterMaterial: SessionId.ToArray()))
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            if (WhyNotLetInWithTotp(Username, Saying: true) is not null ||
+                !logins.TryGet(Username, out var login) ||
+                login.TOTP is not TOTPSettings settings)
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            letInWith[Username] = settings;
+
+            return ValueTask.FromResult(true);
+
+        }
 
         #endregion
 
@@ -248,10 +329,67 @@ namespace cloud.charging.open.LocalController.OCPP
         public String? WhyNoLongerIn(SshSessionInfo Session)
         {
 
-            if (Session.PublicKeyBlob is not Byte[] key)
-                return $"the charging station '{Session.Username}' did not sign in with an SSH key";
+            if (Session.PublicKeyBlob is Byte[] key)
+                return WhyNotLetIn(Session.Username, key, Saying: false);
 
-            return WhyNotLetIn(Session.Username, key, Saying: false);
+            if (Session.Method != SshSessionBoundTotp.MethodName)
+                return $"the charging station '{Session.Username}' signed in with neither an SSH key nor a one-time password of its session";
+
+            if (WhyNotLetInWithTotp(Session.Username, Saying: false) is String why)
+                return why;
+
+            // Held to the secret it came with, as a key's session to its key.
+            if (!logins.TryGet(Session.Username, out var login) ||
+                !letInWith.TryGetValue(Session.Username, out var cameWith) ||
+                login.TOTP != cameWith)
+            {
+                return $"the TOTP secret the charging station '{Session.Username}' signed in with is no longer the one it has here - changed or taken away";
+            }
+
+            return null;
+
+        }
+
+        #endregion
+
+        #region (private) WhyNotLetInWithTotp(Id, Saying)
+
+        /// <summary>
+        /// Why the station may not sign in with a one-time password now, or
+        /// null where it may - the password itself aside, which is checked
+        /// where it is shown.
+        /// </summary>
+        private String? WhyNotLetInWithTotp(String   Id,
+                                            Boolean  Saying)
+        {
+
+            if (!served())
+                return "OCPP over SSH is switched off";
+
+            if (!logins.TryGet(Id, out var login))
+                return $"there is no charging station '{Id}' any more";
+
+            String? why = null;
+
+            if (!login.HasTOTP)
+                why = $"the charging station '{Id}' has no TOTP secret here any more";
+
+            else if (!login.Enabled)
+                why = $"the charging station '{Id}' is switched off here";
+
+            else if (logins.GroupOf(login) is not LoginGroup group)
+                why = $"the charging station '{Id}' belongs to the login group '{login.GroupId}', which this controller does not have";
+
+            else if (!group.Enabled)
+                why = $"the charging station '{Id}' is in the login group '{group.Id}', which is switched off";
+
+            else if (!group.Allows(AuthMethod.TOTP))
+                why = $"the charging station '{Id}' is in the login group '{group.Id}', which does not accept one-time passwords";
+
+            if (why is not null && Saying)
+                Say(Id, why, timeProvider.GetUtcNow());
+
+            return why;
 
         }
 
@@ -309,7 +447,7 @@ namespace cloud.charging.open.LocalController.OCPP
         #region (private) Say(Id, Why, Now)
 
         /// <summary>
-        /// Say why a station's key was refused - once a minute at most: an SSH
+        /// Say why a station was refused - once a minute at most: an SSH
         /// client asks with the same key more than once per sign-in, and a
         /// station tries again and again.
         /// </summary>

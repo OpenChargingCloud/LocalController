@@ -49,7 +49,7 @@ CSMS and the charging station port on top.
 | Certificate store | the TLS roots of the servers the controller connects to, and their certificates - certificates alone, no private key | `certificates:edit` |
 | Client identities | who the controller is as a client, each with its private key: the TLS identities its lines up to the CSMS hold up - brought with their key, or whose key is made here (tab **New key**) and waits for its certificate - and, under **SSH keys**, the keys an `ssh://` line signs in with beside the controller's own | `certificates:edit`; `certificates:run` to make a key and bring its certificate, and to make or remove an SSH key |
 | Charging stations | the server the charging stations connect to: its port, the security profiles it accepts, the names it is reachable as, what it logs, and whether they may connect over SSH as well | `stations:edit` |
-| Logins and groups | which charging stations may sign in, with what - a password, a one-time token, an SSH key - and what their group allows them | `stations:edit` |
+| Logins and groups | which charging stations may sign in, with what - a password, a one-time token (over SSH as well, bound to its session), an SSH key - and what their group allows them | `stations:edit` |
 | Server certificates | the keys this controller presents, and the certificates that answer them | `certificates:edit` |
 | Accepted chains | which certificate authorities a charging station may be vouched for by | `certificates:edit` |
 | State | nothing - it shows whether the line up to the CSMS stands and since when, which charging stations were seen when and over what, and the grid operator's limits in force | `state:read` |
@@ -205,6 +205,16 @@ command, no SFTP. A key taken away, a station or its group switched off, ends
 the session it opened at once. Which OCPP versions are offered is the
 WebSocket port's, unless `subprotocols` beside `enabled` says otherwise;
 `maxMessageSize` and `pingEverySeconds` there too wait for the next start.
+
+A station that has a TOTP secret here signs in without a key as well: with the
+SSH method `totp@open.charging.cloud`, the one-time token of that secret bound
+to the session identifier of the SSH connection it is sent in, so that it is
+good in that session and nowhere else (white paper "SSH Authentication
+Extensions for OCPP"). Its group has to accept one-time passwords (`totp`), as
+over the WebSocket port; what the station gets is what a key gets it, and a
+secret changed or taken away ends the session it opened. A one-time token that
+is not bound to the session is a password to an SSH server, and a password
+lets no charging station in.
 
 The whole way from both ends, step by step - the options of a key, the
 settings and what to look at when a station does not connect - is in

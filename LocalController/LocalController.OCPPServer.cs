@@ -733,6 +733,7 @@ namespace cloud.charging.open.LocalController
             }
 
             var stations = StationLogins.Logins.Count(login => login.Enabled && login.HasSSHKey);
+            var withTotp = StationLogins.Logins.Count(login => login.Enabled && login.HasTOTP);
 
             if (!SSHEnabled)
                 Log.Warning(
@@ -744,7 +745,7 @@ namespace cloud.charging.open.LocalController
             else
                 Log.Notice(
                     $"The charging stations may connect over SSH as well: {OCPPServerSSHURL}, subsystem {OCPPSshServer.OCPPSubsystem}, " +
-                    $"host key {SSHHostKey ?? "not known yet"} ({stations} station(s) with an SSH key).",
+                    $"host key {SSHHostKey ?? "not known yet"} ({stations} station(s) with an SSH key, {withTotp} with a TOTP secret).",
                     "ocpp", "station", "ssh"
                 );
 
