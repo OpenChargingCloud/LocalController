@@ -99,7 +99,7 @@ describe('the CSMS page', () => {
 
         const root = await opened();
 
-        assert.ok(root.querySelector('a[href$="/configuration/identities"]') !== null, 'the identity is not looked for on the Identities');
+        assert.ok(root.querySelector('a[href$="/configuration/client-identities"]') !== null, 'the identity is not looked for on the Client identities');
         assert.ok(root.querySelector('a[href$="/configuration/certificates"]') === null, 'the identity is looked for among the certificates, which keep no key');
 
     });

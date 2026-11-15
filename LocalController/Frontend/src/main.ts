@@ -100,7 +100,7 @@ startNode({
         // they are a tab of the connections, which is where they are used.
         '/configuration/authentication':            movedTo('/configuration/connections?tab=credentials', 'Connections'),
         // Where the keys were while they had a page of their own.
-        '/configuration/client-keys':               movedTo('/configuration/identities', 'Client identities'),
+        '/configuration/client-keys':               movedTo('/configuration/client-identities', 'Client identities'),
         '/configuration/ocpp-server':               ocppServerPage,
         '/configuration/ocpp-server/logins':        stationLoginsPage,
         '/configuration/ocpp-server/certificates':  serverCertificatesPage,

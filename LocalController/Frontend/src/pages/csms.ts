@@ -256,7 +256,7 @@ export const csmsPage: Page = {
                                  <span class="hint">
                                      What this controller presents in TLS, with its private key, on a line whose
                                      connection names no client key of its own: one of its
-                                     <a href="${toURL('/configuration/identities')}">identities</a>, imported on the
+                                     <a href="${toURL('/configuration/client-identities')}">identities</a>, imported on the
                                      certificate store's page. The CSMS knows it by the last segment of the address,
                                      as every OCPP client says who it is.
                                  </span>`}
