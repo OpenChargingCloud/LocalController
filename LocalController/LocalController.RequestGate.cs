@@ -201,6 +201,13 @@ namespace cloud.charging.open.LocalController
                            ? (false, onProbation)
                            : null;
 
+            // A line the CSMS dialled itself: this controller accepted it, and
+            // it is the CSMS's all the same - let in by what a connection of
+            // this controller names, and never on probation, which is for a
+            // key this controller learned of a server it dialled.
+            if (IsInbound(Connection))
+                return null;
+
             var station = Connection.NetworkingNodeIdOf();
 
             if (station is null || NetworkPath.Source != station.Value)
@@ -214,8 +221,11 @@ namespace cloud.charging.open.LocalController
 
             }
 
+            // Reached over this controller's own servers, and not the CSMS
+            // that dialled in over one of them: another station.
             if (Node.Routing.LookupNetworkingNode(Destination.Next, out var reachability) &&
-                reachability.Client is null)
+                reachability.Client is null &&
+                !LeadsToInbound(Destination.Next))
             {
 
                 var why = $"'{Action}' from the charging station '{station}' is not sent on to '{Destination.Next}': a charging station's requests go to the CSMS, not to another station of this local controller.";
@@ -247,18 +257,20 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
-        #region (private static) OnlyTheCSMS(Connection, Action, Payload)
+        #region (private) OnlyTheCSMS(Connection, Action, Payload)
 
         /// <summary>
         /// Why a request addressed to this controller itself is not processed: where it is one of the
         /// <see cref="CSMSOnlyActions"/> and came over a connection this controller accepted rather than
-        /// over the one it dialled - or null.
+        /// over the one it dialled - or null. A connection the CSMS dialled itself, written down as a
+        /// connection of this controller, is its line up as much as one the controller dialled.
         /// </summary>
-        private static String? OnlyTheCSMS(IMessageConnection  Connection,
-                                           String              Action,
-                                           JObject?            Payload)
+        private String? OnlyTheCSMS(IMessageConnection  Connection,
+                                    String              Action,
+                                    JObject?            Payload)
 
             => Connection.Role == ConnectionRole.Server &&
+               !IsInbound(Connection) &&
                CSMSOnlyActions.Contains(Action)
 
                    ? $"'{Action}' is for this local controller's CSMS to ask, over the controller's own connection to it - not for a charging station connected to the controller."

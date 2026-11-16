@@ -45,7 +45,7 @@ CSMS and the charging station port on top.
 | SSH server | whether the command line is served over SSH, on which port, and whether passwords open it - in effect at once; its host key, who is connected, the keys of the accounts and what it offers | `ssh:edit` |
 | Your account (the name at the foot of the menu) | your own name, e-mail address and how to reach you; your API keys and SSH keys - added, switched off and on, removed | your own account, whatever the role |
 | CSMS connection | whether the controller reports to a CSMS at all, and how its lines up are kept: pings, timeouts, the TLS identity a line holds up where it names none | `csms:edit` |
-| Connections | the lines up to the CSMS: where each dials, what it signs in with, how its server is believed, how it is doing - and a test of one; on its tab **Credentials**, the passwords and one-time tokens the connections sign in with | `csms:edit`, `csms:run` |
+| Connections | the lines up to the CSMS: where each dials - or, where **The other end dials** is ticked, where the CSMS dials the controller -, what it signs in with, how its server is believed, how it is doing - and a test of one; on its tab **Credentials**, the passwords and one-time tokens the connections sign in with | `csms:edit`, `csms:run` |
 | Certificate store | the TLS roots of the servers the controller connects to, and their certificates - certificates alone, no private key | `certificates:edit` |
 | Client identities | who the controller is as a client, each with its private key: the TLS identities its lines up to the CSMS hold up - brought with their key, or whose key is made here (tab **New key**) and waits for its certificate - and, under **SSH keys**, the keys an `ssh://` line signs in with beside the controller's own | `certificates:edit`; `certificates:run` to make a key and bring its certificate, and to make or remove an SSH key |
 | Charging stations | the server the charging stations connect to: its port, the security profiles it accepts, the names it is reachable as, what it logs, and whether they may connect over SSH as well | `stations:edit` |
@@ -188,6 +188,35 @@ on goes up to the CSMS, in the station's own name: a frame that names another
 sender is dropped, and one addressed to another station of the controller is
 refused. An answer the controller passes on goes to whoever asked, whatever
 the answer names.
+
+Where the controller cannot dial its CSMS - behind a firewall that lets nothing
+out, on a network only the back end reaches - the CSMS dials the controller.
+OCPP stays as it is; only who opens the WebSocket is the other way round. There
+is no port of its own for it: the CSMS comes in over the port of the charging
+stations. On the Connections page a connection is written down with **The other
+end dials** ticked: its URL is the one the CSMS dials -
+`wss://controller.example.org:9000/csms-01` - and the last part of it the name
+the CSMS comes under; the credentials it names are what the CSMS signs in with,
+a login of that name with a password (HTTP Basic) or a one-time token. "Connect
+by itself" is what lets it in: off, nothing comes in under its name, and one
+that is in is let go of. The page shows it as *waiting* until the CSMS dials
+and as *connected* from then on.
+
+At the door the name decides, before any credentials: whoever comes under the
+name of such a connection is let in as that or not at all - by what the
+connection names, on the security profile the port would be for a password -
+and a charging station's password opens nothing under it. So a name a charging
+station has cannot be given to a CSMS that dials. Once in, it is the line up of
+the controller as much as one the controller dialled: what the stations send on
+goes up over it, what it asks of a station goes down, what only a CSMS asks of
+the controller it may ask, and it is neither counted nor listed among the
+charging stations. A CSMS of the overlay network says so in the header of its
+dial, `X-OCPP-NetworkingMode: OverlayNetwork`, as the controller does where it
+dials; one that says nothing speaks the plain frame of OCPP, and what it sends
+is for the controller. All of it needs the station server switched on and the
+controller reporting to a CSMS at all (`"csms": { "enabled": true }`). Not
+there yet: a client certificate as what a CSMS that dials signs in with, and a
+one-time token bound to its TLS session.
 
 The charging stations may speak OCPP over SSH as well, where `ssh` in the
 `ocppServer` section says so - `"ssh": { "enabled": true }`, switched off

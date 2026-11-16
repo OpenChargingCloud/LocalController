@@ -132,6 +132,13 @@ namespace cloud.charging.open.LocalController
             Connections.KnownCertificateIds   = () => Certificates.ByKind(CertificateKind.TLSIdentity).Select(entry => entry.Id);
             Connections.OnNotice             += (level, message) => Log.Log(level, message, "ocpp", "connections");
 
+            // A back end that dials comes in over the port of the charging
+            // stations, under a name: one a charging station has is not free.
+            Connections.WhyInboundNameIsTaken = name => StationLogins?.TryGet(name, out _) == true
+                                                            ? $"'{name}' is a charging station of this local controller, and a back end that dials comes in over the " +
+                                                              "same port: under that name the two could not be told apart at the door. Give it another name."
+                                                            : null;
+
             // What a controller of before kept in a directory of its own:
             // its keys and their certificates, into the certificate store -
             // and its connections with them. Once, and before anything dials

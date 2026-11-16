@@ -36,6 +36,7 @@ using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.LocalController.OCPP;
 
 using OCPPWebSockets = cloud.charging.open.protocols.OCPP.WebSockets;
+using OCPPVersion    = cloud.charging.open.protocols.OCPP.Node.Connections.OCPPVersion;
 
 #endregion
 
@@ -62,6 +63,13 @@ namespace cloud.charging.open.LocalController
     /// whether a client certificate is asked for - is decided when the server
     /// is built, and changing it waits for the next start. Which of the two a
     /// change was is reported back rather than left to be discovered.
+    ///
+    /// <b>And the CSMS, where it is the one that dials.</b> A CSMS this
+    /// controller cannot dial dials the controller, on this same port: written
+    /// down as a connection the other end makes, let in under the name its URL
+    /// ends with by the credentials it names - and from then on the line up
+    /// of this controller, not a charging station of it. See
+    /// <see cref="ServeTheBackEndsThatDial"/> and <see cref="ValidateStation"/>.
     ///
     /// <b>And over SSH, where somebody switches it on.</b> The charging
     /// stations may speak OCPP over the SSH server of this controller as well,
@@ -584,6 +592,8 @@ namespace cloud.charging.open.LocalController
             if (settings.SSH?.Enabled == true)
                 ServeOCPPOverSSH();
 
+            ServeTheBackEndsThatDial();
+
             #region What is about to run out, now and every day after this
 
             CheckCertificates();
@@ -638,11 +648,52 @@ namespace cloud.charging.open.LocalController
 
             StopServingOCPPOverSSH("the station server stopped");
 
+            StopServingTheBackEndsThatDial("The station server of this local controller stopped.");
+
             await ocppWebSocketServer.Shutdown("The local controller is shutting down.");
 
             Log.Info("The charging station server has stopped listening.", "ocpp", "station");
 
         }
+
+        #endregion
+
+        #region (private) ServeTheBackEndsThatDial() / StopServingTheBackEndsThatDial(Why)
+
+        /// <summary>
+        /// Let in, over the station port, the back ends that dial this
+        /// controller: the connections the other end makes, where this
+        /// controller reports to a CSMS at all.
+        /// </summary>
+        /// <remarks>
+        /// The port is the charging stations' and stays theirs: who signs in
+        /// there is decided in <see cref="ValidateStation"/>, which asks first
+        /// whether somebody comes under the name of such a connection. Nothing
+        /// of it is the server's to know.
+        /// </remarks>
+        private void ServeTheBackEndsThatDial()
+        {
+
+            if (ocppWebSocketServer is null || !ocppServerStarted || csmsSettings.Enabled != true)
+                return;
+
+            ServeInbound(OCPPVersion.OCPP2_1, ocppWebSocketServer, SharedWithOthers: true);
+
+            var written = Connections.Connections.Count(connection => connection.Inbound);
+
+            if (written > 0)
+                Log.Notice($"{written} connection{(written == 1 ? "" : "s")} of this local controller {(written == 1 ? "is" : "are")} made by the other end: " +
+                           $"a CSMS dials {OCPPServerURL}<its name>, the port of the charging stations.",
+                           "ocpp", "csms");
+
+        }
+
+        /// <summary>
+        /// Let no back end in any more, and let go of those that are.
+        /// </summary>
+        private void StopServingTheBackEndsThatDial(String Why)
+
+            => StopServingInbound(OCPPVersion.OCPP2_1, Why);
 
         #endregion
 
@@ -849,6 +900,38 @@ namespace cloud.charging.open.LocalController
 
             var profiles  = ocppServerSettings.SecurityProfiles ?? OCPPServerConfiguration.DefaultSecurityProfiles;
             var from      = Connection.RemoteSocket.ToString();
+
+            #region A back end that dials: a connection the other end makes
+
+            // Whoever comes under the name of a connection the other end makes
+            // is let in as that or not at all, by what that connection names -
+            // before anything a charging station is asked, and whatever it
+            // shows besides: its CSMS, or a controller above this one, is no
+            // charging station of this controller. Held to the security
+            // profiles of this port all the same: a password over a port that
+            // may not take one is not taken from a CSMS either.
+            if (SignInInbound(OCPPVersion.OCPP2_1, Connection) is InboundSignIn backEnd)
+            {
+
+                var asProfile = (Byte) (ocppServerTLS ? 2 : 1);
+
+                if (!backEnd.LetIn)
+                    return Refuse(Connection, backEnd.Why);
+
+                if (!profiles.Contains(asProfile))
+                    return Refuse(Connection, $"'{backEnd.Name}' is a back end that dials this local controller, and signed in with {backEnd.Why} on " +
+                                              $"{(ocppServerTLS ? "an encrypted" : "an unencrypted")} port, which is security profile {asProfile}, not allowed here");
+
+                if (ocppServerSettings.Logging?.Authentication != false)
+                    Log.Info($"The back end '{backEnd.Name}' dialled this local controller from {from} and signed in with {backEnd.Why} (security profile {asProfile}" +
+                             $"{(ocppServerTLS ? "" : ", on an unencrypted port, so what it signed in with crossed the network in the clear")}).",
+                             "ocpp", "csms", "auth");
+
+                return Task.FromResult<HTTPResponse?>(null);
+
+            }
+
+            #endregion
 
             #region Security profile 3: it brought a certificate
 
@@ -1284,7 +1367,7 @@ namespace cloud.charging.open.LocalController
 
                 if (ocppServerSettings.Logging?.Connections != false)
                     Log.Notice(
-                        $"The charging station '{StationOn(connection)}' is connected from {connection.RemoteSocket}" +
+                        $"{WhoIsOn(connection)} is connected from {connection.RemoteSocket}" +
                         $" ({selectedSubprotocol ?? "no subprotocol"}).",
                         "ocpp", "station"
                     );
@@ -1297,7 +1380,7 @@ namespace cloud.charging.open.LocalController
 
                 if (ocppServerSettings.Logging?.Connections != false)
                     Log.Notice(
-                        $"The charging station '{StationOn(connection)}' went away ({statusCode}{(reason.IsNullOrEmpty() ? "" : $": {reason}")}).",
+                        $"{WhoIsOn(connection)} went away ({statusCode}{(reason.IsNullOrEmpty() ? "" : $": {reason}")}).",
                         "ocpp", "station"
                     );
 
@@ -1426,7 +1509,27 @@ namespace cloud.charging.open.LocalController
         /// </summary>
         private static String StationOn(WebSocketServerConnection Connection)
 
-            => Connection.TryGetCustomData(StationIdKey) as String ?? Connection.RemoteSocket.ToString();
+            => Connection.TryGetCustomData(StationIdKey) as String ??
+               (IsABackEnd(Connection)
+                    ? cloud.charging.open.protocols.WWCP.NetworkingNode.WWCPConnectionExtensions.NetworkingNodeIdOf(Connection)?.ToString()
+                    : null) ??
+               Connection.RemoteSocket.ToString();
+
+        /// <summary>
+        /// Whether a connection of the station port was let in as a back end
+        /// that dials this controller, and not as a charging station.
+        /// </summary>
+        private static Boolean IsABackEnd(WebSocketServerConnection Connection)
+
+            => Connection.TryGetCustomData(InboundConnectionKey) is String;
+
+        /// <summary>
+        /// What a connection of the station port is called in the log: the
+        /// charging station, or the back end that dialled.
+        /// </summary>
+        private static String WhoIsOn(WebSocketServerConnection Connection)
+
+            => $"The {(IsABackEnd(Connection) ? "back end" : "charging station")} '{StationOn(Connection)}'";
 
         /// <summary>
         /// The charging station the URL of an upgrade names: its last segment,
