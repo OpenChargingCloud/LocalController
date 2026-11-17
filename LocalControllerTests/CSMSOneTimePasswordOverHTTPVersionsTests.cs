@@ -68,8 +68,8 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// A controller standing in for the CSMS: TLS with a certificate of
-        /// the test's authority, security profile 2, and 'lc002' known by a
-        /// one-time token.
+        /// the test's authority, security profile 2, over HTTP/3 as well, and
+        /// 'lc002' known by a one-time token.
         /// </summary>
         [SetUp]
         public async Task StartACSMSThatKnowsATokenOfLC002()
@@ -109,7 +109,8 @@ namespace cloud.charging.open.LocalController.Tests
                                                   new JProperty("port",              csmsPort),
                                                   new JProperty("securityProfiles",  new JArray(2)),
                                                   new JProperty("reachableAs",       new JArray("127.0.0.1")),
-                                                  new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1"))
+                                                  new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1")),
+                                                  new JProperty("http3",             true)
                                               ))
                                           )
                                       );

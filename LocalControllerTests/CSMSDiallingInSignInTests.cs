@@ -129,7 +129,8 @@ namespace cloud.charging.open.LocalController.Tests
                                                      new JProperty("port",              port),
                                                      new JProperty("securityProfiles",  new JArray(2, 3)),
                                                      new JProperty("reachableAs",       new JArray("127.0.0.1")),
-                                                     new JProperty("subprotocols",      new JArray("ocpp2.1"))
+                                                     new JProperty("subprotocols",      new JArray("ocpp2.1")),
+                                                     new JProperty("http3",             true)
                                                  )),
                                                  new JProperty("csms",       new JObject(new JProperty("enabled", true)))
                                              )

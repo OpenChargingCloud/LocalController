@@ -226,7 +226,9 @@ credentials, never both - the page does not take a connection that names both:
 - **Credentials**: a login of that name with a password (HTTP Basic) or a
   one-time token. A token bound to the TLS session is checked with keying
   material only the TLS of HTTP/3 exports: such a CSMS is let in where it opens
-  its WebSocket over HTTP/3, and a raw token is not taken instead.
+  its WebSocket over HTTP/3 - which the station port takes where `ocppServer`
+  says `"http3": true`, and not where it says nothing -, and a raw token is
+  not taken instead.
 
 A client certificate is security profile 3, as it is for a charging station;
 it opens no charging station's path, and a key a station has opens nothing

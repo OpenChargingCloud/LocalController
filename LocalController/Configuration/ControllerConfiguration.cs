@@ -128,7 +128,7 @@ namespace cloud.charging.open.LocalController.Configuration
                     return false;
                 }
 
-                if (!OCPPServerConfiguration.TryParse(ocppServerJSON, out ocppServer, out Error))
+                if (!OCPPServerConfiguration.TryParseForOneServer(ocppServerJSON, out ocppServer, out Error))
                     return false;
 
             }
