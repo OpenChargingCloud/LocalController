@@ -496,6 +496,8 @@ namespace cloud.charging.open.LocalController.Tests
                                                                                                                    Does.Contain("csms:edit"));
                 Assert.That(Entry(policy, byTheNameServers, "OCPPServerController",      "Port").           Reason ?? "", Does.Contain("stations:edit"));
                 Assert.That(Entry(policy, byTheNameServers, "OCPPServerController",      "Port", "read").   Reason ?? "", Does.Contain("stations:read"));
+                Assert.That(Entry(policy, byTheNameServers, "StationLoginController",    "Password",    Instance: "cs001").Reason ?? "", Does.Contain("stations:edit"));
+                Assert.That(Entry(policy, byTheNameServers, "StationLoginGroupController", "AuthMethods", Instance: "default").Reason ?? "", Does.Contain("stations:edit"));
 
                 // A pin set is the signers of pin sets' to hold it to, not a role's:
                 // the policy lets it on to the line's own check, whoever signed it.

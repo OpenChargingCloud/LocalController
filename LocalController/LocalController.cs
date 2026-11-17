@@ -396,6 +396,11 @@ namespace cloud.charging.open.LocalController
             // write as the page does - "stations", see ResourceOfComponent.
             AttachOCPPServerController(lc01);
 
+            // StationLoginController and StationLoginGroupController: the
+            // charging stations that may sign in there and their groups, as
+            // the page lists them - "stations" as well.
+            AttachStationLoginControllers(lc01);
+
             // And the line upwards. Nothing is dialled yet either, for the
             // same reason: Start() does.
             BuildCSMSConnection(configuration.CSMS);

@@ -787,8 +787,9 @@ its component, and one the signers may not change or read is refused with
 (`DNSClientController`, `DNSServerController`) are `dns`, the time
 (`ClockCtrlr`, `NTPController` and theirs) `nts`, the keys of the station port
 (`EVQICtrlr`) `certificates`, the line up to the CSMS (`TLSClientController`)
-`csms`, the station port itself (`OCPPServerController`) `stations`, anything
-else `configuration`. The controller shows its name servers and its time over
+`csms`, the station port itself (`OCPPServerController`) and who may sign in
+there (`StationLoginController`, `StationLoginGroupController`) `stations`,
+anything else `configuration`. The controller shows its name servers and its time over
 OCPP as a charging station does, through WWCP_OCPP_Node's `DeviceModelBridge`,
 and its station port as the page **Charging stations** shows it: the section
 `ocppServer`, OCPP over SSH and the logging of the port, besides what the port
@@ -797,7 +798,15 @@ the next start - the address, the port, the OCPP and TLS versions, the
 connections, the pings and the revocation checks - is written down and
 answered `RebootRequired`, and switching the port off, HTTP/3 or OCPP over SSH
 takes effect once the answer is out, even where the CSMS came in on that very
-port. What the controller
+port. And the charging stations that may sign in, and their login groups, as
+the page lists them: an instance of `StationLoginController` for every station
+and of `StationLoginGroupController` for every group. A CSMS lists a station by
+giving it a first way in - a `Password`, a `TOTPSecret`, an `SSHKeyAdd` or
+`KeyPins` - makes a group by its `AuthMethods` and `SecurityProfiles`, and takes
+either away by setting `Listed` to false. The password and the shared secret of
+the one-time token are written and never read out, and the CSMS brings them
+itself: nothing is made up for it, as an answer to `SetVariables` carries no
+value back. What the controller
 forwards is not decided here: the station it goes to holds it against its own
 resources, and the controller's role is no power of attorney for it. The
 policy is off by default - the controller then behaves as before it had one.

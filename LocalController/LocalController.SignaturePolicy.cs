@@ -89,14 +89,18 @@ namespace cloud.charging.open.LocalController
         /// every station of the site trusts - a trust decision, as a change of
         /// the certificates is: "certificates". TLSClientController is the line
         /// up to the CSMS: "csms", as SetNetworkProfile. OCPPServerController is
-        /// the port the charging stations connect to: "stations", as its page.
+        /// the port the charging stations connect to, StationLoginController and
+        /// StationLoginGroupController who may sign in there: "stations", as
+        /// their page.
         /// </remarks>
         private static String ResourceOfComponent(String Component)
 
             => Component switch {
                    "EVQICtrlr"            => NodeResources.Certificates,
                    "TLSClientController"  => LocalControllerAccess.CSMS,
-                   "OCPPServerController" => LocalControllerAccess.Stations,
+                   "OCPPServerController"         => LocalControllerAccess.Stations,
+                   "StationLoginController"       => LocalControllerAccess.Stations,
+                   "StationLoginGroupController"  => LocalControllerAccess.Stations,
                    _                      => protocols.WWCP.SignaturePolicy.DefaultResourceOfComponent(Component)
                };
 
