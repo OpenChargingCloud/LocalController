@@ -196,11 +196,27 @@ is no port of its own for it: the CSMS comes in over the port of the charging
 stations. On the Connections page a connection is written down with **The other
 end dials** ticked: its URL is the one the CSMS dials -
 `wss://controller.example.org:9000/csms-01` - and the last part of it the name
-the CSMS comes under; the credentials it names are what the CSMS signs in with,
-a login of that name with a password (HTTP Basic) or a one-time token. "Connect
-by itself" is what lets it in: off, nothing comes in under its name, and one
-that is in is let go of. The page shows it as *waiting* until the CSMS dials
-and as *connected* from then on.
+the CSMS comes under. The CSMS signs in with a client certificate or with
+credentials, never both - the page does not take a connection that names both:
+
+- **A client certificate known by its key**: the connection's key pins name the
+  keys it may hold, and the key is the whole check - no chain, no name, no
+  validity period.
+- **A client certificate checked by its CA**: the connection holds it to roots
+  of the controller's certificate store - a group of roots, kept for `csms`
+  and marked for the group, or roots by their fingerprints -, and its common
+  name has to be the name the CSMS comes under. Nothing is learned on first use,
+  and a certificate that does not match is refused.
+- **Credentials**: a login of that name with a password (HTTP Basic) or a
+  one-time token. A token bound to the TLS session is checked with keying
+  material only the TLS of HTTP/3 exports: such a CSMS is let in where it opens
+  its WebSocket over HTTP/3, and a raw token is not taken instead.
+
+A client certificate is security profile 3, as it is for a charging station;
+it opens no charging station's path, and a key a station has opens nothing
+under the name of the CSMS. "Connect by itself" is what lets it in: off,
+nothing comes in under its name, and one that is in is let go of. The page
+shows it as *waiting* until the CSMS dials and as *connected* from then on.
 
 At the door the name decides, before any credentials: whoever comes under the
 name of such a connection is let in as that or not at all - by what the
@@ -214,9 +230,7 @@ charging stations. A CSMS of the overlay network says so in the header of its
 dial, `X-OCPP-NetworkingMode: OverlayNetwork`, as the controller does where it
 dials; one that says nothing speaks the plain frame of OCPP, and what it sends
 is for the controller. All of it needs the station server switched on and the
-controller reporting to a CSMS at all (`"csms": { "enabled": true }`). Not
-there yet: a client certificate as what a CSMS that dials signs in with, and a
-one-time token bound to its TLS session.
+controller reporting to a CSMS at all (`"csms": { "enabled": true }`).
 
 The charging stations may speak OCPP over SSH as well, where `ssh` in the
 `ocppServer` section says so - `"ssh": { "enabled": true }`, switched off

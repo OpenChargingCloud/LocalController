@@ -412,8 +412,11 @@ namespace cloud.charging.open.LocalController
             // station is the one the pin is listed for, and its path has to say
             // so - see ValidateStation. Told to the server as well, or it would
             // read the common name, register the connection under it, and turn
-            // a station whose certificate names another away with a 403.
-            ocppWebSocketServer.AcceptedByKeyPin = certificate => StationLogins.FindKeyPin(KeyPin.FromCertificate(certificate)) is not null;
+            // a station whose certificate names another away with a 403. The
+            // same for a back end that dials and signs in with a certificate
+            // its connection knows by its key.
+            ocppWebSocketServer.AcceptedByKeyPin = certificate => StationLogins.FindKeyPin(KeyPin.FromCertificate(certificate)) is not null ||
+                                                                  IsInboundKeyPinned(certificate);
 
             ocppWebSocketServer.OnValidateWebSocketConnection += ValidateStation;
 
@@ -909,22 +912,26 @@ namespace cloud.charging.open.LocalController
             // shows besides: its CSMS, or a controller above this one, is no
             // charging station of this controller. Held to the security
             // profiles of this port all the same: a password over a port that
-            // may not take one is not taken from a CSMS either.
+            // may not take one is not taken from a CSMS either, and a client
+            // certificate is security profile 3, as it is for a station.
             if (SignInInbound(OCPPVersion.OCPP2_1, Connection) is InboundSignIn backEnd)
             {
 
-                var asProfile = (Byte) (ocppServerTLS ? 2 : 1);
+                var asProfile = (Byte) (backEnd.ByCertificate ? 3 : ocppServerTLS ? 2 : 1);
 
                 if (!backEnd.LetIn)
                     return Refuse(Connection, backEnd.Why);
 
                 if (!profiles.Contains(asProfile))
-                    return Refuse(Connection, $"'{backEnd.Name}' is a back end that dials this local controller, and signed in with {backEnd.Why} on " +
-                                              $"{(ocppServerTLS ? "an encrypted" : "an unencrypted")} port, which is security profile {asProfile}, not allowed here");
+                    return Refuse(Connection, backEnd.ByCertificate
+                                                  ? $"'{backEnd.Name}' is a back end that dials this local controller, and signed in with {backEnd.Why}, " +
+                                                     "which is security profile 3, not allowed here"
+                                                  : $"'{backEnd.Name}' is a back end that dials this local controller, and signed in with {backEnd.Why} on " +
+                                                    $"{(ocppServerTLS ? "an encrypted" : "an unencrypted")} port, which is security profile {asProfile}, not allowed here");
 
                 if (ocppServerSettings.Logging?.Authentication != false)
                     Log.Info($"The back end '{backEnd.Name}' dialled this local controller from {from} and signed in with {backEnd.Why} (security profile {asProfile}" +
-                             $"{(ocppServerTLS ? "" : ", on an unencrypted port, so what it signed in with crossed the network in the clear")}).",
+                             $"{(ocppServerTLS || backEnd.ByCertificate ? "" : ", on an unencrypted port, so what it signed in with crossed the network in the clear")}).",
                              "ocpp", "csms", "auth");
 
                 return Task.FromResult<HTTPResponse?>(null);
@@ -987,6 +994,18 @@ namespace cloud.charging.open.LocalController
                     !ClientTrust.Validate(Connection.ClientCertificate, null, ocppServerSettings.CheckCertificateRevocation == true).Accepted)
                 {
                     return Refuse(Connection, $"its key pin {keyPin} is no charging station's any more, and its certificate does not lead to an accepted chain");
+                }
+
+                // Let through the handshake as the certificate of a back end that
+                // dials - by a key pin, or by the CA, of a connection the other
+                // end makes - and not under that connection's name: it skipped
+                // the accepted chains of the stations, and is held against them
+                // now, rather than read as one that passed them.
+                if (IsAnInboundCertificate(Connection.ClientCertificate) &&
+                    !ClientTrust.Validate(Connection.ClientCertificate, null, ocppServerSettings.CheckCertificateRevocation == true).Accepted)
+                {
+                    return Refuse(Connection, $"its certificate is the one a back end that dials signs in with, and it asked to connect as a charging station " +
+                                               "under a name that is no such back end's; as a station's it does not lead to an accepted chain");
                 }
 
                 #endregion
@@ -1266,6 +1285,17 @@ namespace cloud.charging.open.LocalController
 
             if (Certificate is null)
                 return new TLSValidationResult(IsValid: true, Errors: null, Warnings: null);
+
+            #region A back end that dials, by its client certificate
+
+            // The certificate of a connection the other end makes: by its key
+            // pin, or by its CA under the name it is issued to. One that claims
+            // to be such a certificate passes as that or not at all; one that
+            // claims nothing is a station's, and judged as before.
+            if (InboundCertificateCheck(Certificate, Chain, PolicyErrors) is TLSValidationResult backEnd)
+                return backEnd;
+
+            #endregion
 
             #region By its key pin
 

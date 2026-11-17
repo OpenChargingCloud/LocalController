@@ -1,0 +1,653 @@
+/*
+ * Copyright (c) 2014-2026 GraphDefined GmbH <achim.friedland@graphdefined.com>
+ * This file is part of LocalController <https://github.com/OpenChargingCloud/LocalController>
+ *
+ * Licensed under the Affero GPL license, Version 3.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.gnu.org/licenses/agpl.html
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#region Usings
+
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
+
+using Newtonsoft.Json.Linq;
+
+using NUnit.Framework;
+
+using org.GraphDefined.Vanaheimr.Hermod;
+
+using cloud.charging.open.protocols.WWCP.Node.Certificates;
+using cloud.charging.open.protocols.WWCP.Node.Configuration;
+using cloud.charging.open.protocols.WWCP.Node.TestKit;
+
+using cloud.charging.open.LocalController.OCPP;
+
+using OCPPConnections = cloud.charging.open.protocols.OCPP.Node.Connections;
+
+#endregion
+
+namespace cloud.charging.open.LocalController.Tests
+{
+
+    /// <summary>
+    /// A CSMS that dials the controller signs in with what is more than a
+    /// password: a client certificate - known by the key pin of its key, or by
+    /// the CA of the operator, issued to the name it comes under - or a
+    /// one-time password bound to the TLS session of its line, over HTTP/3.
+    /// </summary>
+    /// <remarks>
+    /// The CSMS is a second controller here, whose line up dials the first:
+    /// what it sends - a certificate with its chain, a bound one-time
+    /// password over HTTP/3 - is what OCPPDiallingNode sends, which the CSMS
+    /// that dials uses unchanged. The controller under test lets it in on the
+    /// port of its charging stations, by what its connection names.
+    /// </remarks>
+    public class CSMSDiallingInSignInTests
+    {
+
+        #region Data
+
+        private const           String    CSMSName          = "csms-01";
+        private const           String    TheSharedSecret   = "a-shared-secret-long-enough-for-ocpp";
+        private const           String    RootGroup         = "operator";
+
+        private static readonly TimeSpan  ThroughWithin     = TimeSpan.FromSeconds(15);
+
+        private TestCA           ca                 = default!;
+        private String           controllerDirectory = default!;
+        private String           csmsDirectory       = default!;
+        private LocalController  controller          = default!;
+        private LocalController? csms;
+        private UInt16           port;
+
+        private readonly ConcurrentQueue<String>  said  = [];
+        private readonly List<TestCA>             more  = [];
+
+        #endregion
+
+        #region SetUp / TearDown
+
+        /// <summary>
+        /// The controller under test: its station port encrypted with a
+        /// certificate of the site's authority, taking security profiles 2 and 3,
+        /// over HTTP/3 as well, and reporting to a CSMS it does not dial.
+        /// </summary>
+        [SetUp]
+        public async Task StartTheControllerTheCSMSDials()
+        {
+
+            said.Clear();
+
+            ca          = TestCA.Create($"Site CA {Guid.NewGuid()}", WithIntermediate: true);
+
+            controller  = await TestPorts.StartedOnFreshPorts(() => {
+
+                              TestControllers.Remove(controllerDirectory);
+
+                              port                 = APortFreeForBoth();
+
+                              controllerDirectory  = TestControllers.TemporaryDirectory("csms-dials-in");
+                              Directory.CreateDirectory(controllerDirectory);
+
+                              using (var store = new ServerCertificateStore(Path.Combine(controllerDirectory, ServerCertificateStore.DefaultDirectoryName)))
+                              {
+
+                                  Assert.That(store.TryCreateKey("127.0.0.1", [ "127.0.0.1" ], null, out _, out var csr, out var keyError),
+                                              Is.True, keyError);
+
+                                  using var certificate = ca.Sign(csr!, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+
+                                  Assert.That(store.TryAddCertificate(ca.ChainPEM(certificate), [ "127.0.0.1" ], out _, out _, out var addError),
+                                              Is.True, addError);
+
+                              }
+
+                              var made = TestControllers.New(
+                                             controllerDirectory,
+                                             new JObject(
+                                                 new JProperty("nts",        new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
+                                                 new JProperty("ocpp",       new JObject(new JProperty("nodeId", "lc001"))),
+                                                 new JProperty("ocppServer", new JObject(
+                                                     new JProperty("enabled",           true),
+                                                     new JProperty("address",           "127.0.0.1"),
+                                                     new JProperty("port",              port),
+                                                     new JProperty("securityProfiles",  new JArray(2, 3)),
+                                                     new JProperty("reachableAs",       new JArray("127.0.0.1")),
+                                                     new JProperty("subprotocols",      new JArray("ocpp2.1"))
+                                                 )),
+                                                 new JProperty("csms",       new JObject(new JProperty("enabled", true)))
+                                             )
+                                         );
+
+                              made.Log.OnLogged += entry => said.Enqueue(entry.Message);
+
+                              return made;
+
+                          });
+
+            csmsDirectory = TestControllers.TemporaryDirectory("csms-dials-in-csms");
+            Directory.CreateDirectory(csmsDirectory);
+
+        }
+
+        [TearDown]
+        public async Task StopThem()
+        {
+
+            if (csms is not null)
+                await csms.DisposeAsync();
+
+            await controller.DisposeAsync();
+
+            ca.Dispose();
+
+            foreach (var other in more)
+                other.Dispose();
+
+            more.Clear();
+
+            TestControllers.Remove(csmsDirectory);
+            TestControllers.Remove(controllerDirectory);
+
+        }
+
+        #endregion
+
+
+        #region (private static) APortFreeForBoth()
+
+        /// <summary>
+        /// A port free for UDP as for TCP: a WebSocket over HTTP/3 comes to the
+        /// UDP port of the number of the TCP one - see
+        /// CSMSOneTimePasswordOverHTTPVersionsTests.
+        /// </summary>
+        private static UInt16 APortFreeForBoth()
+        {
+
+            for (var attempt = 0; attempt < 200; attempt++)
+            {
+
+                var port = Random.Shared.Next(20000, 32768);
+
+                try
+                {
+
+                    using var udp4 = new System.Net.Sockets.UdpClient(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback,     port));
+                    using var udp6 = new System.Net.Sockets.UdpClient(new System.Net.IPEndPoint(System.Net.IPAddress.IPv6Loopback, port));
+
+                    var tcp4 = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
+                    tcp4.Start();
+                    tcp4.Stop();
+
+                    return (UInt16) port;
+
+                }
+                catch (System.Net.Sockets.SocketException)
+                { }
+
+            }
+
+            throw new InvalidOperationException("No port free for TCP and UDP was found.");
+
+        }
+
+        #endregion
+
+        #region (private) TheControllerTakesHTTP3()
+
+        private void TheControllerTakesHTTP3()
+        {
+
+            var server = controller.StationServer;
+
+            SpinWait.SpinUntil(() => server?.HTTP3Port is not null || server?.WhyNoHTTP3 is not null, TimeSpan.FromSeconds(10));
+
+            Assert.That(server?.HTTP3Port?.ToString(), Is.EqualTo(port.ToString()),
+                        "The controller takes no WebSockets over HTTP/3: " + server?.WhyNoHTTP3);
+
+        }
+
+        #endregion
+
+        #region (private) AnIdentity(Subject, Authority = null) / KeyPinOf(Identity)
+
+        /// <summary>
+        /// A TLS identity the given authority issued - the site's, where none
+        /// is given -, with its private key and the sub-CA it was issued by,
+        /// as the PKCS#12 an import takes.
+        /// </summary>
+        private Byte[] AnIdentity(String Subject, TestCA? Authority = null)
+        {
+
+            var authority     = Authority ?? ca;
+
+            using var key     = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            var request       = new CertificateRequest($"CN={Subject}", key, HashAlgorithmName.SHA256);
+
+            using var issued  = authority.Sign(request.CreateSigningRequestPem(),
+                                               DateTimeOffset.UtcNow.AddDays(-1),
+                                               DateTimeOffset.UtcNow.AddYears(1),
+                                               ClientAuthentication: true);
+
+            using var withKey = issued.CopyWithPrivateKey(key);
+
+            var collection    = new X509Certificate2Collection { withKey };
+
+            if (authority.Intermediate is not null)
+                collection.Add(authority.Intermediate);
+
+            return collection.Export(X509ContentType.Pkcs12)!;
+
+        }
+
+        /// <summary>
+        /// The key pin of the key of the first certificate of a PKCS#12.
+        /// </summary>
+        private static String KeyPinOf(Byte[] Identity)
+        {
+            var certificates = X509CertificateLoader.LoadPkcs12Collection(Identity, null);
+            try
+            {
+                return KeyPin.FromCertificate(certificates.First(one => one.HasPrivateKey)).ToHex();
+            }
+            finally
+            {
+                foreach (var one in certificates)
+                    one.Dispose();
+            }
+        }
+
+        #endregion
+
+        #region (private) TheCSMSIsWrittenDown(...)
+
+        /// <summary>
+        /// Write down, on the controller under test, the CSMS that dials it:
+        /// by the key pin of its client certificate, by the group of roots its
+        /// chain has to end at, or by credentials.
+        /// </summary>
+        private String TheCSMSIsWrittenDown(String?  KeyPins           = null,
+                                            Boolean  ByCA              = false,
+                                            Boolean  BoundOneTimePass  = false)
+        {
+
+            String? login = null;
+
+            if (BoundOneTimePass)
+                Assert.That(controller.Connections.TryAddAuthentication("What the CSMS signs in with", "totp", CSMSName, TheSharedSecret,
+                                                                        out login, out var loginError,
+                                                                        TLSChannelBinding: true),
+                            Is.True, loginError);
+
+            if (ByCA)
+                Assert.That(controller.Certificates.Import(Encoding.ASCII.GetBytes(ca.Certificate.ExportCertificatePem()),
+                                                           CertificateKind.TLSRoot, null, "The operator's authority",
+                                                           [ ServerPins.MarkOf(controller.ConnectionsCertificateUsage, RootGroup) ],
+                                                           out _, out var rootError),
+                            Is.True, rootError);
+
+            Assert.That(controller.Connections.TryAddConnection("The CSMS, dialling in", $"wss://127.0.0.1:{port}/{CSMSName}", "CSMS", true, login, null,
+                                                                out var id, out var error,
+                                                                ServerKeyPins:  KeyPins,
+                                                                Pins:           ByCA ? new OCPPConnections.ServerPinsChange(new ServerPins([], [], RootGroup: RootGroup)) : null,
+                                                                Inbound:        true),
+                        Is.True, error);
+
+            return id!;
+
+        }
+
+        #endregion
+
+        #region (private) ACSMSThatDials(...)
+
+        /// <summary>
+        /// The CSMS: a second controller whose line up dials the controller
+        /// under test on the given path, believing it by the site's authority -
+        /// with a client certificate, or with a one-time password over the
+        /// given version of HTTP.
+        /// </summary>
+        private async Task<LocalController> ACSMSThatDials(String   Path,
+                                                           Byte[]?  Identity     = null,
+                                                           Boolean  OneTimePass  = false,
+                                                           Boolean  Bound        = false,
+                                                           String?  HTTPVersion  = null)
+        {
+
+            var attempt = 0;
+
+            LocalController Made()
+            {
+
+                if (attempt++ > 0)
+                {
+                    TestControllers.Remove(csmsDirectory);
+                    csmsDirectory = TestControllers.TemporaryDirectory("csms-dials-in-csms");
+                    Directory.CreateDirectory(csmsDirectory);
+                }
+
+                var made = TestControllers.New(
+                               csmsDirectory,
+                               new JObject(
+                                   new JProperty("nts",  new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
+                                   new JProperty("ocpp", new JObject(new JProperty("nodeId", "csms")))
+                               )
+                           );
+
+                Assert.That(made.Certificates.Import(Encoding.ASCII.GetBytes(ca.Certificate.ExportCertificatePem()),
+                                                     CertificateKind.TLSRoot, null, "The site's authority", null,
+                                                     out _, out var rootError),
+                            Is.True, rootError);
+
+                String? handle = null;
+
+                if (Identity is not null)
+                {
+                    Assert.That(made.Certificates.Import(Identity, CertificateKind.TLSIdentity, null, "Towards the controller", null,
+                                                         out var entry, out var identityError),
+                                Is.True, identityError);
+                    handle = entry!.Id;
+                }
+
+                if (OneTimePass)
+                    Assert.That(made.TrySetUplinkTOTP(CSMSName, TheSharedSecret, null, null, null, null, out var tokenError, out _, Bound),
+                                Is.True, tokenError);
+
+                var uplink = new JObject(
+                                 new JProperty("enabled",                true),
+                                 new JProperty("url",                    $"wss://127.0.0.1:{port}/{Path}"),
+                                 new JProperty("securityProfile",        Identity is not null ? 3 : 2),
+                                 new JProperty("reconnectInitialDelay",  1),
+                                 new JProperty("reconnectMaxDelay",      2)
+                             );
+
+                if (handle is not null)
+                    uplink.Add("clientCertificate", handle);
+
+                if (HTTPVersion is not null)
+                    uplink.Add("httpVersion", HTTPVersion);
+
+                Assert.That(made.TryConfigureUplink(uplink, out var uplinkError), Is.True, uplinkError);
+
+                return made;
+
+            }
+
+            csms = await TestPorts.StartedOnFreshPorts(Made);
+
+            return csms;
+
+        }
+
+        #endregion
+
+        #region (private) TheStationsAreOfTheSiteToo()
+
+        /// <summary>
+        /// The charging stations of the controller hold certificates of the
+        /// site's authority as well: a certificate of the CSMS gets through the
+        /// handshake as a station's would, and what keeps it out of the name
+        /// of the CSMS is the CSMS's connection alone.
+        /// </summary>
+        private void TheStationsAreOfTheSiteToo()
+
+            => Assert.That(controller.ClientTrust.TryAdd(ca.ChainPEM(ca.Certificate), "The site's authority", out _, out _, out var trustError),
+                           Is.True, trustError);
+
+        #endregion
+
+        #region (private) StatusOf(Id) / Log / UntilConnected(Id) / NeverConnected(Id)
+
+        private String StatusOf(String Id)
+            => controller.ConnectionStates.TryGetValue(Id, out var state)
+                   ? OCPPConnections.ConnectionState.AsText(state.Status)
+                   : "nothing yet";
+
+        private String Log
+            => String.Join(Environment.NewLine, said);
+
+        private async Task<Boolean> UntilConnected(String Id)
+        {
+
+            var giveUp = DateTimeOffset.UtcNow + ThroughWithin;
+
+            while (DateTimeOffset.UtcNow < giveUp && !(StatusOf(Id) == "connected" && csms?.CSMSConnected == true))
+                await Task.Delay(100);
+
+            return StatusOf(Id) == "connected" && csms?.CSMSConnected == true;
+
+        }
+
+        /// <summary>
+        /// Whether the CSMS keeps trying for a few seconds and is never let in:
+        /// a refusal is not one moment, the line comes back every second.
+        /// </summary>
+        private async Task<Boolean> NeverConnected(String? Id)
+        {
+
+            var giveUp = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(6);
+
+            while (DateTimeOffset.UtcNow < giveUp)
+            {
+
+                if (csms?.CSMSConnected == true || (Id is not null && StatusOf(Id) == "connected"))
+                    return false;
+
+                await Task.Delay(100);
+
+            }
+
+            return true;
+
+        }
+
+        #endregion
+
+
+        #region ByTheKeyPinOfItsCertificate_ItIsLetIn_WhateverTheCertificateSays()
+
+        /// <summary>
+        /// Its connection pins the key of its client certificate: the key is
+        /// the whole check, and the name in the certificate is not the one it
+        /// comes under. Let in, as security profile 3, with no password at all.
+        /// </summary>
+        [Test]
+        public async Task ByTheKeyPinOfItsCertificate_ItIsLetIn_WhateverTheCertificateSays()
+        {
+
+            var identity  = AnIdentity("not-the-name-it-comes-under");
+            var id        = TheCSMSIsWrittenDown(KeyPins: KeyPinOf(identity));
+
+            await ACSMSThatDials(CSMSName, Identity: identity);
+
+            Assert.That(await UntilConnected(id), Is.True, $"{csms?.CSMSLastProblem}{Environment.NewLine}{Log}");
+
+            Assert.Multiple(() => {
+                Assert.That(Log, Does.Contain($"The back end '{CSMSName}' dialled this local controller"));
+                Assert.That(Log, Does.Contain("a client certificate, by its key pin"));
+                Assert.That(Log, Does.Contain("security profile 3"));
+                Assert.That(controller.StateJSON()["stations"]?["connected"]?.Value<Int32>(), Is.Zero, "the CSMS is counted among the charging stations");
+            });
+
+        }
+
+        #endregion
+
+        #region AnotherKey_IsNotLetIn()
+
+        /// <summary>
+        /// A certificate of the site's authority, which the stations are of as
+        /// well, with another key than the one the connection pins: through
+        /// the handshake as a station's, and not let in under the name of the
+        /// CSMS.
+        /// </summary>
+        [Test]
+        public async Task AnotherKey_IsNotLetIn()
+        {
+
+            TheStationsAreOfTheSiteToo();
+
+            var id = TheCSMSIsWrittenDown(KeyPins: KeyPinOf(AnIdentity(CSMSName)));
+
+            await ACSMSThatDials(CSMSName, Identity: AnIdentity(CSMSName));
+
+            Assert.That(await NeverConnected(id), Is.True, "a key the connection does not pin was let in");
+
+        }
+
+        #endregion
+
+        #region ByItsCA_IssuedToItsName_ItIsLetIn()
+
+        /// <summary>
+        /// Its connection holds its certificate to a group of roots of the
+        /// controller's store: issued by that authority, through a sub-CA it
+        /// sends beside it, to the name the CSMS comes under. Let in.
+        /// </summary>
+        [Test]
+        public async Task ByItsCA_IssuedToItsName_ItIsLetIn()
+        {
+
+            var id = TheCSMSIsWrittenDown(ByCA: true);
+
+            await ACSMSThatDials(CSMSName, Identity: AnIdentity(CSMSName));
+
+            Assert.That(await UntilConnected(id), Is.True, $"{csms?.CSMSLastProblem}{Environment.NewLine}{Log}");
+
+            Assert.Multiple(() => {
+                Assert.That(Log, Does.Contain($"a client certificate of 'The operator's authority', issued to '{CSMSName}'"));
+                Assert.That(Log, Does.Contain("security profile 3"));
+            });
+
+        }
+
+        #endregion
+
+        #region ByItsCA_IssuedToAnotherName_OrByAnotherCA_ItIsNotLetIn(IssuedTo)
+
+        /// <summary>
+        /// Issued by the right authority to another name, or by another
+        /// authority to its name: not let in.
+        /// </summary>
+        [TestCase("csms-02", false)]
+        [TestCase(CSMSName,  true)]
+        public async Task ByItsCA_IssuedToAnotherName_OrByAnotherCA_ItIsNotLetIn(String IssuedTo, Boolean ByAnotherCA)
+        {
+
+            var id = TheCSMSIsWrittenDown(ByCA: true);
+
+            TestCA? another = null;
+
+            if (ByAnotherCA)
+            {
+                another = TestCA.Create($"Another CA {Guid.NewGuid()}", WithIntermediate: true);
+                more.Add(another);
+            }
+
+            // Issued to another name by the site's authority, which the stations
+            // are of as well: through the handshake as a station's, and kept out
+            // of the name of the CSMS by the name it is issued to - at the door of
+            // the station server, which takes no certificate for a path that is
+            // not its common name (403), before the connection is asked.
+            else
+                TheStationsAreOfTheSiteToo();
+
+            await ACSMSThatDials(CSMSName, Identity: AnIdentity(IssuedTo, another));
+
+            Assert.That(await NeverConnected(id), Is.True, ByAnotherCA ? "another authority's certificate was let in" : "a certificate issued to another name was let in");
+
+        }
+
+        #endregion
+
+        #region ItsCertificate_OpensNoStationsPath()
+
+        /// <summary>
+        /// The certificate the CSMS signs in with gets through the handshake by
+        /// the key pin its connection names. On the path of a charging station
+        /// it is no station's: not held to the stations' authorities, it lets
+        /// nobody in.
+        /// </summary>
+        [Test]
+        public async Task ItsCertificate_OpensNoStationsPath()
+        {
+
+            var identity = AnIdentity("cs009");
+
+            TheCSMSIsWrittenDown(KeyPins: KeyPinOf(identity));
+
+            await ACSMSThatDials("cs009", Identity: identity);
+
+            Assert.Multiple(async () => {
+                Assert.That(await NeverConnected(null),  Is.True, "the certificate of the CSMS let a charging station in");
+                Assert.That(Log,                         Does.Contain("is the one a back end that dials signs in with"));
+            });
+
+        }
+
+        #endregion
+
+        #region AOneTimePasswordBoundToItsLine_LetsItInOverHTTP3()
+
+        /// <summary>
+        /// Its credentials bind the one-time password to the TLS session: over
+        /// HTTP/3, whose TLS exports what it is bound with, it is let in.
+        /// </summary>
+        [Test]
+        public async Task AOneTimePasswordBoundToItsLine_LetsItInOverHTTP3()
+        {
+
+            TheControllerTakesHTTP3();
+
+            var id = TheCSMSIsWrittenDown(BoundOneTimePass: true);
+
+            await ACSMSThatDials(CSMSName, OneTimePass: true, Bound: true, HTTPVersion: "3");
+
+            Assert.That(await UntilConnected(id), Is.True, $"{csms?.CSMSLastProblem}{Environment.NewLine}{Log}");
+
+            Assert.That(Log, Does.Contain("a one-time password bound to its TLS session (security profile 2"));
+
+        }
+
+        #endregion
+
+        #region AOneTimePasswordThatIsNotBound_IsNotLetIn_WhereTheBindingIsAsked()
+
+        /// <summary>
+        /// The same CSMS, its one-time password not bound: not let in, and the
+        /// log says what it has to do.
+        /// </summary>
+        [Test]
+        public async Task AOneTimePasswordThatIsNotBound_IsNotLetIn_WhereTheBindingIsAsked()
+        {
+
+            TheControllerTakesHTTP3();
+
+            var id = TheCSMSIsWrittenDown(BoundOneTimePass: true);
+
+            await ACSMSThatDials(CSMSName, OneTimePass: true, Bound: false, HTTPVersion: "3");
+
+            Assert.Multiple(async () => {
+                Assert.That(await NeverConnected(id),  Is.True, "a one-time password that is not bound was let in");
+                Assert.That(Log,                       Does.Contain("has to open its WebSocket over HTTP/3 and bind its one-time password"));
+            });
+
+        }
+
+        #endregion
+
+    }
+
+}
