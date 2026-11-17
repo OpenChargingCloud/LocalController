@@ -17,6 +17,7 @@
 
 #region Usings
 
+using cloud.charging.open.protocols.OCPP.Node;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 
@@ -125,7 +126,7 @@ namespace cloud.charging.open.LocalController
                           );
 
             keyPinning       = NewKeyPinning();
-            tlsClientSource  = NewTLSClientSource();
+            OCPPDialling.MakeTLSClientSource();
 
             // Which identities exist is the certificate store's business and
             // changes while this one is alive, so it is asked rather than
@@ -149,7 +150,7 @@ namespace cloud.charging.open.LocalController
             // After every change the store wrote: the device model first, so
             // that a connection dialled again has its TLSClientController by
             // then, and then what is dialled.
-            Connections.OnConnectionsChanged += () => FollowTLSClientComponents(lc01);
+            Connections.OnConnectionsChanged += () => OCPPDialling.FollowTLSClientComponents(lc01);
             Connections.OnConnectionsChanged += () => {
                                                     if (csmsSettings.Enabled == true && started)
                                                         _ = ApplyConnectionChanges();
@@ -459,17 +460,17 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
-        #region (protected override) ClientKeyPins()
+        #region (private) ClientKeyPinsWith(Pins) / ControllerDialling
 
         /// <summary>
         /// The key pins of the TLS client keys this controller presents:
         /// those of the certificates its connections name, and that of the
         /// TLS identity of its own certificate store, where one is chosen.
         /// </summary>
-        protected override IEnumerable<KeyPin> ClientKeyPins()
+        private IEnumerable<KeyPin> ClientKeyPinsWith(IEnumerable<KeyPin> Pins)
         {
 
-            var pins = base.ClientKeyPins().ToList();
+            var pins = Pins.ToList();
 
             if (csmsSettings.ChosenClientCertificate is not null &&
                 TryCSMSIdentity(out var identity, out _) &&
@@ -491,6 +492,25 @@ namespace cloud.charging.open.LocalController
             }
 
             return pins;
+
+        }
+
+        /// <summary>
+        /// OCPP as every serving node speaks it, with the key of the TLS
+        /// identity of this controller among the client keys it presents.
+        /// </summary>
+        protected override OCPPDialling NewOCPPDialling()
+
+            => new ControllerDialling(this);
+
+        private sealed class ControllerDialling(LocalController Controller)
+
+            : OCPPDialling(Controller, () => Controller.Node16, () => Controller.Node21)
+
+        {
+
+            public override IEnumerable<KeyPin> ClientKeyPins()
+                => Controller.ClientKeyPinsWith(base.ClientKeyPins());
 
         }
 

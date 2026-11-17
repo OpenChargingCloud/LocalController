@@ -183,7 +183,7 @@ namespace cloud.charging.open.LocalController
         /// <summary>
         /// Dial the CSMS: every connection of the store that dials by itself,
         /// peer by peer, the next one of a peer where one cannot be reached -
-        /// as a charging station dials, see OCPPDiallingNode.
+        /// as a charging station dials, see WWCPNode.Connections.cs.
         /// </summary>
         /// <remarks>
         /// Nothing here throws, and a connection that cannot be made is a
@@ -498,7 +498,7 @@ namespace cloud.charging.open.LocalController
             csmsSettings = wanted;
 
             // Over TLS or not any more: TLSClientController follows.
-            FollowTLSClientComponents(lc01);
+            OCPPDialling.FollowTLSClientComponents(lc01);
 
             return true;
 

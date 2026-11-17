@@ -86,7 +86,7 @@ configuration file - and looked after on the Connections pages or with
 `/api/v1/configuration/connections`, `.../authentications` and
 `.../sshKeys`; `GET /api/v1/status/connections` says how each is doing,
 and `POST .../connections/test` tries one without writing anything. It is the
-code a charging station dials with (WWCP_OCPP_Node's `OCPPDiallingNode`), so
+code a charging station dials with (WWCP_Node's `WWCPNode`, over OCPP by WWCP_OCPP_Node's `OCPPDialling`), so
 what a connection can do there it can do here. A controller may have several:
 each is dialled by itself, and the next endpoint of a peer where one cannot be
 reached. The oldest that dials by itself leads to the CSMS in charge, which is

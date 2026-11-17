@@ -38,7 +38,7 @@ using cloud.charging.open.LocalController.OCPP;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
 
 using OCPPConnections = cloud.charging.open.protocols.WWCP.Node.Connections;
-using OCPPDiallingNode = cloud.charging.open.protocols.OCPP.Node.OCPPDiallingNode;
+using WWCPNode = cloud.charging.open.protocols.WWCP.Node.WWCPNode;
 
 #endregion
 
@@ -54,7 +54,7 @@ namespace cloud.charging.open.LocalController.Tests
     /// <remarks>
     /// The CSMS is a second controller here, whose line up dials the first:
     /// what it sends - a certificate with its chain, a bound one-time
-    /// password over HTTP/3 - is what OCPPDiallingNode sends, which the CSMS
+    /// password over HTTP/3 - is what WWCPNode sends, which the CSMS
     /// that dials uses unchanged. The controller under test lets it in on the
     /// port of its charging stations, by what its connection names.
     /// </remarks>
@@ -329,7 +329,7 @@ namespace cloud.charging.open.LocalController.Tests
         /// </summary>
         /// <param name="NamedByItsConnection">
         /// Whether the client certificate is the identity its connection names,
-        /// as the Connections page sets it - shown as OCPPDiallingNode shows
+        /// as the Connections page sets it - shown as WWCPNode shows
         /// one -, rather than the one the section "csms" chose before there
         /// were connections.
         /// </param>
@@ -791,13 +791,13 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// Ask the controller what only the kind of node itself asks: the
-        /// protected methods of the node of connections.
+        /// protected methods of the node of connections, WWCPNode.
         /// </summary>
         private Object? AsTheNode(String Method, params Object[] Arguments)
 
-            => typeof(OCPPDiallingNode).GetMethods(BindingFlags.NonPublic | BindingFlags.Instance).
-                                        Single(method => method.Name == Method && method.GetParameters().Length == Arguments.Length).
-                                        Invoke(controller, Arguments);
+            => typeof(WWCPNode).GetMethods(BindingFlags.NonPublic | BindingFlags.Instance).
+                                Single(method => method.Name == Method && method.GetParameters().Length == Arguments.Length).
+                                Invoke(controller, Arguments);
 
         #endregion
 

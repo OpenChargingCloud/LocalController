@@ -136,7 +136,7 @@ namespace cloud.charging.open.LocalController
         /// The issuing CAs because a CSMS that dials this controller may sign
         /// in with a certificate of a CA below a root and show it alone: the
         /// CAs between are kept here to build its chain with, and are believed
-        /// nothing by themselves - see OCPPDiallingNode.Accepting.
+        /// nothing by themselves - see WWCPNode.Accepting.
         /// </remarks>
         public static readonly IReadOnlyList<CertificateKind>  CertificateKinds  = [
                                                                                      CertificateKind.TLSRoot,
