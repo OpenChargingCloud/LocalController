@@ -66,10 +66,12 @@ export interface Configuration extends NodeConfiguration {
 /**
  * What a certificate in this local controller's store is for. A TLS root is
  * believed of a server it connects to, an identity is what it presents in TLS
- * itself, and a server certificate is neither, but kept to recognise a server
- * by its fingerprint.
+ * itself - a server identity as its web interface -, and a server certificate
+ * is neither, but kept to recognise a server by its fingerprint; an issuing CA
+ * is neither either, but kept to build the chain of a certificate shown
+ * without it.
  */
-export type CertificateKind = 'tlsRoot' | 'tlsServer' | 'tlsIdentity';
+export type CertificateKind = 'tlsRoot' | 'tlsServer' | 'tlsIdentity' | 'tlsServerIdentity' | 'tlsIntermediate';
 
 /** One certificate in the store. */
 export type Certificate = NodeCertificate<CertificateKind>;

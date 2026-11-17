@@ -210,7 +210,7 @@ namespace cloud.charging.open.LocalController.Tests
                             "The menu offers no page of server identities, where the key of the web interface is made before HTTPS is switched on.");
 
                 Assert.That(controller.Certificates.Kinds,
-                            Is.EquivalentTo(new[] { CertificateKind.TLSRoot, CertificateKind.TLSServer, CertificateKind.TLSIdentity, CertificateKind.TLSServerIdentity }),
+                            Is.EquivalentTo(new[] { CertificateKind.TLSRoot, CertificateKind.TLSServer, CertificateKind.TLSIdentity, CertificateKind.TLSServerIdentity, CertificateKind.TLSIntermediate }),
                             "The node's store keeps other kinds of certificate than a controller has use for.");
 
                 Assert.That(controller.Certificates.RequestKinds,

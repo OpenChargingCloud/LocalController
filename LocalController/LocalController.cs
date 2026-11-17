@@ -133,12 +133,17 @@ namespace cloud.charging.open.LocalController
         /// "store" } }, or --https - is a TLS server identity: kept whether
         /// or not HTTPS is served yet, as a charging station keeps it, so
         /// that its key can be made here before anything is switched over.
+        /// The issuing CAs because a CSMS that dials this controller may sign
+        /// in with a certificate of a CA below a root and show it alone: the
+        /// CAs between are kept here to build its chain with, and are believed
+        /// nothing by themselves - see OCPPDiallingNode.Accepting.
         /// </remarks>
         public static readonly IReadOnlyList<CertificateKind>  CertificateKinds  = [
                                                                                      CertificateKind.TLSRoot,
                                                                                      CertificateKind.TLSServer,
                                                                                      CertificateKind.TLSIdentity,
-                                                                                     CertificateKind.TLSServerIdentity
+                                                                                     CertificateKind.TLSServerIdentity,
+                                                                                     CertificateKind.TLSIntermediate
                                                                                  ];
 
         /// <summary>

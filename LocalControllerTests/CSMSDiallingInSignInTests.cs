@@ -230,9 +230,10 @@ namespace cloud.charging.open.LocalController.Tests
         /// <summary>
         /// A TLS identity the given authority issued - the site's, where none
         /// is given -, with its private key and the sub-CA it was issued by,
-        /// as the PKCS#12 an import takes.
+        /// as the PKCS#12 an import takes: or with its key alone, where it is
+        /// not brought with its sub-CA.
         /// </summary>
-        private Byte[] AnIdentity(String Subject, TestCA? Authority = null)
+        private Byte[] AnIdentity(String Subject, TestCA? Authority = null, Boolean WithItsSubCA = true)
         {
 
             var authority     = Authority ?? ca;
@@ -249,7 +250,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var collection    = new X509Certificate2Collection { withKey };
 
-            if (authority.Intermediate is not null)
+            if (WithItsSubCA && authority.Intermediate is not null)
                 collection.Add(authority.Intermediate);
 
             return collection.Export(X509ContentType.Pkcs12)!;
@@ -280,11 +281,13 @@ namespace cloud.charging.open.LocalController.Tests
         /// <summary>
         /// Write down, on the controller under test, the CSMS that dials it:
         /// by the key pin of its client certificate, by the group of roots its
-        /// chain has to end at, or by credentials.
+        /// chain has to end at - the root of the given authority, the site's
+        /// where none is given -, or by credentials.
         /// </summary>
         private String TheCSMSIsWrittenDown(String?  KeyPins           = null,
                                             Boolean  ByCA              = false,
-                                            Boolean  BoundOneTimePass  = false)
+                                            Boolean  BoundOneTimePass  = false,
+                                            TestCA?  Operator          = null)
         {
 
             String? login = null;
@@ -296,7 +299,7 @@ namespace cloud.charging.open.LocalController.Tests
                             Is.True, loginError);
 
             if (ByCA)
-                Assert.That(controller.Certificates.Import(Encoding.ASCII.GetBytes(ca.Certificate.ExportCertificatePem()),
+                Assert.That(controller.Certificates.Import(Encoding.ASCII.GetBytes((Operator ?? ca).Certificate.ExportCertificatePem()),
                                                            CertificateKind.TLSRoot, null, "The operator's authority",
                                                            [ ServerPins.MarkOf(controller.ConnectionsCertificateUsage, RootGroup) ],
                                                            out _, out var rootError),
@@ -323,11 +326,18 @@ namespace cloud.charging.open.LocalController.Tests
         /// with a client certificate, or with a one-time password over the
         /// given version of HTTP.
         /// </summary>
+        /// <param name="NamedByItsConnection">
+        /// Whether the client certificate is the identity its connection names,
+        /// as the Connections page sets it - shown as OCPPDiallingNode shows
+        /// one -, rather than the one the section "csms" chose before there
+        /// were connections.
+        /// </param>
         private async Task<LocalController> ACSMSThatDials(String   Path,
-                                                           Byte[]?  Identity     = null,
-                                                           Boolean  OneTimePass  = false,
-                                                           Boolean  Bound        = false,
-                                                           String?  HTTPVersion  = null)
+                                                           Byte[]?  Identity              = null,
+                                                           Boolean  OneTimePass           = false,
+                                                           Boolean  Bound                 = false,
+                                                           String?  HTTPVersion           = null,
+                                                           Boolean  NamedByItsConnection  = false)
         {
 
             var attempt = 0;
@@ -377,13 +387,22 @@ namespace cloud.charging.open.LocalController.Tests
                                  new JProperty("reconnectMaxDelay",      2)
                              );
 
-                if (handle is not null)
+                if (handle is not null && !NamedByItsConnection)
                     uplink.Add("clientCertificate", handle);
 
                 if (HTTPVersion is not null)
                     uplink.Add("httpVersion", HTTPVersion);
 
                 Assert.That(made.TryConfigureUplink(uplink, out var uplinkError), Is.True, uplinkError);
+
+                if (handle is not null && NamedByItsConnection)
+                {
+                    var line = made.Uplink()!;
+                    Assert.That(made.Connections.TryUpdateConnection(line.Id, line.Description, line.URL.ToString(), line.ConnectionType.ToString(), line.AutoConnect,
+                                                                     line.AuthenticationId, handle,
+                                                                     out var lineError),
+                                Is.True, lineError);
+                }
 
                 return made;
 
@@ -855,6 +874,110 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.That(await NeverConnected(id), Is.True, "a certificate issued to another name was let in");
 
             Assert.That(Log, Does.Contain($"has to be issued to '{CSMSName}'"), Log);
+
+        }
+
+        #endregion
+
+        #region ThroughASubCA_WhichItSendsAlong_ItIsLetIn(NamedByItsConnection)
+
+        /// <summary>
+        /// Its certificate comes from a sub-CA of its operator's authority, and
+        /// the controller is told the root of that authority alone: the CSMS
+        /// sends the sub-CA beside its certificate, and the controller builds
+        /// the chain with it. Whether its identity is the one its connection
+        /// names, or the one the section "csms" chose.
+        /// </summary>
+        /// <remarks>
+        /// Another authority than the site's, which issued the certificate of
+        /// the station port: a sub-CA the controller's own TLS context put into
+        /// the Windows store of intermediates would let a chain through that
+        /// nobody sent. What a client sends along is put there on Windows as
+        /// well, by .NET, and taken out again with the authority - see
+        /// <see cref="TestCA"/>; there the test does not tell what was sent
+        /// from what is kept, as it does on Linux.
+        /// </remarks>
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task ThroughASubCA_WhichItSendsAlong_ItIsLetIn(Boolean NamedByItsConnection)
+        {
+
+            var operatorCA = TestCA.Create($"Operator CA {Guid.NewGuid()}", WithIntermediate: true);
+            more.Add(operatorCA);
+
+            var id = TheCSMSIsWrittenDown(ByCA: true, Operator: operatorCA);
+
+            await ACSMSThatDials(CSMSName, Identity: AnIdentity(CSMSName, operatorCA), NamedByItsConnection: NamedByItsConnection);
+
+            Assert.That(await UntilConnected(id), Is.True, $"{csms?.CSMSLastProblem}{Environment.NewLine}{Log}");
+
+            Assert.That(Log, Does.Contain($"a client certificate of 'The operator's authority', issued to '{CSMSName}'"));
+
+        }
+
+        #endregion
+
+        #region ThroughASubCA_WhichTheControllerKeeps_ItsCertificateAloneIsLetIn()
+
+        /// <summary>
+        /// The other way: the CSMS shows its certificate alone, and the
+        /// controller keeps the sub-CA between it and the root as an issuing
+        /// CA of its certificate store. Not let in while it does not, and let
+        /// in once it does - read at every handshake, without a restart.
+        /// </summary>
+        [Test]
+        public async Task ThroughASubCA_WhichTheControllerKeeps_ItsCertificateAloneIsLetIn()
+        {
+
+            var operatorCA = TestCA.Create($"Operator CA {Guid.NewGuid()}", WithIntermediate: true);
+            more.Add(operatorCA);
+
+            var id = TheCSMSIsWrittenDown(ByCA: true, Operator: operatorCA);
+
+            await ACSMSThatDials(CSMSName, Identity: AnIdentity(CSMSName, operatorCA, WithItsSubCA: false), NamedByItsConnection: true);
+
+            Assert.That(await NeverConnected(id), Is.True, "its certificate alone was let in, though nobody told the controller the sub-CA above it");
+
+            Assert.That(controller.Certificates.Import(Encoding.ASCII.GetBytes(operatorCA.Intermediate!.ExportCertificatePem()),
+                                                       CertificateKind.TLSIntermediate, null, "The operator's issuing CA", null,
+                                                       out _, out var keptError),
+                        Is.True, keptError);
+
+            Assert.That(await UntilConnected(id), Is.True, $"{csms?.CSMSLastProblem}{Environment.NewLine}{Log}");
+
+            Assert.That(Log, Does.Contain($"a client certificate of 'The operator's authority', issued to '{CSMSName}'"));
+
+        }
+
+        #endregion
+
+        #region AnIssuingCAOfAnotherAuthority_OpensNothing()
+
+        /// <summary>
+        /// A sub-CA the controller keeps is believed nothing by itself: a
+        /// certificate of it, of an authority the connection is not held to,
+        /// is not let in, whether it is shown alone or with the sub-CA.
+        /// </summary>
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AnIssuingCAOfAnotherAuthority_OpensNothing(Boolean SentAlong)
+        {
+
+            var operatorCA  = TestCA.Create($"Operator CA {Guid.NewGuid()}", WithIntermediate: true);
+            var another     = TestCA.Create($"Another CA {Guid.NewGuid()}",  WithIntermediate: true);
+            more.Add(operatorCA);
+            more.Add(another);
+
+            var id = TheCSMSIsWrittenDown(ByCA: true, Operator: operatorCA);
+
+            Assert.That(controller.Certificates.Import(Encoding.ASCII.GetBytes(another.Intermediate!.ExportCertificatePem()),
+                                                       CertificateKind.TLSIntermediate, null, "Somebody else's issuing CA", null,
+                                                       out _, out var keptError),
+                        Is.True, keptError);
+
+            await ACSMSThatDials(CSMSName, Identity: AnIdentity(CSMSName, another, WithItsSubCA: SentAlong), NamedByItsConnection: true);
+
+            Assert.That(await NeverConnected(id), Is.True, "a certificate of an issuing CA of another authority was let in");
 
         }
 

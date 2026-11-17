@@ -217,7 +217,12 @@ credentials, never both - the page does not take a connection that names both:
   of the controller's certificate store - a group of roots, kept for `csms`
   and marked for the group, or roots by their fingerprints -, and its common
   name has to be the name the CSMS comes under. Nothing is learned on first use,
-  and a certificate that does not match is refused.
+  and a certificate that does not match is refused. One issued by a CA below
+  such a root is checked either way: the CSMS sends the certificates of the CAs
+  between beside its own, or shows its certificate alone and the controller
+  knows them already - kept in its certificate store as issuing CAs
+  (`tlsIntermediate`), which help to build a chain and are believed nothing:
+  the chain still has to end at a root the connection is held to.
 - **Credentials**: a login of that name with a password (HTTP Basic) or a
   one-time token. A token bound to the TLS session is checked with keying
   material only the TLS of HTTP/3 exports: such a CSMS is let in where it opens
@@ -622,7 +627,16 @@ store - `"web": { "tls": { "certificate": "store" } }` in the configuration
 file, or `--https`. `--import-certificate tlsServerIdentity=<file>` puts one
 in with `--https` on the same command line; otherwise it goes in on the Server
 identities page - brought with its key, or its key made there before HTTPS is
-switched on - or by copying it in. The store lives in `certificates/` beside
+switched on - or by copying it in. And it keeps **issuing CAs**
+(`tlsIntermediate`): the CAs between a root and the certificate of a CSMS that
+dials the controller and shows its certificate alone, kept to build its chain
+with and believed nothing by themselves. An identity the controller signs in to
+its CSMS with that was brought with the certificates of the CAs above it sends
+them beside its own at every handshake; one brought alone is shown alone. On
+Windows, the TLS of the operating system sends along only what it finds in a
+certificate store: those certificates are written into the intermediate store
+of the user the controller runs as (`CurrentUser\CA`) when it dials, and stay
+there - believed for nothing, as it is no store of roots. The store lives in `certificates/` beside
 `configuration.json`, one file per certificate and an `index.json` saying what
 each is called, whether it is switched on and what it is kept for; a file
 copied into the right directory by hand is taken in at the next start. One

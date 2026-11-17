@@ -444,7 +444,10 @@ namespace cloud.charging.open.LocalController
 
                        TLSProtocols:                csmsSettings.MinimumTLSVersion,
                        RemoteCertificateValidator:  Validator,
-                       ClientCertificates:          Certificates,
+                       // Its certificate alone, or with the CAs between it and
+                       // its root that travel with it - see CertificateShownAlone.
+                       ClientCertificates:          CertificateShownAlone(Certificates),
+                       ClientCertificateChain:      CertificateWithItsChain(Certificates),
                        ClientCertificateContext:    identity,
 
                        DNSClient:                   DNSClient,
