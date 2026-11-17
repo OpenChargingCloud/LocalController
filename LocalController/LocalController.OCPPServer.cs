@@ -416,7 +416,7 @@ namespace cloud.charging.open.LocalController
             // same for a back end that dials and signs in with a certificate
             // its connection knows by its key.
             ocppWebSocketServer.AcceptedByKeyPin = certificate => StationLogins.FindKeyPin(KeyPin.FromCertificate(certificate)) is not null ||
-                                                                  IsInboundKeyPinned(certificate);
+                                                                  IsInboundKeyPinned(OCPPVersion.OCPP2_1, certificate);
 
             ocppWebSocketServer.OnValidateWebSocketConnection += ValidateStation;
 
@@ -1001,7 +1001,7 @@ namespace cloud.charging.open.LocalController
                 // end makes - and not under that connection's name: it skipped
                 // the accepted chains of the stations, and is held against them
                 // now, rather than read as one that passed them.
-                if (IsAnInboundCertificate(Connection.ClientCertificate) &&
+                if (IsAnInboundCertificate(OCPPVersion.OCPP2_1, Connection.ClientCertificate) &&
                     !ClientTrust.Validate(Connection.ClientCertificate, null, ocppServerSettings.CheckCertificateRevocation == true).Accepted)
                 {
                     return Refuse(Connection, $"its certificate is the one a back end that dials signs in with, and it asked to connect as a charging station " +
@@ -1292,7 +1292,7 @@ namespace cloud.charging.open.LocalController
             // pin, or by its CA under the name it is issued to. One that claims
             // to be such a certificate passes as that or not at all; one that
             // claims nothing is a station's, and judged as before.
-            if (InboundCertificateCheck(Certificate, Chain, PolicyErrors) is TLSValidationResult backEnd)
+            if (InboundCertificateCheck(OCPPVersion.OCPP2_1, Certificate, Chain, PolicyErrors) is TLSValidationResult backEnd)
                 return backEnd;
 
             #endregion

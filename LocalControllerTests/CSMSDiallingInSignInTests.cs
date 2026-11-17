@@ -18,6 +18,8 @@
 #region Usings
 
 using System.Collections.Concurrent;
+using System.Net.Security;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -35,6 +37,7 @@ using cloud.charging.open.protocols.WWCP.Node.TestKit;
 using cloud.charging.open.LocalController.OCPP;
 
 using OCPPConnections = cloud.charging.open.protocols.OCPP.Node.Connections;
+using OCPPDiallingNode = cloud.charging.open.protocols.OCPP.Node.OCPPDiallingNode;
 
 #endregion
 
@@ -639,12 +642,141 @@ namespace cloud.charging.open.LocalController.Tests
 
             await ACSMSThatDials(CSMSName, OneTimePass: true, Bound: false, HTTPVersion: "3");
 
-            Assert.Multiple(async () => {
-                Assert.That(await NeverConnected(id),  Is.True, "a one-time password that is not bound was let in");
-                Assert.That(Log,                       Does.Contain("has to open its WebSocket over HTTP/3 and bind its one-time password"));
+            var never = await NeverConnected(id);
+
+            Assert.Multiple(() => {
+                Assert.That(never,  Is.True, "a one-time password that is not bound was let in");
+                Assert.That(Log,    Does.Contain("has to open its WebSocket over HTTP/3 and bind its one-time password"));
             });
 
         }
+
+        #endregion
+
+        #region ABoundOneTimePassword_WhereNoHTTP3IsTaken_IsSaidToBeUnableToSignIn()
+
+        /// <summary>
+        /// Its one-time password bound to the TLS session, and the server it
+        /// dials taking no WebSockets over HTTP/3: what the connection says is
+        /// why it can not sign in, not that it is waited for.
+        /// </summary>
+        [Test]
+        public void ABoundOneTimePassword_WhereNoHTTP3IsTaken_IsSaidToBeUnableToSignIn()
+        {
+
+            controller.StationServer!.AcceptHTTP3 = false;
+
+            var id    = TheCSMSIsWrittenDown(BoundOneTimePass: true);
+
+            SpinWait.SpinUntil(() => controller.ConnectionStates.ContainsKey(id), ThroughWithin);
+
+            var said  = controller.ConnectionStates.TryGetValue(id, out var state) ? state.Said : "nothing";
+
+            Assert.That(said, Does.Contain($"'{CSMSName}' can not sign in").And.Contain("takes no WebSockets over HTTP/3"));
+
+        }
+
+        #endregion
+
+        #region ACertificateOfAConnectionOfAnotherVersion_IsNotClaimed_UnderTheSameName(ByCA)
+
+        /// <summary>
+        /// The name of an inbound connection is its own within its version of
+        /// OCPP alone: here a connection of OCPP 1.6 that signs in with a client
+        /// certificate, and one of OCPP 2.1 under the same name that signs in
+        /// with a password. At a handshake of the server of OCPP 2.1 nobody
+        /// claims the certificate of the first - or a server that takes the
+        /// common name of a certificate its handshake accepted for who it is,
+        /// one not shared with others, would let it in as the second without
+        /// its password. Over OCPP 1.6 it is claimed, and passes.
+        /// </summary>
+        /// <remarks>
+        /// The controller serves OCPP 2.1 alone; its station server is served
+        /// for OCPP 1.6 as well here, as a node that serves both would, and the
+        /// checks are asked as the validator of each server asks them.
+        /// </remarks>
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ACertificateOfAConnectionOfAnotherVersion_IsNotClaimed_UnderTheSameName(Boolean ByCA)
+        {
+
+            AsTheNode("ServeInbound", OCPPConnections.OCPPVersion.OCPP1_6, controller.StationServer!, true);
+
+            var identity = AnIdentity(CSMSName);
+
+            if (ByCA)
+                Assert.That(controller.Certificates.Import(Encoding.ASCII.GetBytes(ca.Certificate.ExportCertificatePem()),
+                                                           CertificateKind.TLSRoot, null, "The operator's authority",
+                                                           [ ServerPins.MarkOf(controller.ConnectionsCertificateUsage, RootGroup) ],
+                                                           out _, out var rootError),
+                            Is.True, rootError);
+
+            Assert.That(controller.Connections.TryAddConnection("The CSMS, dialling in over OCPP 1.6", $"wss://127.0.0.1:{port}/{CSMSName}", "CSMS", true, null, null,
+                                                                out _, out var error,
+                                                                OCPPVersion:    "1.6",
+                                                                ServerKeyPins:  ByCA ? null : KeyPinOf(identity),
+                                                                Pins:           ByCA ? new OCPPConnections.ServerPinsChange(new ServerPins([], [], RootGroup: RootGroup)) : null,
+                                                                Inbound:        true),
+                        Is.True, error);
+
+            Assert.That(controller.Connections.TryAddAuthentication("What the CSMS signs in with over OCPP 2.1", "basic", CSMSName, TheSharedSecret,
+                                                                    out var login, out var loginError),
+                        Is.True, loginError);
+
+            Assert.That(controller.Connections.TryAddConnection("The CSMS, dialling in over OCPP 2.1", $"wss://127.0.0.1:{port}/{CSMSName}", "CSMS", true, login, null,
+                                                                out _, out var error21,
+                                                                OCPPVersion:    "2.1",
+                                                                Inbound:        true),
+                        Is.True, error21);
+
+            var certificates = X509CertificateLoader.LoadPkcs12Collection(identity, null);
+
+            try
+            {
+
+                var certificate  = certificates.First(one => one.HasPrivateKey);
+
+                // The chain as a handshake builds it: with what was sent beside
+                // the certificate, and a root this machine does not trust.
+                using var chain  = new X509Chain();
+                chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+                chain.ChainPolicy.ExtraStore.AddRange(certificates.Where(one => !one.HasPrivateKey).ToArray());
+
+                var errors       = chain.Build(certificate) ? SslPolicyErrors.None : SslPolicyErrors.RemoteCertificateChainErrors;
+
+                var over21       = AsTheNode("InboundCertificateCheck", OCPPConnections.OCPPVersion.OCPP2_1, certificate, chain, errors);
+                var over16       = AsTheNode("InboundCertificateCheck", OCPPConnections.OCPPVersion.OCPP1_6, certificate, chain, errors);
+
+                Assert.Multiple(() => {
+
+                    Assert.That(over21,                                                                                          Is.Null,  "the certificate of the connection of OCPP 1.6 was claimed at a handshake of OCPP 2.1");
+                    Assert.That(AsTheNode("IsAnInboundCertificate", OCPPConnections.OCPPVersion.OCPP2_1, certificate),           Is.False, "an inbound certificate of OCPP 2.1");
+                    Assert.That(AsTheNode("IsInboundKeyPinned",     OCPPConnections.OCPPVersion.OCPP2_1, certificate),           Is.False, "key-pinned over OCPP 2.1");
+
+                    Assert.That(over16?.GetType().GetProperty("IsValid")?.GetValue(over16),                                      Is.True,  "over OCPP 1.6 it did not pass: " + over16);
+                    Assert.That(AsTheNode("IsAnInboundCertificate", OCPPConnections.OCPPVersion.OCPP1_6, certificate),           Is.True,  "not an inbound certificate of OCPP 1.6");
+                    Assert.That(AsTheNode("IsInboundKeyPinned",     OCPPConnections.OCPPVersion.OCPP1_6, certificate),           Is.EqualTo(!ByCA));
+
+                });
+
+            }
+            finally
+            {
+                foreach (var one in certificates)
+                    one.Dispose();
+            }
+
+        }
+
+        /// <summary>
+        /// Ask the controller what only the kind of node itself asks: the
+        /// protected methods of the node of connections.
+        /// </summary>
+        private Object? AsTheNode(String Method, params Object[] Arguments)
+
+            => typeof(OCPPDiallingNode).GetMethods(BindingFlags.NonPublic | BindingFlags.Instance).
+                                        Single(method => method.Name == Method && method.GetParameters().Length == Arguments.Length).
+                                        Invoke(controller, Arguments);
 
         #endregion
 
