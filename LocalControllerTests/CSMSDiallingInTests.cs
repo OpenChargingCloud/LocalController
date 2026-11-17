@@ -27,6 +27,7 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using cloud.charging.open.protocols.WWCP.NetworkingNode;
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 using OCPPConnections = cloud.charging.open.protocols.OCPP.Node.Connections;
@@ -696,6 +697,55 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.That(await again.Dial(Door(CSMSName), CSMSName, ItsPassword, Overlay), Is.EqualTo(HttpStatusCode.SwitchingProtocols), Log);
 
             await Until(() => StatusOf(id) == "connected", "The CSMS being connected again");
+
+        }
+
+        #endregion
+
+        #region ItsAnswers_FindItUnderTheIdentificationItAsksWith()
+
+        /// <summary>
+        /// The CSMS writes its own identification into what it asks, not the name it came under: the
+        /// answers of the controller and of a station behind it find it all the same, over the line it
+        /// dialled. Let go of, that identification leads nowhere any more.
+        /// </summary>
+        [Test]
+        public async Task ItsAnswers_FindItUnderTheIdentificationItAsksWith()
+        {
+
+            const String ItsIdentification = "csms-main";
+
+            var (csms, id) = await TheCSMSIsIn();
+
+            await using var theCSMS  = csms;
+            await using var cs002    = await AStation("cs002");
+
+            // In the frame of the overlay network, which the controller reads in either mode.
+            await csms.Send(new JArray(2, ControllerId, ItsIdentification, "csms-1", "GetVariables",        SomeVariable));
+            await csms.Send(new JArray(2, "cs002",      ItsIdentification, "csms-7", "GetLocalListVersion", new JObject()));
+
+            var fromTheController  = await csms.AnswerTo("csms-1");
+            var fromTheStation     = await csms.AnswerTo("csms-7");
+
+            Assert.Multiple(() => {
+
+                Assert.That(fromTheController?[0].Value<Int32>(),  Is.EqualTo(3), $"the controller's answer did not reach the CSMS: {fromTheController?.ToString(Formatting.None)}{Environment.NewLine}{Log}");
+                Assert.That(fromTheStation?   [0].Value<Int32>(),  Is.EqualTo(3), $"the station's answer did not reach the CSMS: {fromTheStation?.ToString(Formatting.None)}{Environment.NewLine}{Log}");
+
+                if (fromTheController is not null)
+                    Assert.That(PayloadOf(fromTheController)?["getVariableResult"], Is.Not.Null, fromTheController.ToString(Formatting.None));
+
+                if (fromTheStation is not null)
+                    Assert.That(PayloadOf(fromTheStation)?["answeredBy"]?.Value<String>(), Is.EqualTo("cs002"));
+
+            });
+
+            LetIn(id, false);
+
+            await Until(() => StatusOf(id) == "waiting" && !csms.IsOpen, "The CSMS being let go of");
+
+            Assert.That(Controller.Node.Routing.LookupNetworkingNode(NetworkingNode_Id.Parse(ItsIdentification), out _),
+                        Is.False, "the identification of the CSMS that was let go of still leads somewhere");
 
         }
 
