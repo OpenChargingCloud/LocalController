@@ -392,6 +392,10 @@ namespace cloud.charging.open.LocalController
             // Nothing listens yet: Start() does.
             BuildOCPPServer(configuration.OCPPServer);
 
+            // OCPPServerController: that server, for the CSMS to read and to
+            // write as the page does - "stations", see ResourceOfComponent.
+            AttachOCPPServerController(lc01);
+
             // And the line upwards. Nothing is dialled yet either, for the
             // same reason: Start() does.
             BuildCSMSConnection(configuration.CSMS);

@@ -459,8 +459,8 @@ namespace cloud.charging.open.LocalController.Tests
         /// role that may change the name servers and nothing else passes as a
         /// whole, and its device model decides each entry by the resource of its
         /// component - the name servers "dns", the time "nts", the keys of the
-        /// station port "certificates", the line up to the CSMS "csms", and
-        /// anything else "configuration".
+        /// station port "certificates", the line up to the CSMS "csms", the
+        /// station port itself "stations", and anything else "configuration".
         /// </summary>
         [Test]
         public void TheDeviceModelIsDecidedEntryByEntry()
@@ -494,6 +494,8 @@ namespace cloud.charging.open.LocalController.Tests
                                                                                                                    Does.Contain("certificates:read"));
                 Assert.That(Entry(policy, byTheNameServers, "TLSClientController",       "TrustOnFirstUse", Instance: "csms").Reason ?? "",
                                                                                                                    Does.Contain("csms:edit"));
+                Assert.That(Entry(policy, byTheNameServers, "OCPPServerController",      "Port").           Reason ?? "", Does.Contain("stations:edit"));
+                Assert.That(Entry(policy, byTheNameServers, "OCPPServerController",      "Port", "read").   Reason ?? "", Does.Contain("stations:read"));
 
                 // A pin set is the signers of pin sets' to hold it to, not a role's:
                 // the policy lets it on to the line's own check, whoever signed it.
@@ -505,6 +507,7 @@ namespace cloud.charging.open.LocalController.Tests
 
                 Assert.That(Entry(policy, byTheAdministrator, "EVQICtrlr",               "ActiveKeyPin", Instance: "TLSServer").Applied, Is.True);
                 Assert.That(Entry(policy, byTheAdministrator, "NTPController",           "ClientGroups").   Applied, Is.True);
+                Assert.That(Entry(policy, byTheAdministrator, "OCPPServerController",    "Port").           Applied, Is.True);
 
             });
 
