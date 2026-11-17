@@ -33,7 +33,7 @@ using org.GraphDefined.Vanaheimr.Hermod.WebSocket;
 using cloud.charging.open.protocols.WWCP;
 using cloud.charging.open.protocols.WWCP.NetworkingNode;
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
-using cloud.charging.open.protocols.OCPP.Node.KeyPins;
+using cloud.charging.open.protocols.WWCP.Node.KeyPins;
 
 using OCPPv2_1 = cloud.charging.open.protocols.OCPPv2_1;
 
@@ -443,7 +443,7 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(() => {
                 Assert.That(written.Value<String>("serverKeyPinState"),    Is.EqualTo("Learned"));
                 Assert.That(written.Value<String>("serverKeyPinLearned"),  Is.EqualTo(pin.ToHex()));
-                Assert.That(File.Exists(Path.Combine(controller.Connections.Path, cloud.charging.open.protocols.OCPP.Node.Connections.ConnectionStore.PeersFileName)),
+                Assert.That(File.Exists(Path.Combine(controller.Connections.Path, cloud.charging.open.protocols.WWCP.Node.Connections.ConnectionStore.PeersFileName)),
                                                                            Is.True, "nothing was written down");
                 Assert.That(controller.UplinkTrust()?.OnProbation, Is.True);
                 Assert.That(csms.SecurityEvents("KeyPinLearned").Single().Value<String>("techInfo"), Does.Contain(pin.ToString()));

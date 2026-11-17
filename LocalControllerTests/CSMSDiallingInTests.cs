@@ -30,7 +30,7 @@ using NUnit.Framework;
 using cloud.charging.open.protocols.WWCP.NetworkingNode;
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
-using OCPPConnections = cloud.charging.open.protocols.OCPP.Node.Connections;
+using OCPPConnections = cloud.charging.open.protocols.WWCP.Node.Connections;
 
 using static cloud.charging.open.LocalController.Tests.CSMSNetworkingModeTests;
 

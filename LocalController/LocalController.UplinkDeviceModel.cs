@@ -22,7 +22,7 @@ using org.GraphDefined.Vanaheimr.Hermod.Messaging;
 using cloud.charging.open.protocols.WWCP;
 using cloud.charging.open.protocols.WWCP.NetworkingNode;
 
-using cloud.charging.open.protocols.OCPP.Node.KeyPins;
+using cloud.charging.open.protocols.WWCP.Node.KeyPins;
 
 using OCPPv2_1    = cloud.charging.open.protocols.OCPPv2_1;
 using OCPPv2_1_LC = cloud.charging.open.protocols.OCPPv2_1.LocalController;

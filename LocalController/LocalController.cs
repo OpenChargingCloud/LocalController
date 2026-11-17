@@ -31,7 +31,7 @@ using OCPPv2_1_LC = cloud.charging.open.protocols.OCPPv2_1.LocalController;
 
 using cloud.charging.open.protocols.WWCP.Node;
 using cloud.charging.open.protocols.OCPP.Node;
-using cloud.charging.open.protocols.OCPP.Node.Connections;
+using cloud.charging.open.protocols.WWCP.Node.Connections;
 using cloud.charging.open.protocols.WWCP.Node.Logging;
 using cloud.charging.open.protocols.WWCP.Node.Certificates;
 using cloud.charging.open.protocols.WWCP.Node.Configuration;

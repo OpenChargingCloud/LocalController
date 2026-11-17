@@ -31,8 +31,8 @@ using cloud.charging.open.protocols.WWCP;
 using cloud.charging.open.protocols.WWCP.NetworkingNode;
 using cloud.charging.open.protocols.WWCP.Node.Certificates;
 
-using cloud.charging.open.protocols.OCPP.Node.Connections;
-using cloud.charging.open.protocols.OCPP.Node.KeyPins;
+using cloud.charging.open.protocols.WWCP.Node.Connections;
+using cloud.charging.open.protocols.WWCP.Node.KeyPins;
 
 using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.LocalController.OCPP;

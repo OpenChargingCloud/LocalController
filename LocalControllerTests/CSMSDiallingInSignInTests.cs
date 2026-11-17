@@ -37,7 +37,7 @@ using cloud.charging.open.protocols.WWCP.Node.TestKit;
 using cloud.charging.open.LocalController.OCPP;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
 
-using OCPPConnections = cloud.charging.open.protocols.OCPP.Node.Connections;
+using OCPPConnections = cloud.charging.open.protocols.WWCP.Node.Connections;
 using OCPPDiallingNode = cloud.charging.open.protocols.OCPP.Node.OCPPDiallingNode;
 
 #endregion

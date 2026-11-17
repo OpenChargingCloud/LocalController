@@ -483,7 +483,7 @@ namespace cloud.charging.open.LocalController.Tests
                 // And the file does carry it, or this controller could never
                 // sign in at all.
                 Assert.That(File.ReadAllText(Path.Combine(downstream.Connections.Path,
-                                                          cloud.charging.open.protocols.OCPP.Node.Connections.ConnectionStore.AuthenticationsFileName)),
+                                                          cloud.charging.open.protocols.WWCP.Node.Connections.ConnectionStore.AuthenticationsFileName)),
                                                                                      Does.Contain(ThePassword));
 
             });
