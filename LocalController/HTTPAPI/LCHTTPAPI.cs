@@ -43,7 +43,7 @@ namespace cloud.charging.open.LocalController
     /// have its own copy of all of them. What is left here is registered on
     /// top: see LCHTTPAPI.CSMS.cs and LCHTTPAPI.OCPPServer.cs.
     /// </remarks>
-    public partial class LCHTTPAPI : OCPPDiallingHTTPAPI
+    public partial class LCHTTPAPI : OCPPServingHTTPAPI
     {
 
         #region Properties
@@ -81,6 +81,7 @@ namespace cloud.charging.open.LocalController
                    ExtAPI,
                    Log,
                    LocalControllerAccess.CSMS,
+                   LocalControllerAccess.Stations,
                    APIPath,
                    Version ?? typeof(LCHTTPAPI).Assembly.GetName().Version?.ToString(3) ?? "0.0.0")
 
@@ -89,9 +90,9 @@ namespace cloud.charging.open.LocalController
             this.Controller = Controller;
 
             // The charging station server, its certificates, the chains it
-            // accepts and the stations that may sign in; see
-            // LCHTTPAPI.OCPPServer.cs. And the CSMS above; see LCHTTPAPI.CSMS.cs.
-            RegisterOCPPServerRoutes();
+            // accepts and the stations that may sign in are registered by
+            // OCPPServingHTTPAPI, under the resource "stations". The CSMS
+            // above; see LCHTTPAPI.CSMS.cs.
             RegisterCSMSRoutes();
 
             // And the grid operator's VTN; see LCHTTPAPI.OpenADR.cs.

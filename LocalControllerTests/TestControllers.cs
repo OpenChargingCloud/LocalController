@@ -26,6 +26,7 @@ using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.LocalController.Web;
+using cloud.charging.open.protocols.OCPP.Node.Serving;
 
 #endregion
 

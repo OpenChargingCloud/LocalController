@@ -22,6 +22,7 @@ using System.Diagnostics.CodeAnalysis;
 using Newtonsoft.Json.Linq;
 
 using cloud.charging.open.protocols.WWCP.Node.Configuration;
+using cloud.charging.open.protocols.OCPP.Node.Serving;
 
 #endregion
 

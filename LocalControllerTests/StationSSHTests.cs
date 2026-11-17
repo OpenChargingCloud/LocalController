@@ -33,8 +33,9 @@ using cloud.charging.open.protocols.WWCP.Node.SecureShell;
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 using cloud.charging.open.LocalController.OCPP;
+using cloud.charging.open.protocols.OCPP.Node.Serving;
 
-using LCConfig = cloud.charging.open.LocalController.Configuration;
+using LCConfig = cloud.charging.open.protocols.OCPP.Node.Serving;
 
 #endregion
 

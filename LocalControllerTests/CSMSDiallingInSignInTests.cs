@@ -35,6 +35,7 @@ using cloud.charging.open.protocols.WWCP.Node.Configuration;
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 using cloud.charging.open.LocalController.OCPP;
+using cloud.charging.open.protocols.OCPP.Node.Serving;
 
 using OCPPConnections = cloud.charging.open.protocols.OCPP.Node.Connections;
 using OCPPDiallingNode = cloud.charging.open.protocols.OCPP.Node.OCPPDiallingNode;
@@ -831,6 +832,29 @@ namespace cloud.charging.open.LocalController.Tests
                 foreach (var one in certificates)
                     one.Dispose();
             }
+
+        }
+
+        #endregion
+
+        #region ACertificateOfItsCA_IssuedToAnotherName_IsRefusedWithAHint()
+
+        /// <summary>
+        /// The stations are not of the CA of the CSMS: a certificate of that CA
+        /// issued to another name is refused at the handshake as a station's,
+        /// and the log says what it has to be issued to.
+        /// </summary>
+        [Test]
+        public async Task ACertificateOfItsCA_IssuedToAnotherName_IsRefusedWithAHint()
+        {
+
+            var id = TheCSMSIsWrittenDown(ByCA: true);
+
+            await ACSMSThatDials(CSMSName, Identity: AnIdentity("csms-02"));
+
+            Assert.That(await NeverConnected(id), Is.True, "a certificate issued to another name was let in");
+
+            Assert.That(Log, Does.Contain($"has to be issued to '{CSMSName}'"), Log);
 
         }
 

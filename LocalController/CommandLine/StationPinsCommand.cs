@@ -22,6 +22,7 @@ using org.GraphDefined.Vanaheimr.CLI;
 using cloud.charging.open.protocols.WWCP.Node.Web;
 
 using cloud.charging.open.LocalController.OCPP;
+using cloud.charging.open.protocols.OCPP.Node.Serving;
 
 #endregion
 

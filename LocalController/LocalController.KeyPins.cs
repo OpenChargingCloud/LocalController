@@ -27,6 +27,7 @@ using OCPPv2_1    = cloud.charging.open.protocols.OCPPv2_1;
 using OCPPv2_1_LC = cloud.charging.open.protocols.OCPPv2_1.LocalController;
 
 using cloud.charging.open.LocalController.OCPP;
+using cloud.charging.open.protocols.OCPP.Node.Serving;
 
 #endregion
 
@@ -92,7 +93,7 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
-        #region (private) ReportServerKeySwitch(Before, After)
+        #region (protected override) ServerKeySwitched(Before, After)
 
         /// <summary>
         /// Tell the CSMS that the station port presents another key now: the security event
@@ -104,8 +105,8 @@ namespace cloud.charging.open.LocalController
         /// held up by a CSMS that is slow to answer. Where the CSMS cannot be reached the event waits in
         /// the node's queue, and the log says what happened in any case.
         /// </remarks>
-        private void ReportServerKeySwitch(KeyPin?  Before,
-                                           KeyPin   After)
+        protected override void ServerKeySwitched(KeyPin?  Before,
+                                                  KeyPin   After)
         {
 
             var techInfo = $"TLS server key switched: key pin {Before?.ToHex() ?? "none"} -> {After.ToHex()}";

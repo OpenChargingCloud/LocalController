@@ -40,6 +40,7 @@ using cloud.charging.open.protocols.WWCP.Node.SecureShell;
 using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.LocalController.CommandLine;
 using cloud.charging.open.LocalController.Web;
+using cloud.charging.open.protocols.OCPP.Node.Serving;
 
 #endregion
 
@@ -70,7 +71,7 @@ namespace cloud.charging.open.LocalController
     /// vehicle and a charging station are built on as well. What is here is
     /// what makes one of those a local controller.
     /// </remarks>
-    public partial class LocalController : OCPPDiallingNode
+    public partial class LocalController : OCPPServingNode
     {
 
         #region Data
@@ -93,12 +94,6 @@ namespace cloud.charging.open.LocalController
         /// is handed to it rather than left to it.
         /// </remarks>
         public static new readonly IPPort  DefaultHTTPPort  = IPPort.Parse(2350);
-
-        /// <summary>
-        /// The port the charging stations connect to, as a sentence names it
-        /// when it cannot be had.
-        /// </summary>
-        public static readonly NodePort  StationServerPort  = new ("The charging station server");
 
         /// <summary>
         /// What a local controller is to the node below it: what it calls
@@ -524,17 +519,7 @@ namespace cloud.charging.open.LocalController
                          new JProperty("file",             ConfigFile.Path)
                      )));
 
-            json.Add(new JProperty("stationServer", new JObject(
-                         new JProperty("enabled",          OCPPServerEnabled),
-                         new JProperty("running",          ocppServerStarted),
-                         new JProperty("tls",              ocppServerTLS),
-                         new JProperty("url",              OCPPServerURL),
-                         new JProperty("sshUrl",           OCPPOverSSHServed ? OCPPServerSSHURL : null),
-                         new JProperty("securityProfiles", new JArray((ocppServerSettings.SecurityProfiles ?? []).Select(profile => (Int32) profile))),
-                         new JProperty("stationLogins",    StationLogins.EnabledCount),
-                         new JProperty("trustedChains",    ClientTrust.EnabledCount),
-                         new JProperty("certificates",     ServerCertificates.Entries.Count)
-                     )));
+            json.Add(new JProperty("stationServer", StationServerJSON()));
 
             return json;
 
@@ -585,47 +570,6 @@ namespace cloud.charging.open.LocalController
                    DNSClient:                      DNSClient
 
                );
-
-        #endregion
-
-        #region DisposeAsync()
-
-        /// <summary>
-        /// Stop listening, let go of what is this controller's own, and then
-        /// of the rest.
-        /// </summary>
-        /// <remarks>
-        /// Let go of even where stopping fails, which is thrown on afterwards:
-        /// a controller whose stop threw used to keep its certificate stores,
-        /// and everything of the node below, its log file among it.
-        /// </remarks>
-        public override async ValueTask DisposeAsync()
-        {
-
-            try
-            {
-
-                // Stopped here as well as below: the stores may not go before
-                // the station server that reads them has.
-                await Stop();
-
-            }
-            finally
-            {
-
-                try
-                {
-                    ServerCertificates?.Dispose();
-                    ClientTrust?       .Dispose();
-                }
-                finally
-                {
-                    await base.DisposeAsync();
-                }
-
-            }
-
-        }
 
         #endregion
 

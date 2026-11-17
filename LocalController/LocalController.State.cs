@@ -95,14 +95,14 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
-        #region (private) WireStationsSeen(Server)
+        #region (protected override) FollowStationsSeen(Server)
 
         /// <summary>
         /// Note the charging stations of the station port as they connect and
         /// as they speak: only those this controller let in, by the identity
         /// it let them in as.
         /// </summary>
-        private void WireStationsSeen(OCPPWebSockets.OCPPWebSocketServer Server)
+        protected override void FollowStationsSeen(OCPPWebSockets.OCPPWebSocketServer Server)
         {
 
             Server.OnNewWebSocketConnection += (timestamp, server, connection, sharedSubprotocols, selectedSubprotocol, eventTrackingId, cancellationToken) => {
@@ -126,7 +126,7 @@ namespace cloud.charging.open.LocalController
         /// Note the charging stations that come over SSH, as the networking
         /// node their HELLO was welcomed as.
         /// </summary>
-        private void WireStationsSeen(OCPPSshServer Server)
+        protected override void FollowStationsSeen(OCPPSshServer Server)
         {
 
             Server.OnNetworkingNodeConnectionAccepted += (timestamp, transport, connection, networkingNodeId, networkingMode, eventTrackingId, cancellationToken) => {
@@ -163,11 +163,11 @@ namespace cloud.charging.open.LocalController
 
             var connected  = new Dictionary<String, String>(StringComparer.Ordinal);
 
-            foreach (var connection in ocppWebSocketServer?.WebSocketConnections ?? [])
+            foreach (var connection in StationServer?.WebSocketConnections ?? [])
                 if (LetInAs(connection) is String station)
                     connected[station] = OverWebSocket;
 
-            foreach (var networkingNodeId in ocppSshServer?.ConnectedNetworkingNodeIds ?? [])
+            foreach (var networkingNodeId in StationSSHServer?.ConnectedNetworkingNodeIds ?? [])
                 connected[networkingNodeId.ToString()] = OverSSH;
 
             var stations   = stationsSeen.

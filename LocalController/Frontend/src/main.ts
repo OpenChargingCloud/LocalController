@@ -1,4 +1,4 @@
-﻿import './styles/app.scss';
+import './styles/app.scss';
 
 // FontAwesome: the CSS ends up in the extracted stylesheet, the referenced
 // font files become hashed assets below /assets/.
@@ -9,10 +9,10 @@ import { movedTo, nodeMenu, startNode } from '@node/start';
 
 import { configurationPage }      from './pages/configuration';
 import { csmsPage }               from './pages/csms';
-import { ocppServerPage }         from './pages/ocppServer';
-import { stationLoginsPage }      from './pages/stationLogins';
-import { serverCertificatesPage } from './pages/serverCertificates';
-import { clientTrustPage }        from './pages/clientTrust';
+import { ocppServerPage }         from '@ocpp/pages/ocppServer';
+import { stationLoginsPage }      from '@ocpp/pages/stationLogins';
+import { serverCertificatesPage } from '@ocpp/pages/serverCertificates';
+import { clientTrustPage }        from '@ocpp/pages/clientTrust';
 import { statePage }              from './pages/state';
 
 import { sshKeysSection }         from '@ocpp/sshKeys';

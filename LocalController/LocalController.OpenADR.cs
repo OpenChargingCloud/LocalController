@@ -28,6 +28,7 @@ using cloud.charging.open.protocols.OpenADRv3;
 
 using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.LocalController.OpenADR;
+using cloud.charging.open.protocols.OCPP.Node.Serving;
 
 using OpenADRValueType = cloud.charging.open.protocols.OpenADRv3.ValueType;
 

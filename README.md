@@ -92,6 +92,17 @@ each is dialled by itself, and the next endpoint of a peer where one cannot be
 reached. The oldest that dials by itself leads to the CSMS in charge, which is
 told what the controller says of its own accord.
 
+The station port is shared code as well: the `ocppServer` section, the
+charging stations that may sign in and their login groups
+(`ocpp-stations.json`), the chains a station's certificate may lead to
+(`ocpp-client-trust/`), the keys and certificates the port presents
+(`ocpp-server-keys/`), OCPP over SSH, a CSMS that dials on the same port,
+the routes below `/api/v1/configuration/ocpp-server` and the four pages that
+look after them are WWCP_OCPP_Node's `OCPPServingNode`, which a gateway has
+too. What is the controller's own is what it does with them: whether a CSMS
+may dial it at all (only while it reports to one), the CSMS it tells of a
+switch of the port's key, and the stations it counts on its State page.
+
 What the `csms` section of the configuration file says is what a connection
 does not: whether the controller reports to a CSMS at all (`enabled`), the
 frame its lines speak in (`networkingMode`), how they are kept
@@ -384,7 +395,10 @@ its clock, its configuration file, its start - is tested in WWCP_Node's own
 suite, once for every kind of node. The rest is what only a local controller
 does: its CSMS, its station port, its OCPP identity and its section of the
 file, the roles and resources that are its own, and the name its log files
-go by.
+go by. The stores of the station port - its logins and groups, its accepted
+chains, its keys and certificates, the section itself - are WWCP_OCPP_Node's,
+and so are their tests (`WWCP_OCPP_Node_Tests/Serving`); what a controller
+does with them is tested here.
 
 Each test gets a controller of its own, on a port from the kit's `TestPorts` -
 one the operating system has just confirmed is free, and that no other test

@@ -24,6 +24,7 @@ using NUnit.Framework;
 using cloud.charging.open.protocols.WWCP.Node.Configuration;
 
 using cloud.charging.open.LocalController.Configuration;
+using cloud.charging.open.protocols.OCPP.Node.Serving;
 
 #endregion
 

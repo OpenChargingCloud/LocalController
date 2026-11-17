@@ -30,6 +30,7 @@ using cloud.charging.open.protocols.OCPP.Node.Connections;
 using cloud.charging.open.protocols.OCPP.Node.KeyPins;
 
 using cloud.charging.open.LocalController.OCPP;
+using cloud.charging.open.protocols.OCPP.Node.Serving;
 
 #endregion
 

@@ -27,6 +27,7 @@ using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 using cloud.charging.open.LocalController.OCPP;
+using cloud.charging.open.protocols.OCPP.Node.Serving;
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 #endregion

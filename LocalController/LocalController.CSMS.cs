@@ -33,6 +33,7 @@ using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.protocols.WWCP.Node.Logging;
 using cloud.charging.open.protocols.WWCP.Node.Certificates;
 using cloud.charging.open.LocalController.OCPP;
+using cloud.charging.open.protocols.OCPP.Node.Serving;
 using cloud.charging.open.protocols.OCPP.Node.Connections;
 
 #endregion
