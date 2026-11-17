@@ -780,6 +780,62 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region AHint_SaysWhatACertificateOfItsCA_HasToBeIssuedTo(IssuedTo, ByAnotherCA, Hinted)
+
+        /// <summary>
+        /// A certificate refused at the station port that leads to the roots a
+        /// CSMS that dials is checked by, and is issued to another name than it
+        /// comes under: the hint for the log says what it has to be issued to.
+        /// Of another CA, or issued to the name of the CSMS - and so claimed by
+        /// its connection -, there is nothing to hint at.
+        /// </summary>
+        [TestCase("csms-02", false, true)]
+        [TestCase("csms-02", true,  false)]
+        [TestCase(CSMSName,  false, false)]
+        public void AHint_SaysWhatACertificateOfItsCA_HasToBeIssuedTo(String IssuedTo, Boolean ByAnotherCA, Boolean Hinted)
+        {
+
+            TheCSMSIsWrittenDown(ByCA: true);
+
+            TestCA? another = null;
+
+            if (ByAnotherCA)
+            {
+                another = TestCA.Create($"Another CA {Guid.NewGuid()}", WithIntermediate: true);
+                more.Add(another);
+            }
+
+            var certificates = X509CertificateLoader.LoadPkcs12Collection(AnIdentity(IssuedTo, another), null);
+
+            try
+            {
+
+                var certificate  = certificates.First(one => one.HasPrivateKey);
+
+                using var chain  = new X509Chain();
+                chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+                chain.ChainPolicy.ExtraStore.AddRange(certificates.Where(one => !one.HasPrivateKey).ToArray());
+
+                var errors       = chain.Build(certificate) ? SslPolicyErrors.None : SslPolicyErrors.RemoteCertificateChainErrors;
+
+                var hint         = AsTheNode("InboundCertificateHint", OCPPConnections.OCPPVersion.OCPP2_1, certificate, chain, errors) as String;
+
+                if (Hinted)
+                    Assert.That(hint, Does.Contain($"has to be issued to '{CSMSName}'").And.Contain($"issued to '{IssuedTo}'"));
+                else
+                    Assert.That(hint, Is.Null);
+
+            }
+            finally
+            {
+                foreach (var one in certificates)
+                    one.Dispose();
+            }
+
+        }
+
+        #endregion
+
     }
 
 }
