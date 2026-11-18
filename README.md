@@ -343,11 +343,15 @@ to the END line, to be saved as a file only you can read. See
 for signing in with it.
 
 Whoever signs in over SSH gets the command line of the local controller,
-whichever program runs it: the commands every node has, `syncNTS` among them,
-and beside them what only a local controller can be told - `stationKeys` and
-`openADR`. They are this library's, in `LocalController/CommandLine/`, and not
-the program's, so that a local controller in the test environment can be told
-the same as one run by LocalControllerCLI.
+whichever program runs it: the commands every node has, `syncNTS` among them;
+those of every node that serves charging stations, `stationKeys` and
+`stationPins`, which a gateway has as well; and beside them what only a local
+controller can be told - `openADR` and `serverKeys`. The last two are this
+library's, in `LocalController/CommandLine/`; `stationKeys` and `stationPins`
+are WWCP_OCPP_Node's, in `WWCP_OCPP_Node/Serving/CommandLine/`, and
+`ControllerCLI` registers them, asking for the controller's `stations` as its
+pages do. None of them is the program's, so that a local controller in the
+test environment can be told the same as one run by LocalControllerCLI.
 
 Port 2350 and not 2348: an OpenChargingCloud charging station uses 2348 and
 2349, and a controller and a station are often tried out on the same bench.

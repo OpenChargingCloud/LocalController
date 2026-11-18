@@ -22,6 +22,7 @@ using System.Reflection;
 using org.GraphDefined.Vanaheimr.CLI;
 
 using cloud.charging.open.protocols.WWCP.Node.CommandLine;
+using cloud.charging.open.protocols.OCPP.Node.Serving.CommandLine;
 
 using LC = cloud.charging.open.LocalController.LocalController;
 
@@ -39,6 +40,11 @@ namespace cloud.charging.open.LocalController.CommandLine
     /// a local controller can be told is a command built from a ControllerCLI
     /// in this assembly, found as the node's are: a new command is a new file
     /// and nothing else.
+    ///
+    /// The commands of every node that serves charging stations - stationKeys
+    /// and stationPins - are WWCP_OCPP_Node's, and the gateway has them too.
+    /// They are registered by hand, told the resource they ask for: the
+    /// controller's "stations", as on the pages of its charging stations.
     ///
     /// The local controller's, not a program's: the controller hands it to
     /// whoever signs in over SSH itself, so that every program that runs one -
@@ -88,6 +94,7 @@ namespace cloud.charging.open.LocalController.CommandLine
             this.Controller = Controller;
 
             RegisterCLIType(typeof(ControllerCLI));
+            RegisterStationCommands();
 
         }
 
@@ -111,8 +118,23 @@ namespace cloud.charging.open.LocalController.CommandLine
             this.Controller = Controller;
 
             RegisterCLIType(typeof(ControllerCLI));
+            RegisterStationCommands();
 
         }
+
+        #endregion
+
+        #region (private) RegisterStationCommands()
+
+        /// <summary>
+        /// The commands of every node that serves charging stations, asking
+        /// for the controller's "stations" - once, in this class alone, so
+        /// that a command line derived from it has them once as well.
+        /// </summary>
+        private void RegisterStationCommands()
+
+            => RegisterCommands(new StationKeysCommand(this, LocalControllerAccess.Stations),
+                                new StationPinsCommand(this, LocalControllerAccess.Stations));
 
         #endregion
 

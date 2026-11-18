@@ -34,6 +34,7 @@ using cloud.charging.open.protocols.WWCP.Node.TestKit;
 using cloud.charging.open.LocalController.CommandLine;
 using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
+using cloud.charging.open.protocols.OCPP.Node.Serving.CommandLine;
 
 #endregion
 
