@@ -27,7 +27,8 @@ using OCPPv2_1    = cloud.charging.open.protocols.OCPPv2_1;
 using OCPPv2_1_LC = cloud.charging.open.protocols.OCPPv2_1.LocalController;
 
 using cloud.charging.open.LocalController.OCPP;
-using cloud.charging.open.protocols.OCPP.Node.Serving;
+using cloud.charging.open.protocols.OCPP.Node;
+using cloud.charging.open.protocols.WWCP.Node.Certificates;
 
 #endregion
 
@@ -43,10 +44,11 @@ namespace cloud.charging.open.LocalController
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The keys are the store's, <see cref="ServerCertificates"/>, and nothing else's: every read asks
-    /// the store, so that a next key made or a switch done on the command line or the page is what the
-    /// CSMS reads next, and the CSMS's switch is the store's own <c>TrySwitchToNextKey</c>, the path of
-    /// "serverKeys switch" and of the page. The Device Model holds no value of its own.
+    /// The keys are the node's certificate store's - the server keys of the listener "ocpp", the
+    /// station port - and nothing else's: every read asks the store, so that a next key made or a
+    /// switch done on the command line, the page or the JSON API is what the CSMS reads next, and the
+    /// CSMS's switch is the store's own <c>TrySwitchToNextKey</c>, the path of "serverKeys switch" and
+    /// of /v1/certificates/serverKeys/ocpp/switch. The Device Model holds no value of its own.
     /// </para>
     /// <para>
     /// A switch takes effect at the next TLS handshake: the station port chooses what it presents per
@@ -131,7 +133,8 @@ namespace cloud.charging.open.LocalController
         #region (private class) TLSServerKeys
 
         /// <summary>
-        /// EVQICtrlr[TLSServer] over the station port's key store.
+        /// EVQICtrlr[TLSServer] over the server keys of the station port, the listener "ocpp" of the
+        /// node's certificate store.
         /// </summary>
         /// <remarks>
         /// Internal for the tests, which hand the switch a key pin that stopped being the next key's
@@ -157,29 +160,32 @@ namespace cloud.charging.open.LocalController
             /// <summary>
             /// What the store says now. The current key is the one presented at the next handshake, as
             /// "serverKeys" and the page show it - on a port that is not encrypted yet, the one presented
-            /// from the next start.
+            /// from the next start: the current server key of "ocpp", or where the port has none, the key
+            /// of whatever it presents - a certificate an authority issued for a key made here.
             /// </summary>
             public String? TLSServerValue(String Variable)
             {
 
-                ServerCertificateEntry? current  = null;
-                ServerCertificateEntry? next     = null;
-
                 // Read as one pair: a switch in between would otherwise show the
                 // key before it without the next one, or the new key twice.
-                if (Controller.ServerCertificates is ServerCertificateStore store)
-                    current = store.GetCurrentAndNextKey(out next);
+                var serverKey   = Controller.Certificates.GetCurrentAndNextKey(OCPPServingNode.StationListener, out var next);
+                var presented   = serverKey is null && Controller.StationCertificate is ListenerCertificate port
+                                      ? port.Entry
+                                      : null;
+
+                var current     = serverKey?.KeyPin    ?? presented?.KeyPin;
+                var createdAt   = serverKey?.CreatedAt ?? presented?.ImportedAt;
 
                 return Variable switch {
 
                            // The current key first (paper, 7.4).
-                           "KeyPins"        => String.Join(",", new[] { current?.KeyPin, next?.KeyPin }.
+                           "KeyPins"        => String.Join(",", new[] { current, next?.KeyPin }.
                                                                     OfType<KeyPin>().
                                                                     Select(keyPin => keyPin.ToHex())),
 
                            "NextKeyPin"     => next?.KeyPin.ToHex() ?? "",
-                           "KeyCreated"     => current?.CreatedAt.ToISO8601(),
-                           "ActiveKeyPin"   => current?.KeyPin.ToHex(),
+                           "KeyCreated"     => createdAt?.ToISO8601(),
+                           "ActiveKeyPin"   => current?.ToHex(),
 
                            // SslStream offers no raw public keys (paper, 10.3).
                            "RawPublicKeys"  => "Off",
@@ -212,18 +218,20 @@ namespace cloud.charging.open.LocalController
                 if (RefusalOfTheRight(Request) is OCPPv2_1.StatusInfo refusal)
                     return Task.FromResult<OCPPv2_1.StatusInfo?>(refusal);
 
-                if (Controller.ServerCertificates is not ServerCertificateStore store)
+                if (Controller.StationCertificate is null)
                     return Task.FromResult<OCPPv2_1.StatusInfo?>(
                                new OCPPv2_1.StatusInfo("InternalError", "This local controller has no station port, and no key to switch.")
                            );
 
+                var store = Controller.Certificates;
+
                 // Compared with the next key under the store's own lock: a switch
                 // made meanwhile, and a new next key after it, cannot turn this
                 // into a switch to a key the CSMS never handed out.
-                if (store.TrySwitchToNextKey(NextKeyPin, out var id, out var error, out var notSaved))
+                if (store.TrySwitchToNextKey(OCPPServingNode.StationListener, NextKeyPin, out var switched, out var error, out var notSaved))
                 {
 
-                    Controller.Log.Notice($"{who} switched the charging station server to the server key '{id}' over OCPP, " +
+                    Controller.Log.Notice($"{who} switched the charging station server to the server key '{switched.Id}' over OCPP, " +
                                           $"writing its key pin {NextKeyPin} into EVQICtrlr[TLSServer].ActiveKeyPin.",
                                           "ocpp", "tls", "csms");
 
@@ -231,7 +239,7 @@ namespace cloud.charging.open.LocalController
 
                 }
 
-                var current = store.GetCurrentAndNextKey(out var next);
+                var current = store.GetCurrentAndNextKey(OCPPServingNode.StationListener, out var next);
 
                 // Switched meanwhile, on the command line, on the page or by a
                 // request before this one: what was asked for is what is there.

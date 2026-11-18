@@ -23,6 +23,8 @@ using org.GraphDefined.Vanaheimr.Hermod;
 
 using cloud.charging.open.LocalController.OCPP;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
+using cloud.charging.open.protocols.WWCP.Node.Certificates;
+using cloud.charging.open.protocols.WWCP.Node.Logging;
 
 #endregion
 
@@ -73,26 +75,37 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// A key made here and a certificate for it, the way a controller comes
-        /// by one.
+        /// by one - in the node's store, told the station port's listener - and
+        /// what the station port would present out of it.
         /// </summary>
-        private ServerCertificateStore AStoreWith(TestCA CA, Boolean WithTheIntermediate)
+        private ListenerCertificate AStoreWith(TestCA CA, Boolean WithTheIntermediate)
         {
 
-            var store = new ServerCertificateStore(Path.Combine(directory, ServerCertificateStore.DefaultDirectoryName));
+            var store = StationPortCertificates.StoreIn(directory);
 
-            if (!store.TryCreateKey("127.0.0.1", [ "127.0.0.1" ], null, out _, out var csr, out var keyError))
+            if (!store.TryCreateRequest(CertificateKind.TLSServerIdentity,
+                                        "127.0.0.1",
+                                        null,
+                                        new CertificateRequestAsks(ReachableAs: [ "127.0.0.1" ]),
+                                        [ StationPortCertificates.Listener ],
+                                        null,
+                                        out var request,
+                                        out var keyError,
+                                        out _))
+            {
                 throw new InvalidOperationException($"The test's own key was refused: {keyError}");
+            }
 
-            using var certificate = CA.Sign(csr!, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+            using var certificate = CA.Sign(request.CSR, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
 
             var pem = WithTheIntermediate
                           ? CA.ChainPEM(certificate)
                           : TestCA.ToPEM(certificate);
 
-            if (!store.TryAddCertificate(pem, [ "127.0.0.1" ], out _, out _, out var addError))
+            if (!store.TryAnswerRequest(pem, out _, out _, out _, out var addError, out _))
                 throw new InvalidOperationException($"The test's own certificate was refused: {addError}");
 
-            return store;
+            return new ListenerCertificate(store, StationPortCertificates.Listener, new EventLog());
 
         }
 
@@ -112,7 +125,7 @@ namespace cloud.charging.open.LocalController.Tests
             using var ca     = TestCA.Create($"On its own {Guid.NewGuid()}", WithIntermediate: true);
             using var store  = AStoreWith(ca, WithTheIntermediate: false);
 
-            var chain = store.Select();
+            var chain = store.Current;
 
             Assert.That(chain, Is.Not.Null);
 

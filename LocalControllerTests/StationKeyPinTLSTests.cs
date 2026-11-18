@@ -95,11 +95,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             // Before the controller is built, because whether the port speaks
             // TLS at all is decided when it starts.
-            using (var store = new ServerCertificateStore(Path.Combine(directory, ServerCertificateStore.DefaultDirectoryName)))
-            {
-                Assert.That(store.TryCreateServerKey(null, AsNext: false, out _, out var pin, out var error), Is.True, error);
-                serverPin = pin!;
-            }
+            serverPin = StationPortCertificates.AServerKeyIn(directory).KeyPin;
 
             #endregion
 

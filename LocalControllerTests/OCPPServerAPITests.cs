@@ -44,9 +44,14 @@ namespace cloud.charging.open.LocalController.Tests
     public class OCPPServerAPITests : ALocalControllerTests
     {
 
-        #region (private) Root
+        #region (private) Root / Requests
 
-        private const String Root = "/api/v1/configuration/ocpp-server";
+        private const String Root      = "/api/v1/configuration/ocpp-server";
+
+        /// <summary>
+        /// Where a key for the station port is made and its certificate brought: the node's store.
+        /// </summary>
+        private const String Requests  = "/api/v1/certificates/requests";
 
         #endregion
 
@@ -89,7 +94,9 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var http = Anonymous();
 
-            foreach (var path in new[] { Root, $"{Root}/certificates", $"{Root}/trust", $"{Root}/stations" })
+            // What the station port presents is the node's store's, asked for
+            // where the node's routes are: its server keys among them.
+            foreach (var path in new[] { Root, "/api/v1/certificates/serverKeys/ocpp", $"{Root}/trust", $"{Root}/stations" })
             {
                 var response = await http.GetAsync(path);
                 Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized), $"GET {path}");
@@ -216,45 +223,43 @@ namespace cloud.charging.open.LocalController.Tests
 
         #region AKeyIsMadeAndItsRequestCanBeFetched()
 
+        /// <summary>
+        /// A key for the station port is made in the node's store - a TLS
+        /// server identity told "ocpp" - and its signing request comes back to
+        /// be handed to an authority; nothing anywhere hands out the key.
+        /// </summary>
         [Test]
         public async Task AKeyIsMadeAndItsRequestCanBeFetched()
         {
 
             using var http = await SignedIn();
 
-            await http.PutAsync(Root, JSONBody(new JProperty("reachableAs", new JArray("lc001.example.org"))));
-
             var made = await http.PostAsync(
-                                 $"{Root}/certificates",
+                                 Requests,
                                  JSONBody(
-                                     new JProperty("subject",    "lc001.example.org"),
-                                     new JProperty("algorithm",  "ecdsa-p256")
+                                     new JProperty("kind",         "tlsServerIdentity"),
+                                     new JProperty("subject",      "lc001.example.org"),
+                                     new JProperty("algorithm",    "ecdsa-p256"),
+                                     new JProperty("reachableAs",  new JArray("lc001.example.org")),
+                                     new JProperty("usages",       new JArray(StationPortCertificates.Listener))
                                  )
                              );
 
             Assert.That(made.StatusCode, Is.EqualTo(HttpStatusCode.Created), await made.Content.ReadAsStringAsync());
 
-            var answer = JObject.Parse(await made.Content.ReadAsStringAsync());
-            var id     = answer.Value<String>("id")!;
-
-            var csr    = await http.GetAsync($"{Root}/certificates/{id}/csr");
+            var answer  = JObject.Parse(await made.Content.ReadAsStringAsync());
+            var request = answer["request"]!;
 
             await Assert.MultipleAsync(async () => {
 
-                Assert.That(answer.Value<String>("csr"), Does.StartWith("-----BEGIN CERTIFICATE REQUEST-----"));
-
-                Assert.That(csr.IsSuccessStatusCode,                     Is.True);
-                Assert.That(await csr.Content.ReadAsStringAsync(),        Does.StartWith("-----BEGIN CERTIFICATE REQUEST-----"));
-
-                // A file to save, named after the key.
-                Assert.That(csr.Content.Headers.ContentDisposition?.DispositionType,  Is.EqualTo("attachment"));
-                Assert.That(csr.Content.Headers.ContentDisposition?.FileName?.Trim('"'), Is.EqualTo($"{id}.csr.pem"));
+                Assert.That(request.Value<String>("csr"),                     Does.StartWith("-----BEGIN CERTIFICATE REQUEST-----"));
+                Assert.That(request["usages"]!.Values<String>(),               Is.EqualTo(new[] { StationPortCertificates.Listener }));
 
                 // And nothing anywhere hands out the private key.
-                var listed = await GetJSON(http, $"{Root}/certificates");
+                var listed = await GetJSON(http, "/api/v1/certificates");
 
-                Assert.That(listed.ToString(),                            Does.Not.Contain("PRIVATE KEY"));
-                Assert.That(listed.Value<Boolean>("canImportPrivateKeys"), Is.False);
+                Assert.That(answer.ToString(),                                 Does.Not.Contain("PRIVATE KEY"));
+                Assert.That(listed.ToString(),                                 Does.Not.Contain("PRIVATE KEY"));
 
             });
 
@@ -271,8 +276,10 @@ namespace cloud.charging.open.LocalController.Tests
             using var http = await SignedIn();
 
             var made = await http.PostAsync(
-                                 $"{Root}/certificates",
-                                 JSONBody(new JProperty("algorithm", "ecdsa-p256"))
+                                 Requests,
+                                 JSONBody(new JProperty("kind",       "tlsServerIdentity"),
+                                          new JProperty("subject",    "lc001.example.org"),
+                                          new JProperty("algorithm",  "ecdsa-p256"))
                              );
 
             await Assert.MultipleAsync(async () => {
@@ -286,36 +293,33 @@ namespace cloud.charging.open.LocalController.Tests
 
         #region ACertificateForAnotherKeySaysWhoseItIs()
 
+        /// <summary>
+        /// Two keys wait for their certificate; the one that answers the first
+        /// is taken in under the first, by its public key - the second still
+        /// waits.
+        /// </summary>
         [Test]
         public async Task ACertificateForAnotherKeySaysWhoseItIs()
         {
 
             using var http = await SignedIn();
 
-            await http.PutAsync(Root, JSONBody(new JProperty("reachableAs", new JArray("lc001.example.org"))));
-
-            var first  = JObject.Parse(await (await http.PostAsync($"{Root}/certificates",
-                             JSONBody(new JProperty("algorithm", "ecdsa-p256")))).Content.ReadAsStringAsync());
-
-            var second = JObject.Parse(await (await http.PostAsync($"{Root}/certificates",
-                             JSONBody(new JProperty("algorithm", "ecdsa-p256")))).Content.ReadAsStringAsync());
+            var first  = (await MadeAKey(http))["request"]!;
+            var second = (await MadeAKey(http))["request"]!;
 
             using var ca = TestCA.Create("Test CA");
 
-            // A certificate that answers the first request, uploaded to the
-            // second row.
             using var certificate = ca.Sign(first.Value<String>("csr")!,
                                             DateTimeOffset.UtcNow.AddDays(-1),
                                             DateTimeOffset.UtcNow.AddYears(1));
 
-            var response = await http.PutAsync(
-                                     $"{Root}/certificates/{second.Value<String>("id")}",
-                                     JSONBody(new JProperty("pem", ca.ChainPEM(certificate)))
-                                 );
+            var response = await http.PostAsync($"{Requests}/answer", JSONBody(new JProperty("pem", ca.ChainPEM(certificate))));
+            var answer   = JObject.Parse(await response.Content.ReadAsStringAsync());
 
-            await Assert.MultipleAsync(async () => {
-                Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
-                Assert.That(await response.Content.ReadAsStringAsync(), Does.Contain(first.Value<String>("id")!));
+            Assert.Multiple(() => {
+                Assert.That(response.StatusCode,                                Is.EqualTo(HttpStatusCode.OK), answer.ToString());
+                Assert.That(answer.Value<String>("requestId"),                  Is.EqualTo(first.Value<String>("id")));
+                Assert.That(Controller.Certificates.Request(second.Value<String>("id")), Is.Not.Null, "the second key took the certificate of the first");
             });
 
         }
@@ -324,38 +328,60 @@ namespace cloud.charging.open.LocalController.Tests
 
         #region ACertificateIsTakenInAndShowsUpOnThePage()
 
+        /// <summary>
+        /// The certificate that answers the station port's key is a TLS server
+        /// identity told "ocpp", in force - and what the port presents.
+        /// </summary>
         [Test]
         public async Task ACertificateIsTakenInAndShowsUpOnThePage()
         {
 
             using var http = await SignedIn();
 
-            await http.PutAsync(Root, JSONBody(new JProperty("reachableAs", new JArray("lc001.example.org"))));
-
-            var made = JObject.Parse(await (await http.PostAsync($"{Root}/certificates",
-                           JSONBody(new JProperty("algorithm", "ecdsa-p256")))).Content.ReadAsStringAsync());
+            var made = (await MadeAKey(http))["request"]!;
 
             using var ca          = TestCA.Create("Test CA");
             using var certificate = ca.Sign(made.Value<String>("csr")!,
                                             DateTimeOffset.UtcNow.AddDays(-1),
                                             DateTimeOffset.UtcNow.AddYears(1));
 
-            var response = await http.PutAsync(
-                                     $"{Root}/certificates/{made.Value<String>("id")}",
-                                     JSONBody(new JProperty("pem", ca.ChainPEM(certificate)))
-                                 );
+            var response = await http.PostAsync($"{Requests}/answer", JSONBody(new JProperty("pem", ca.ChainPEM(certificate))));
 
             Assert.That(response.IsSuccessStatusCode, Is.True, await response.Content.ReadAsStringAsync());
 
-            var listed = await GetJSON(http, $"{Root}/certificates");
-            var entry  = listed["entries"]?[0];
+            var entry  = JObject.Parse(await response.Content.ReadAsStringAsync())["entry"];
+            var server = await GetJSON(http, Root);
 
             Assert.Multiple(() => {
-                Assert.That(entry?.Value<Boolean>("hasCertificate"),                 Is.True);
-                Assert.That(entry?["certificate"]?.Value<String>("state"),           Is.EqualTo("valid"));
-                Assert.That(entry?["certificate"]?["subjectAltNames"]?.Values<String>(),
-                            Does.Contain("lc001.example.org"));
+                Assert.That(entry?.Value<String>("kind"),                        Is.EqualTo("tlsServerIdentity"));
+                Assert.That(entry?.Value<Boolean>("usable"),                     Is.True);
+                Assert.That(entry?["usages"]?.Values<String>(),                  Is.EqualTo(new[] { StationPortCertificates.Listener }));
+                Assert.That(server["state"]?.Value<Boolean>("hasCertificate"),   Is.True);
+                Assert.That(Controller.StationCertificate.Entry?.Id,            Is.EqualTo(entry?.Value<String>("id")));
             });
+
+        }
+
+        /// <summary>
+        /// A key for the station port, made over the node's JSON API.
+        /// </summary>
+        private static async Task<JObject> MadeAKey(HttpClient HTTP)
+        {
+
+            var made = await HTTP.PostAsync(
+                                 Requests,
+                                 JSONBody(new JProperty("kind",         "tlsServerIdentity"),
+                                          new JProperty("subject",      "lc001.example.org"),
+                                          new JProperty("algorithm",    "ecdsa-p256"),
+                                          new JProperty("reachableAs",  new JArray("lc001.example.org")),
+                                          new JProperty("usages",       new JArray(StationPortCertificates.Listener)))
+                             );
+
+            var answer = JObject.Parse(await made.Content.ReadAsStringAsync());
+
+            Assert.That(made.StatusCode, Is.EqualTo(HttpStatusCode.Created), answer.ToString());
+
+            return answer;
 
         }
 
@@ -607,15 +633,13 @@ namespace cloud.charging.open.LocalController.Tests
         #region AChangeOfTheServerItsFilesCannotTakeIsAServerError(Change)
 
         /// <summary>
-        /// A change of the charging station server, of its keys and
-        /// certificates or of the chains it accepts that is fine in itself, and
-        /// that the files it is kept in cannot be written with, is answered 500
-        /// with why - and changes nothing, now or when the store is read again.
-        /// It was a 400, as if something had been wrong with it.
+        /// A change of the charging station server or of the chains it accepts
+        /// that is fine in itself, and that the files it is kept in cannot be
+        /// written with, is answered 500 with why - and changes nothing, now or
+        /// when the store is read again. It was a 400, as if something had been
+        /// wrong with it.
         /// </summary>
         [TestCase("PUT ocpp-server")]
-        [TestCase("POST certificates")]
-        [TestCase("PUT certificates/{id}")]
         [TestCase("POST trust")]
         [TestCase("PUT trust/{id}, name")]
         [TestCase("PUT trust/{id}, enabled")]
@@ -627,28 +651,9 @@ namespace cloud.charging.open.LocalController.Tests
 
             // What makes each change a fine one: a name this controller is
             // reached as, and for the changes of something that is there, a
-            // key with its signing request or a chain accepted.
+            // chain accepted.
             var reachable   = await http.PutAsync(Root, JSONBody(new JProperty("reachableAs", new JArray("lc001.example.org"))));
             Assert.That(reachable.IsSuccessStatusCode, Is.True, await reachable.Content.ReadAsStringAsync());
-
-            var keyId       = "";
-            var signed      = "";
-
-            if (Change == "PUT certificates/{id}")
-            {
-
-                var made    = JObject.Parse(await (await http.PostAsync($"{Root}/certificates",
-                                  JSONBody(new JProperty("algorithm", "ecdsa-p256")))).Content.ReadAsStringAsync());
-
-                keyId       = made.Value<String>("id")!;
-
-                using var certificate = ca.Sign(made.Value<String>("csr")!,
-                                                DateTimeOffset.UtcNow.AddDays(-1),
-                                                DateTimeOffset.UtcNow.AddYears(1));
-
-                signed      = ca.ChainPEM(certificate);
-
-            }
 
             // The handle the store gives a chain: its anchor's, and so known
             // before it is there.
@@ -675,18 +680,6 @@ namespace cloud.charging.open.LocalController.Tests
                     System.IO.Directory.CreateDirectory(Controller.ConfigFile.Path + ".tmp");
                     break;
 
-                // Where the keys would go is a file.
-                case "POST certificates":
-                    if (System.IO.Directory.Exists(Controller.ServerCertificates.Path))
-                        System.IO.Directory.Delete(Controller.ServerCertificates.Path);
-                    await File.WriteAllTextAsync(Controller.ServerCertificates.Path, "");
-                    break;
-
-                // Where the certificate would go is a directory.
-                case "PUT certificates/{id}":
-                    System.IO.Directory.CreateDirectory(Path.Combine(Controller.ServerCertificates.Path, $"{keyId}.cert.pem"));
-                    break;
-
                 // Where what is said of the chain goes, after the chain, is a
                 // directory - and the chain is written by then.
                 case "POST trust":
@@ -705,8 +698,6 @@ namespace cloud.charging.open.LocalController.Tests
 
             var response = Change switch {
                 "PUT ocpp-server"         => await http.PutAsync ($"{Root}",                    JSONBody(new JProperty("port",       9500))),
-                "POST certificates"       => await http.PostAsync($"{Root}/certificates",       JSONBody(new JProperty("algorithm",  "ecdsa-p256"))),
-                "PUT certificates/{id}"   => await http.PutAsync ($"{Root}/certificates/{keyId}", JSONBody(new JProperty("pem",      signed))),
                 "POST trust"              => await http.PostAsync($"{Root}/trust",              JSONBody(new JProperty("pem",        TestCA.ToPEM(ca.Certificate)), new JProperty("name", "Some Charging Network"))),
                 "PUT trust/{id}, name"    => await http.PutAsync ($"{Root}/trust/{chainId}",    JSONBody(new JProperty("name",       "Another Charging Network"))),
                 "PUT trust/{id}, enabled" => await http.PutAsync ($"{Root}/trust/{chainId}",    JSONBody(new JProperty("enabled",    false))),
@@ -715,16 +706,11 @@ namespace cloud.charging.open.LocalController.Tests
 
             var body        = await response.Content.ReadAsStringAsync();
 
-            var keys        = Controller.ServerCertificates.Entries.Select(entry => $"{entry.Id} {(entry.Certificate is null ? "without" : "with")} a certificate").ToArray();
-            var chains      = Controller.ClientTrust.Entries.       Select(entry => $"{entry.Id} '{entry.Name}' {(entry.Enabled ? "on" : "off")}").ToArray();
+            var chains      = Controller.ClientTrust.Entries.Select(entry => $"{entry.Id} '{entry.Name}' {(entry.Enabled ? "on" : "off")}").ToArray();
             var serverNow   = (await GetJSON(http, Root)).ToString();
 
             // And as at the next start: read again, with nothing in the way.
-            if (File.Exists(Controller.ServerCertificates.Path))
-                File.Delete(Controller.ServerCertificates.Path);
-
             foreach (var blocked in new[] { Controller.ConfigFile.Path + ".tmp",
-                                            Path.Combine(Controller.ServerCertificates.Path, $"{keyId}.cert.pem"),
                                             chainMeta })
                 if (System.IO.Directory.Exists(blocked))
                     System.IO.Directory.Delete(blocked);
@@ -732,22 +718,17 @@ namespace cloud.charging.open.LocalController.Tests
             if (File.Exists(chainMeta + ".aside"))
                 File.Move(chainMeta + ".aside", chainMeta);
 
-            Controller.ServerCertificates.Reload();
-            Controller.ClientTrust.       Reload();
+            Controller.ClientTrust.Reload();
 
-            var keysReadAgain    = Controller.ServerCertificates.Entries.Select(entry => $"{entry.Id} {(entry.Certificate is null ? "without" : "with")} a certificate").ToArray();
-            var chainsReadAgain  = Controller.ClientTrust.Entries.       Select(entry => $"{entry.Id} '{entry.Name}' {(entry.Enabled ? "on" : "off")}").ToArray();
+            var chainsReadAgain  = Controller.ClientTrust.Entries.Select(entry => $"{entry.Id} '{entry.Name}' {(entry.Enabled ? "on" : "off")}").ToArray();
 
             var expected = Change switch {
                 "PUT ocpp-server"        => $"'{Controller.ConfigFile.Path}' could not be written: ",
-                "POST certificates"      => $"The key could not be written to '{Controller.ServerCertificates.Path}': ",
-                "PUT certificates/{id}"  => $"The certificate could not be written to '{Controller.ServerCertificates.Path}': ",
                 "POST trust"             => $"The chain could not be written to '{Controller.ClientTrust.Path}': ",
                 _                        => $"'{chainId}' could not be written to '{Controller.ClientTrust.Path}': "
             };
 
-            var keysBefore    = Change == "PUT certificates/{id}" ? new[] { $"{keyId} without a certificate" } : [];
-            var chainsBefore  = Change.StartsWith("PUT trust")     ? new[] { $"{chainId} 'Some Charging Network' on" } : [];
+            var chainsBefore  = Change.StartsWith("PUT trust") ? new[] { $"{chainId} 'Some Charging Network' on" } : [];
 
             Assert.Multiple(() => {
 
@@ -755,10 +736,8 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(JObject.Parse(body).Value<String>("error"), Does.StartWith(expected));
 
                 Assert.That(serverNow,        Is.EqualTo(server),        "what the server says of itself");
-                Assert.That(keys,             Is.EqualTo(keysBefore),    "the keys, and whether each has its certificate");
                 Assert.That(chains,           Is.EqualTo(chainsBefore),  "the chains accepted");
 
-                Assert.That(keysReadAgain,    Is.EqualTo(keysBefore),    "the keys, read again");
                 Assert.That(chainsReadAgain,  Is.EqualTo(chainsBefore),  "the chains accepted, read again: one whose file was left behind is accepted");
 
                 if (Change == "POST trust")
@@ -773,11 +752,9 @@ namespace cloud.charging.open.LocalController.Tests
         #region ADeletionAFileDoesNotLetHappenIsAServerError(Change)
 
         /// <summary>
-        /// A key or a chain whose file cannot be deleted stays, and the request
-        /// is answered 500 with why. It was a 409 and a 404, as if the key were
-        /// being presented or the chain were not there.
+        /// A chain whose file cannot be deleted stays, and the request is
+        /// answered 500 with why. It was a 404, as if the chain were not there.
         /// </summary>
-        [TestCase("DELETE certificates/{id}")]
         [TestCase("DELETE trust/{id}")]
         [Platform("Win", Reason = "A file somebody holds open is deleted all the same on Linux, and a test run as root there deletes what it likes: nothing but Windows keeps a file from being deleted.")]
         public async Task ADeletionAFileDoesNotLetHappenIsAServerError(String Change)
@@ -786,45 +763,22 @@ namespace cloud.charging.open.LocalController.Tests
             using var http  = await SignedIn();
             using var ca    = TestCA.Create("Some Charging Network");
 
-            String id;
-            String file;
-
-            if (Change == "DELETE certificates/{id}")
-            {
-
-                await http.PutAsync(Root, JSONBody(new JProperty("reachableAs", new JArray("lc001.example.org"))));
-
-                id    = JObject.Parse(await (await http.PostAsync($"{Root}/certificates",
-                            JSONBody(new JProperty("algorithm", "ecdsa-p256")))).Content.ReadAsStringAsync()).Value<String>("id")!;
-
-                file  = Path.Combine(Controller.ServerCertificates.Path, $"{id}.key.pem");
-
-            }
-            else
-            {
-
-                id    = JObject.Parse(await (await http.PostAsync($"{Root}/trust",
+            var id    = JObject.Parse(await (await http.PostAsync($"{Root}/trust",
                             JSONBody(new JProperty("pem", TestCA.ToPEM(ca.Certificate))))).Content.ReadAsStringAsync()).Value<String>("id")!;
 
-                file  = Path.Combine(Controller.ClientTrust.Path, $"{id}.pem");
-
-            }
+            var file  = Path.Combine(Controller.ClientTrust.Path, $"{id}.pem");
 
             HttpResponseMessage response;
 
             using (new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read))
-                response = Change == "DELETE certificates/{id}"
-                               ? await http.DeleteAsync($"{Root}/certificates/{id}")
-                               : await http.DeleteAsync($"{Root}/trust/{id}");
+                response = await http.DeleteAsync($"{Root}/trust/{id}");
 
             var body = await response.Content.ReadAsStringAsync();
 
             Assert.Multiple(() => {
                 Assert.That(response.StatusCode,                         Is.EqualTo(HttpStatusCode.InternalServerError), body);
                 Assert.That(JObject.Parse(body).Value<String>("error"),  Does.StartWith($"'{id}' could not be removed from "));
-                Assert.That(Controller.ServerCertificates.Entries.Select(entry => entry.Id).
-                                Concat(Controller.ClientTrust.Entries.Select(entry => entry.Id)),
-                            Does.Contain(id), "it is still there");
+                Assert.That(Controller.ClientTrust.Entries.Select(entry => entry.Id), Does.Contain(id), "it is still there");
             });
 
         }
@@ -834,13 +788,12 @@ namespace cloud.charging.open.LocalController.Tests
         #region ADeletionItsLastFileDoesNotLetHappenLeavesEveryFile(Change)
 
         /// <summary>
-        /// A key or a chain whose last file cannot be deleted keeps all of its
-        /// files, and is there when it is read again. Deleted one after the
-        /// other, the files before it were gone: the key's own and its request,
-        /// the chain's certificates - and the key or the chain, listed until the
-        /// next start, was gone after it (found by the charging station).
+        /// A chain whose last file cannot be deleted keeps all of its files, and
+        /// is there when it is read again. Deleted one after the other, the
+        /// files before it were gone: the chain's certificates - and the chain,
+        /// listed until the next start, was gone after it (found by the charging
+        /// station).
         /// </summary>
-        [TestCase("DELETE certificates/{id}")]
         [TestCase("DELETE trust/{id}")]
         [Platform("Win", Reason = "A file somebody holds open is deleted all the same on Linux, and a test run as root there deletes what it likes: nothing but Windows keeps a file from being deleted.")]
         public async Task ADeletionItsLastFileDoesNotLetHappenLeavesEveryFile(String Change)
@@ -849,29 +802,10 @@ namespace cloud.charging.open.LocalController.Tests
             using var http  = await SignedIn();
             using var ca    = TestCA.Create("Some Charging Network");
 
-            String id;
-            String directory;
-
-            if (Change == "DELETE certificates/{id}")
-            {
-
-                await http.PutAsync(Root, JSONBody(new JProperty("reachableAs", new JArray("lc001.example.org"))));
-
-                id         = JObject.Parse(await (await http.PostAsync($"{Root}/certificates",
-                                 JSONBody(new JProperty("algorithm", "ecdsa-p256")))).Content.ReadAsStringAsync()).Value<String>("id")!;
-
-                directory  = Controller.ServerCertificates.Path;
-
-            }
-            else
-            {
-
-                id         = JObject.Parse(await (await http.PostAsync($"{Root}/trust",
+            var id         = JObject.Parse(await (await http.PostAsync($"{Root}/trust",
                                  JSONBody(new JProperty("pem", TestCA.ToPEM(ca.Certificate))))).Content.ReadAsStringAsync()).Value<String>("id")!;
 
-                directory  = Controller.ClientTrust.Path;
-
-            }
+            var directory  = Controller.ClientTrust.Path;
 
             String[] FilesOf() => System.IO.Directory.GetFiles(directory, $"{id}.*").Order(StringComparer.Ordinal).Select(file => Path.GetFileName(file)).ToArray();
 
@@ -879,25 +813,20 @@ namespace cloud.charging.open.LocalController.Tests
 
             HttpResponseMessage response;
 
-            // The description is the last of either's files to be taken away.
+            // The description is the last of its files to be taken away.
             using (new FileStream(Path.Combine(directory, $"{id}.json"), FileMode.Open, FileAccess.Read, FileShare.Read))
-                response = Change == "DELETE certificates/{id}"
-                               ? await http.DeleteAsync($"{Root}/certificates/{id}")
-                               : await http.DeleteAsync($"{Root}/trust/{id}");
+                response = await http.DeleteAsync($"{Root}/trust/{id}");
 
             var body   = await response.Content.ReadAsStringAsync();
             var after  = FilesOf();
 
-            Controller.ServerCertificates.Reload();
             Controller.ClientTrust.Reload();
 
             Assert.Multiple(() => {
                 Assert.That(response.StatusCode,  Is.EqualTo(HttpStatusCode.InternalServerError), body);
-                Assert.That(before,               Has.Length.GreaterThan(1),  "a key or a chain of one file");
+                Assert.That(before,               Has.Length.GreaterThan(1),  "a chain of one file");
                 Assert.That(after,                Is.EqualTo(before),         "its files");
-                Assert.That(Controller.ServerCertificates.Entries.Select(entry => entry.Id).
-                                Concat(Controller.ClientTrust.Entries.Select(entry => entry.Id)),
-                            Does.Contain(id), "read again");
+                Assert.That(Controller.ClientTrust.Entries.Select(entry => entry.Id), Does.Contain(id), "read again");
             });
 
         }
@@ -907,9 +836,9 @@ namespace cloud.charging.open.LocalController.Tests
         #region ARefusalOfTheServerIsWhatItWasWhileItsFilesCannotBeWritten()
 
         /// <summary>
-        /// What was wrong with a change of the server, its keys or its chains
-        /// is answered as it was while their files cannot be written: a 500 is
-        /// the files', and only where it was the files that refused.
+        /// What was wrong with a change of the server or its chains is answered
+        /// as it was while their files cannot be written: a 500 is the files',
+        /// and only where it was the files that refused.
         /// </summary>
         [Test]
         public async Task ARefusalOfTheServerIsWhatItWasWhileItsFilesCannotBeWritten()
@@ -930,25 +859,16 @@ namespace cloud.charging.open.LocalController.Tests
             // Not one of the files behind these routes can be written.
             System.IO.Directory.CreateDirectory(Controller.ConfigFile.Path + ".tmp");
 
-            if (System.IO.Directory.Exists(Controller.ServerCertificates.Path))
-                System.IO.Directory.Delete(Controller.ServerCertificates.Path);
-
-            await File.WriteAllTextAsync(Controller.ServerCertificates.Path, "");
-
             File.Delete(chainMeta);
             System.IO.Directory.CreateDirectory(chainMeta);
 
             var profile     = await http.PutAsync   (Root,                                JSONBody(new JProperty("securityProfiles", new JArray(4))));
-            var noAlgorithm = await http.PostAsync  ($"{Root}/certificates",              JSONBody(new JProperty("algorithm", "rot13")));
-            var noKey       = await http.DeleteAsync($"{Root}/certificates/0123456789abcdef");
             var noChain     = await http.PostAsync  ($"{Root}/trust",                     JSONBody(new JProperty("pem", "trust us, we are a charging network")));
             var noName      = await http.PutAsync   ($"{Root}/trust/{chainId}",           JSONBody(new JProperty("name", new String('x', ClientTrustStore.MaxNameLength + 1))));
             var noSuchChain = await http.DeleteAsync($"{Root}/trust/0123456789abcdef");
 
             Assert.Multiple(() => {
                 Assert.That(profile.    StatusCode,  Is.EqualTo(HttpStatusCode.BadRequest),  "a security profile there is none of");
-                Assert.That(noAlgorithm.StatusCode,  Is.EqualTo(HttpStatusCode.BadRequest),  "a key algorithm there is none of");
-                Assert.That(noKey.      StatusCode,  Is.EqualTo(HttpStatusCode.Conflict),    "a key this controller does not have");
                 Assert.That(noChain.    StatusCode,  Is.EqualTo(HttpStatusCode.BadRequest),  "something that is not a certificate authority");
                 Assert.That(noName.     StatusCode,  Is.EqualTo(HttpStatusCode.BadRequest),  "a name too long");
                 Assert.That(noSuchChain.StatusCode,  Is.EqualTo(HttpStatusCode.NotFound),    "a chain this controller does not accept");

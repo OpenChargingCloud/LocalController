@@ -50,7 +50,6 @@ CSMS and the charging station port on top.
 | Client identities | who the controller is as a client, each with its private key: the TLS identities its lines up to the CSMS hold up - brought with their key, or whose key is made here (tab **New key**) and waits for its certificate - and, under **SSH keys**, the keys an `ssh://` line signs in with beside the controller's own | `certificates:edit`; `certificates:run` to make a key and bring its certificate, and to make or remove an SSH key |
 | Charging stations | the server the charging stations connect to: its port, the security profiles it accepts, the names it is reachable as, what it logs, and whether they may connect over SSH as well | `stations:edit` |
 | Logins and groups | which charging stations may sign in, with what - a password, a one-time token (over SSH as well, bound to its session), an SSH key - and what their group allows them | `stations:edit` |
-| Server certificates | the keys this controller presents, and the certificates that answer them | `certificates:edit` |
 | Accepted chains | which certificate authorities a charging station may be vouched for by | `certificates:edit` |
 | State | nothing - it shows whether the line up to the CSMS stands and since when, which charging stations were seen when and over what, and the grid operator's limits in force | `state:read` |
 | Logs | nothing - it reads | `log:read` |
@@ -95,9 +94,8 @@ told what the controller says of its own accord.
 The station port is shared code as well: the `ocppServer` section, the
 charging stations that may sign in and their login groups
 (`ocpp-stations.json`), the chains a station's certificate may lead to
-(`ocpp-client-trust/`), the keys and certificates the port presents
-(`ocpp-server-keys/`), OCPP over SSH, a CSMS that dials on the same port,
-the routes below `/api/v1/configuration/ocpp-server` and the four pages that
+(`ocpp-client-trust/`), OCPP over SSH, a CSMS that dials on the same port,
+the routes below `/api/v1/configuration/ocpp-server` and the three pages that
 look after them are WWCP_OCPP_Node's `OCPPServingNode`, which a gateway has
 too. What is the controller's own is what it does with them: whether a CSMS
 may dial it at all (only while it reports to one), the CSMS it tells of a
@@ -658,8 +656,18 @@ start that finds them, and a connection that showed one shows the identity it
 became.
 **Server identities** keeps who the web interface is, with its key - brought
 with it, or made on its **New key** tab, as a charging station makes it, so
-that a key need not be carried to the controller - not to be mixed up with **Server certificates**, what the
-charging station port presents, which is a store of its own. Each page has
+that a key need not be carried to the controller - and what the charging
+station port presents, told the listener `ocpp`: a certificate an authority
+issued for a key made on the **New key** tab, or a **server key** the stations
+pin, shown in a self-signed carrier certificate where no certificate issued for
+it is valid. Its card there - and `serverKeys` on the command line, and
+`/api/v1/certificates/serverKeys/ocpp` - shows the key pin of the current key
+and of the announced next one, makes either, and switches to the next one,
+naming the pin it expects; a key never takes the place of what is shown by
+itself, the current key's carrier is not deleted, switched off or told another
+listener, and where nothing is valid the port goes on presenting what it
+presented last. The CSMS reads the pins and switches through
+`EVQICtrlr[TLSServer]`, and is told of every switch. Each page has
 three tabs: by usage, every certificate once, and the upload, where
 certificates are pasted or files dropped and every one of them is kept as
 every kind ticked.
@@ -678,23 +686,15 @@ It is the node's store and every node's routes, the vehicle's among them -
 `GET` and `POST /api/v1/certificates`, `POST /api/v1/certificates/inspect`,
 `POST /api/v1/certificates/reload`, and `GET`, `PATCH` and
 `DELETE /api/v1/certificates/{id}` - at `certificates:read` to look and
-`certificates:edit` to change. The charging station port's own keys
-and the chains it accepts from charging stations are not in it: they keep the
-stores of their own they have always had, on the pages "Server certificates" and
-"Accepted chains" - `ocpp-server-keys/` and `ocpp-client-trust/` beside
-`configuration.json`. Like the node's store, the accounts and the logs, both
-are readable by the account the controller runs under alone - 0700 on Unix, on
+`certificates:edit` to change, and the server keys below
+`/api/v1/certificates/serverKeys`. The chains the charging station port accepts
+from charging stations are not in it: they keep the store of their own they
+have always had, on the page "Accepted chains" - `ocpp-client-trust/` beside
+`configuration.json`. Like the node's store, the accounts and the logs, it is
+readable by the account the controller runs under alone - 0700 on Unix, on
 Windows an access list of that account, SYSTEM and the administrators - and
 what an older controller left open is taken back at the next start; where the
 file system cannot do that, the log says so.
-
-"Server certificates" has three tabs as well: the keys and their signing
-requests, every certificate once by name or by fingerprint with the key it is
-for, and an upload that takes any number of certificates in at once - renewals
-for several keys, say - each under the key it belongs to, which the controller
-reads from the certificate itself (`POST …/ocpp-server/certificates/inspect`
-and `…/upload`). A private key that comes along in a file is left out of the
-box and its certificate refused: the key is made here and never arrives.
 
 The private keys are kept unencrypted, as the vehicle's are, and the page says
 so as soon as there is one. The identity the CSMS connection signs in with is
@@ -703,28 +703,24 @@ it off is what taking it out of service usually means.
 
 A change that is fine in itself, and that its file cannot take, is answered
 500 with why: the charging station server and the CSMS connection in the
-configuration file, the credentials of the line up, the logins and groups, the
-port's keys and certificates, and the accepted chains. What is in effect stays
+configuration file, the credentials of the line up, the logins and groups, and
+the accepted chains. What is in effect stays
 as it was, and a chain written before what is said of it could not be is taken
 away again, rather than accepted at the next start. These were answered with
 the status of a refusal, and a full disk was a station "not found". What was
 wrong with a change is answered as it was; the node's own routes answer the
 same way.
 
-A key whose files could not all be written - itself, its signing request and
-its description - is taken away again as well, rather than read at the next
-start as a key nobody asked for. A certificate is written beside the one it
-replaces and moved over it, and so is what is said of an accepted chain when
-it is renamed or switched on or off: a renewal or a change the disk runs out
-in leaves what was there whole. Written in its place, it cut that off, and at
-the next start the key or the chain was not read at all.
+What is said of an accepted chain is written beside what it replaces and moved
+over it when it is renamed or switched on or off: a change the disk runs out in
+leaves what was there whole. Written in its place, it cut that off, and at the
+next start the chain was not read at all.
 
-A key or a chain is taken away whole or not at all: its files are set aside,
-as `*.removed`, before any of them is deleted, and put back where one of them
+A chain is taken away whole or not at all: its files are set aside, as
+`*.removed`, before any of them is deleted, and put back where one of them
 cannot be - held open by somebody, as Windows keeps a file then. Deleted one
-after the other, the files before that one were gone, and the key or the
-chain was listed until the next start and gone after it (found by the
-charging station). A file that cannot be put back, or deleted once all are
+after the other, the files before that one were gone, and the chain was listed
+until the next start and gone after it (found by the charging station). A file that cannot be put back, or deleted once all are
 aside, is left over under its `*.removed` name, which the next start does not
 read, and said in the log.
 

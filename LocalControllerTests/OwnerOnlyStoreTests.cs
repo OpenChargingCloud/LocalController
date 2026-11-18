@@ -23,6 +23,8 @@ using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 using cloud.charging.open.LocalController.OCPP;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
+using cloud.charging.open.protocols.WWCP.Node.Certificates;
+using cloud.charging.open.protocols.WWCP.Node.Configuration;
 
 #endregion
 
@@ -48,7 +50,11 @@ namespace cloud.charging.open.LocalController.Tests
 
         private String directory = default!;
 
-        private static readonly String[] Stores = [ ServerCertificateStore.DefaultDirectoryName,
+        /// <summary>
+        /// The node's certificate store, which holds what the station port
+        /// presents - its keys among it - and the chains the port accepts.
+        /// </summary>
+        private static readonly String[] Stores = [ CertificatesConfiguration.DefaultDirectory,
                                                     ClientTrustStore.DefaultDirectoryName ];
 
         #endregion
@@ -110,8 +116,10 @@ namespace cloud.charging.open.LocalController.Tests
         #region TheStoresAreMadeForTheirOwnerAlone()
 
         /// <summary>
-        /// Below a directory open to everybody, the stores made by their first
-        /// key and their first chain are their owner's alone, and so is the key.
+        /// Below a directory open to everybody, the store of the chains made by
+        /// its first chain, and the node's store - made at the start - are their
+        /// owner's alone, and so are a key made for the station port and a
+        /// server key's carrier, which holds its key.
         /// </summary>
         [Test]
         public async Task TheStoresAreMadeForTheirOwnerAlone()
@@ -121,13 +129,23 @@ namespace cloud.charging.open.LocalController.Tests
 
             await using var controller = TestControllers.New(directory, TestControllers.Offline);
 
-            foreach (var store in Stores)
-                Assume.That(Directory.Exists(Path.Combine(directory, store)), Is.False, $"{store}/ is there before anything is put in");
+            Assume.That(Directory.Exists(Path.Combine(directory, ClientTrustStore.DefaultDirectoryName)), Is.False,
+                        $"{ClientTrustStore.DefaultDirectoryName}/ is there before anything is put in");
 
             using var ca = TestCA.Create("Some Charging Network");
 
-            Assert.That(controller.ServerCertificates.TryCreateKey("lc001.example.org", [ "lc001.example.org" ], null, out var key, out _, out var keyError),
+            Assert.That(controller.Certificates.TryCreateRequest(CertificateKind.TLSServerIdentity,
+                                                                 "lc001.example.org",
+                                                                 null,
+                                                                 new CertificateRequestAsks(ReachableAs: [ "lc001.example.org" ]),
+                                                                 [ StationPortCertificates.Listener ],
+                                                                 null,
+                                                                 out var request,
+                                                                 out var keyError,
+                                                                 out _),
                         Is.True, keyError);
+
+            var carrier = controller.Certificates.CarrierOf(StationPortCertificates.AServerKey(controller.Certificates))!;
 
             Assert.That(controller.ClientTrust.TryAdd(ca.ChainPEM(ca.Certificate), "network", out _, out _, out var chainError),
                         Is.True, chainError);
@@ -138,10 +156,15 @@ namespace cloud.charging.open.LocalController.Tests
                     Assert.That(OwnerOnlyChecks.OthersMayGetIn(Path.Combine(directory, store)), Is.Empty,
                                 $"others may get into {store}/");
 
-                var keyFile = Path.Combine(directory, ServerCertificateStore.DefaultDirectoryName, $"{key}.key.pem");
+                var keyFile = Path.Combine(directory, CertificatesConfiguration.DefaultDirectory, CertificateStore.RequestsDirectoryName, $"{request!.Id}.key.pem");
 
                 Assert.That(File.Exists(keyFile),                      Is.True,  "the key is not where it is looked for");
                 Assert.That(OwnerOnlyChecks.OthersMayGetIn(keyFile),   Is.Empty, "others may read the key");
+
+                var carrierFile = controller.Certificates.FullPath(carrier);
+
+                Assert.That(File.Exists(carrierFile),                    Is.True,  "the carrier is not where the store says it is");
+                Assert.That(OwnerOnlyChecks.OthersMayGetIn(carrierFile), Is.Empty, "others may read the server key in its carrier");
 
             });
 

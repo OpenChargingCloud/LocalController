@@ -24,10 +24,10 @@
     <ProjectReference Include="..\..\WWCP_OpenADR\WWCP_OpenADR\WWCP_OpenADR.csproj" />
   </ItemGroup>
 
-  <!-- For the tests: a write of the server's keys and certificates, or of the
-       chains it accepts, that fails where they say, which nothing on the
-       outside can bring about - see BeforeWriting in ServerCertificateStore
-       and ClientTrustStore. -->
+  <!-- For the tests: a write of the chains the station port accepts that
+       fails where they say, which nothing on the outside can bring about -
+       see BeforeWriting in ClientTrustStore - and EVQICtrlr[TLSServer], which
+       they hand a key pin that stopped being the next key's. -->
   <ItemGroup>
     <InternalsVisibleTo Include="LocalControllerTests" />
   </ItemGroup>

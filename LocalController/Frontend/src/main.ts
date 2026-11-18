@@ -11,7 +11,6 @@ import { configurationPage }      from './pages/configuration';
 import { csmsPage }               from './pages/csms';
 import { ocppServerPage }         from '@ocpp/pages/ocppServer';
 import { stationLoginsPage }      from '@ocpp/pages/stationLogins';
-import { serverCertificatesPage } from '@ocpp/pages/serverCertificates';
 import { clientTrustPage }        from '@ocpp/pages/clientTrust';
 import { statePage }              from './pages/state';
 
@@ -36,9 +35,10 @@ setNodeTraits({ oneNodePerOCPPVersion: false, isDialled: true });
 // the log, the name servers, the time servers, the certificate store, the
 // frame and following the log while somebody is signed in are every node's -
 // see WWCP_Node's start.ts. Server identities is the node's store too: who the
-// web interface is where it is served over HTTPS from the store, in the menu
-// only then. What the station port presents is under Server certificates, a
-// store of its own.
+// web interface is where it is served over HTTPS from the store, and what the
+// station port presents - a TLS server identity told "ocpp", or the carrier
+// of a server key the stations pin, with the key pins and the switch to the
+// next key.
 startNode({
 
     name:  'Local Controller',
@@ -61,15 +61,14 @@ startNode({
             nodeMenu.serverIdentities,
             { path: '/configuration/ocpp-server',              label: 'Charging stations',   icon: 'fa-charging-station',  permission: [ 'stations:read' ]     },
             { path: '/configuration/ocpp-server/logins',        label: 'Logins and groups',   icon: 'fa-users-gear',        permission: [ 'stations:read' ]     },
-            { path: '/configuration/ocpp-server/certificates',  label: 'Server certificates', icon: 'fa-certificate',       permission: [ 'certificates:read' ] },
             { path: '/configuration/ocpp-server/trust',         label: 'Accepted chains',     icon: 'fa-user-shield',       permission: [ 'certificates:read' ] }
         ]),
         { path: '/state', label: 'State', icon: 'fa-heart-pulse', permission: [ 'state:read' ] },
         nodeMenu.logs
     ],
 
-    // "Certificate store", because there is a page called "Server certificates"
-    // as well - the charging station server's. And the certificate the line up
+    // "Certificate store", as it has been called here since the charging
+    // station server had a page of certificates of its own. And the certificate the line up
     // to the CSMS signs in with, which the controller does not let go of until
     // another one is chosen on the CSMS page: a TLS identity, marked on the
     // Client identities page, where who the controller is as a client is kept.
@@ -82,7 +81,11 @@ startNode({
         // And who it is where it dials over ssh://: the keys it signs in
         // with, which are no certificates and stand among what it presents
         // all the same.
-        sections: context => [ sshKeysSection(context) ]
+        sections: context => [ sshKeysSection(context) ],
+
+        // The station port's server keys, on Server identities: offered there
+        // before it has one.
+        serverKeyListeners: [ 'ocpp' ]
 
     },
 
@@ -103,7 +106,9 @@ startNode({
         '/configuration/client-keys':               movedTo('/configuration/client-identities', 'Client identities'),
         '/configuration/ocpp-server':               ocppServerPage,
         '/configuration/ocpp-server/logins':        stationLoginsPage,
-        '/configuration/ocpp-server/certificates':  serverCertificatesPage,
+        // Where what the station port presents was while it had a store and
+        // a page of its own.
+        '/configuration/ocpp-server/certificates':  movedTo('/configuration/server-identities', 'Server identities'),
         '/configuration/ocpp-server/trust':         clientTrustPage,
 
         '/state':                                   statePage

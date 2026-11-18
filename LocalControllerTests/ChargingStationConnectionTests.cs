@@ -390,32 +390,22 @@ namespace cloud.charging.open.LocalController.Tests
         #region WhatTheCertificatesSayReachesTheControllersLog()
 
         /// <summary>
-        /// The stores say things; the controller is what writes them down. A
-        /// warning that never left the store is a warning nobody gets.
+        /// The store says things; the controller is what writes them down. A
+        /// warning that never left the store is a warning nobody gets: a key
+        /// made for the station port, and a certificate that came back for it
+        /// nine days from running out, are in the controller's log.
         /// </summary>
         [Test]
         public void WhatTheCertificatesSayReachesTheControllersLog()
         {
 
-            Assert.That(Controller.ServerCertificates.TryCreateKey(
-                            "lc001.example.org",
-                            [ "lc001.example.org" ],
-                            null,
-                            out var id,
-                            out var csr,
-                            out var error
-                        ), Is.True, error);
+            using var ca = TestCA.Create("Test CA");
 
-            using var ca          = TestCA.Create("Test CA");
-            using var certificate = ca.Sign(csr!, DateTimeOffset.UtcNow.AddYears(-1), DateTimeOffset.UtcNow.AddDays(9));
+            var made     = StationPortCertificates.AnIdentity(Controller.Certificates, ca, [ "lc001.example.org" ],
+                                                              DateTimeOffset.UtcNow.AddYears(-1), DateTimeOffset.UtcNow.AddDays(9));
 
-            Assert.That(Controller.ServerCertificates.TryAddCertificate(
-                            ca.ChainPEM(certificate),
-                            [ "lc001.example.org" ],
-                            out _, out _, out var problem
-                        ), Is.True, problem);
-
-            Controller.ServerCertificates.CheckExpiry([ "lc001.example.org" ]);
+            // A key made here is called after its public key, as its key pin begins.
+            var id       = made.KeyPin!.ToHex()[..16];
 
             var messages = Controller.Log.Recent(200).Select(entry => entry.Message).ToArray();
 

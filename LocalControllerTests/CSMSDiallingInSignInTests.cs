@@ -105,18 +105,9 @@ namespace cloud.charging.open.LocalController.Tests
                               controllerDirectory  = TestControllers.TemporaryDirectory("csms-dials-in");
                               Directory.CreateDirectory(controllerDirectory);
 
-                              using (var store = new ServerCertificateStore(Path.Combine(controllerDirectory, ServerCertificateStore.DefaultDirectoryName)))
-                              {
-
-                                  Assert.That(store.TryCreateKey("127.0.0.1", [ "127.0.0.1" ], null, out _, out var csr, out var keyError),
-                                              Is.True, keyError);
-
-                                  using var certificate = ca.Sign(csr!, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
-
-                                  Assert.That(store.TryAddCertificate(ca.ChainPEM(certificate), [ "127.0.0.1" ], out _, out _, out var addError),
-                                              Is.True, addError);
-
-                              }
+                              // What the station port presents, issued by the authority for a key made in
+                              // the node's store: a TLS server identity told "ocpp".
+                              StationPortCertificates.AnIdentityIn(controllerDirectory, ca, [ "127.0.0.1" ], DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
 
                               var made = TestControllers.New(
                                              controllerDirectory,

@@ -22,7 +22,8 @@ using org.GraphDefined.Vanaheimr.CLI;
 using cloud.charging.open.protocols.WWCP.Node.Web;
 
 using cloud.charging.open.LocalController.OCPP;
-using cloud.charging.open.protocols.OCPP.Node.Serving;
+using cloud.charging.open.protocols.OCPP.Node;
+using cloud.charging.open.protocols.WWCP.Node.Certificates;
 
 #endregion
 
@@ -41,6 +42,11 @@ namespace cloud.charging.open.LocalController.CommandLine
     /// is presented yet; serverKeys next [&lt;algorithm&gt;] announces the next
     /// key, whose pin is handed to the stations before the switch; serverKeys
     /// switch presents it from now on (EVQI Transport, key pins, 5.5 and 7.4).
+    /// </para>
+    /// <para>
+    /// The keys are the server keys of the listener "ocpp" in the node's
+    /// certificate store - the same ones the Server identities page and
+    /// /v1/certificates/serverKeys/ocpp show and change.
     /// </para>
     /// <para>
     /// What the web interface asks of the same account is asked here: reading
@@ -122,21 +128,34 @@ namespace cloud.charging.open.LocalController.CommandLine
         private String[] Listed()
         {
 
-            var store    = cli.Controller.ServerCertificates;
-            var current  = store.GetCurrentKey(out var presentedAs);
-            var next     = store.NextKey;
+            var store    = cli.Controller.Certificates;
+            var current  = store.GetCurrentAndNextKey(OCPPServingNode.StationListener, out var next);
+            var shown    = cli.Controller.StationCertificate?.Choose();
             var lines    = new List<String>();
 
             if (current is null)
-                lines.Add("No key is presented to the charging stations. 'serverKeys create' makes one for them to pin.");
+            {
+
+                // No server key: the port may present a certificate an
+                // authority issued for a key made here, which is no key the
+                // stations pin but a key all the same.
+                if (shown is not null)
+                    lines.Add($"key pin       {shown.Entry.KeyPin?.ToHex() ?? "?"}  {shown.Entry.Id}, {shown.Entry.KeyAlgorithm}, '{shown.Entry.Label}', " +
+                              $"in the certificate an authority issued for it, until {shown.Entry.NotAfter:yyyy-MM-dd}" +
+                              (shown.IsKeptOn ? " - not valid, and presented all the same: nothing else is" : ""));
+
+                else
+                    lines.Add("No key is presented to the charging stations. 'serverKeys create' makes one for them to pin.");
+
+            }
 
             else
             {
 
-                lines.Add($"key pin       {current.KeyPin}  {current.Id}, {current.Algorithm}, made {current.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}, " +
-                          (presentedAs == ServerCertificateStore.PresentedAsCarrier
-                               ? "in its carrier certificate"
-                               : "in the certificate an authority issued for it"));
+                lines.Add($"key pin       {current.KeyPin.ToHex()}  {current.Id}, {current.Algorithm}, made {current.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}, " +
+                          (shown is { IsCarrier: false }
+                               ? "in the certificate an authority issued for it"
+                               : "in its carrier certificate"));
 
                 if (!cli.Controller.OCPPServerTLS)
                     lines.Add("              The charging station port is not encrypted, so it presents no key; it is from the next start.");
@@ -144,18 +163,21 @@ namespace cloud.charging.open.LocalController.CommandLine
             }
 
             if (next is not null)
-                lines.Add($"next key pin  {next.KeyPin}  {next.Id}, {next.Algorithm}, made {next.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm} - " +
+                lines.Add($"next key pin  {next.KeyPin.ToHex()}  {next.Id}, {next.Algorithm}, made {next.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm} - " +
                            "hand it to the charging stations, then 'serverKeys switch'");
 
-            var others = store.Entries.Where(entry => entry.Id != current?.Id && entry.Id != next?.Id).ToArray();
+            var others = store.ServerKeys(OCPPServingNode.StationListener).
+                               Where(key => key.KeyPin != current?.KeyPin && key.KeyPin != next?.KeyPin).
+                               ToArray();
 
             if (others.Length > 0)
             {
                 lines.Add("other keys:");
-                lines.AddRange(others.Select(entry => $"  {entry.Id}  {entry.Algorithm}  key pin {entry.KeyPin}  made {entry.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}" +
-                                                      (entry.Certificate is not null ? $", certificate until {entry.NotAfter:yyyy-MM-dd}"
-                                                           : entry.HasCarrier       ? ", no longer presented"
-                                                           : ", waiting for a certificate")));
+                lines.AddRange(others.Select(key => {
+                                                 var issued = store.IssuedFor(key).FirstOrDefault();
+                                                 return $"  {key.Id}  {key.Algorithm}  key pin {key.KeyPin.ToHex()}  made {key.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}" +
+                                                        (issued is not null ? $", certificate until {issued.NotAfter:yyyy-MM-dd}" : ", no longer presented");
+                                             }));
             }
 
             return [ .. lines ];
@@ -170,18 +192,18 @@ namespace cloud.charging.open.LocalController.CommandLine
                                 Boolean  AsNext)
         {
 
-            if (!cli.Controller.ServerCertificates.TryCreateServerKey(Algorithm, AsNext, out var id, out var keyPin, out var error, out _))
+            if (!cli.Controller.Certificates.TryCreateServerKey(OCPPServingNode.StationListener, Algorithm, AsNext, out var key, out var error, out _))
                 return [ $"No key was made: {error}" ];
 
             cli.Node.Log.Notice(
-                $"{cli.Caller.Asker} had this local controller generate the {(AsNext ? "next " : "")}server key '{id}' with the key pin {keyPin}.",
+                $"{cli.Caller.Asker} had this local controller generate the {(AsNext ? "next " : "")}server key '{key.Id}' with the key pin {key.KeyPin.ToHex()}.",
                 cli.Caller.Tags("ocpp", "tls")
             );
 
             return AsNext
-                       ? [ $"next key pin  {keyPin}  {id}",
+                       ? [ $"next key pin  {key.KeyPin.ToHex()}  {key.Id}",
                            "Hand it to the charging stations; 'serverKeys switch' presents it once they all have it." ]
-                       : [ $"key pin       {keyPin}  {id}",
+                       : [ $"key pin       {key.KeyPin.ToHex()}  {key.Id}",
                            .. cli.Controller.OCPPServerTLS
                                   ? Array.Empty<String>()
                                   : [ "The charging station port is not encrypted yet; it is from the next start, in this key's carrier certificate." ] ];
@@ -195,15 +217,15 @@ namespace cloud.charging.open.LocalController.CommandLine
         private String[] Switch()
         {
 
-            if (!cli.Controller.ServerCertificates.TrySwitchToNextKey(out var id, out var error, out _))
+            if (!cli.Controller.Certificates.TrySwitchToNextKey(OCPPServingNode.StationListener, null, out var key, out var error, out _))
                 return [ $"Nothing was switched: {error}" ];
 
             cli.Node.Log.Notice(
-                $"{cli.Caller.Asker} switched the charging station server to the server key '{id}'.",
+                $"{cli.Caller.Asker} switched the charging station server to the server key '{key.Id}'.",
                 cli.Caller.Tags("ocpp", "tls")
             );
 
-            return [ $"The charging station server presents the key '{id}' from the next handshake on, with the key pin {cli.Controller.ServerCertificates.CurrentKey?.KeyPin}.",
+            return [ $"The charging station server presents the key '{key.Id}' from the next handshake on, with the key pin {key.KeyPin.ToHex()}.",
                      "Charging stations that pinned only the key before are refused from then on." ];
 
         }

@@ -47,37 +47,39 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var http = await SignedIn();
 
-            var root      = "/api/v1/configuration/ocpp-server";
+            // The station port's server keys are the node's: the listener
+            // "ocpp" of its certificate store.
+            var root      = "/api/v1/certificates/serverKeys/ocpp";
 
-            var made      = await http.PostAsync($"{root}/serverKeys", JSONBody());
+            var made      = await http.PostAsync(root, JSONBody());
             var madeJSON  = JObject.Parse(await made.Content.ReadAsStringAsync());
 
             Assert.That(made.StatusCode, Is.EqualTo(HttpStatusCode.Created), madeJSON.ToString());
 
-            var second    = await http.PostAsync($"{root}/serverKeys", JSONBody());
-            var next      = await http.PostAsync($"{root}/serverKeys", JSONBody(new JProperty("next", true)));
+            var second    = await http.PostAsync(root, JSONBody());
+            var next      = await http.PostAsync(root, JSONBody(new JProperty("asNext", true)));
             var nextJSON  = JObject.Parse(await next.Content.ReadAsStringAsync());
 
-            var before    = await GetJSON(http, $"{root}/certificates");
+            var before    = await GetJSON(http, root);
 
-            var switched  = await http.PostAsync($"{root}/serverKeys/switch", JSONBody());
+            var switched  = await http.PostAsync($"{root}/switch", JSONBody(new JProperty("ifNextKeyPinIs", nextJSON["key"]!.Value<String>("keyPin"))));
             var after     = JObject.Parse(await switched.Content.ReadAsStringAsync());
 
             Assert.Multiple(() => {
 
-                Assert.That(madeJSON.Value<String>("keyPin"),                               Does.Match("^[0-9a-f]{64}$"));
-                Assert.That(Controller.ServerCertificates.Entries.Single(entry => entry.Id == madeJSON.Value<String>("id")).KeyPin.ToHex(),
-                                                                                            Is.EqualTo(madeJSON.Value<String>("keyPin")));
+                Assert.That(madeJSON["key"]!.Value<String>("keyPin"),                       Does.Match("^[0-9a-f]{64}$"));
+                Assert.That(Controller.Certificates.ServerKeys(StationPortCertificates.Listener).Select(key => key.KeyPin.ToHex()),
+                                                                                            Does.Contain(madeJSON["key"]!.Value<String>("keyPin")));
 
                 Assert.That(second.StatusCode,                                              Is.EqualTo(HttpStatusCode.BadRequest), "a second server key took the place of the first");
                 Assert.That(next.StatusCode,                                                Is.EqualTo(HttpStatusCode.Created));
 
-                Assert.That(before["keyPins"]?["current"]?.Value<String>("keyPin"),         Is.EqualTo(madeJSON.Value<String>("keyPin")));
-                Assert.That(before["keyPins"]?["next"]?.   Value<String>("keyPin"),         Is.EqualTo(nextJSON.Value<String>("keyPin")));
+                Assert.That(before.Value<String>("current"),                                Is.EqualTo(madeJSON["key"]!.Value<String>("keyPin")));
+                Assert.That(before.Value<String>("next"),                                   Is.EqualTo(nextJSON["key"]!.Value<String>("keyPin")));
 
                 Assert.That(switched.StatusCode,                                            Is.EqualTo(HttpStatusCode.OK));
-                Assert.That(after["keyPins"]?["current"]?.Value<String>("keyPin"),          Is.EqualTo(nextJSON.Value<String>("keyPin")));
-                Assert.That(after["keyPins"]?["next"]?.Type,                                Is.EqualTo(JTokenType.Null));
+                Assert.That(after["serverKeys"]!.Value<String>("current"),                  Is.EqualTo(nextJSON["key"]!.Value<String>("keyPin")));
+                Assert.That(after["serverKeys"]!["next"]?.Type,                             Is.EqualTo(JTokenType.Null));
 
             });
 

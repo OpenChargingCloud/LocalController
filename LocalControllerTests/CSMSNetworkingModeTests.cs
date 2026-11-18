@@ -318,16 +318,12 @@ namespace cloud.charging.open.LocalController.Tests
             cs001Key  = ECDsa.Create(ECCurve.NamedCurves.nistP256);
             cs002Key  = ECDsa.Create(ECCurve.NamedCurves.nistP256);
 
-            using (var store = new ServerCertificateStore(Path.Combine(directory, ServerCertificateStore.DefaultDirectoryName)))
-            {
+            // The current and the announced next server key of the station
+            // port, in the node's store before the controller is built.
+            var keys    = StationPortCertificates.StoreIn(directory);
 
-                Assert.That(store.TryCreateServerKey(null, AsNext: false, out _, out var current, out var error),     Is.True, error);
-                Assert.That(store.TryCreateServerKey(null, AsNext: true,  out _, out var next,    out var nextError), Is.True, nextError);
-
-                currentPin  = current!;
-                nextPin     = next!;
-
-            }
+            currentPin  = StationPortCertificates.AServerKey(keys).KeyPin;
+            nextPin     = StationPortCertificates.AServerKey(keys, AsNext: true).KeyPin;
 
             var csmsPort  = TestPorts.Free();
 
@@ -608,7 +604,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task TheControllersOwnRequests_GoUpInTheFrameOfTheMode()
         {
 
-            Assert.That(controller.ServerCertificates.TrySwitchToNextKey(out _, out var error), Is.True, error);
+            Assert.That(controller.Certificates.TrySwitchToNextKey(StationPortCertificates.Listener, null, out _, out var error), Is.True, error);
 
             var told = await csms.SentRequest("SecurityEventNotification",
                                               payload => payload["type"]?.Value<String>() == "ReconfigurationOfSecurityParameters",
@@ -707,7 +703,7 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(() => {
 
                 Assert.That(result.Status,                                       Is.EqualTo("Accepted"), result.Info);
-                Assert.That(controller.ServerCertificates.CurrentKey?.KeyPin,    Is.EqualTo(nextPin), "the store was not switched");
+                Assert.That(StationPortCertificates.CurrentPin(controller),     Is.EqualTo(nextPin), "the store was not switched");
                 Assert.That(cs001.Connected,                                     Is.True, "the station connected before the switch was dropped");
 
                 Assert.That(told,                                                Is.Not.Null, "the CSMS was not told of the switch");
@@ -756,8 +752,8 @@ namespace cloud.charging.open.LocalController.Tests
                     Assert.That(SourceOf(answer),                                Is.EqualTo("cs001"), "the answer does not name the station as where it comes from");
                 }
 
-                Assert.That(controller.ServerCertificates.CurrentKey?.KeyPin,    Is.EqualTo(currentPin), "the controller's key was switched by a request for a station");
-                Assert.That(controller.ServerCertificates.NextKey?.KeyPin,       Is.EqualTo(nextPin));
+                Assert.That(StationPortCertificates.CurrentPin(controller),     Is.EqualTo(currentPin), "the controller's key was switched by a request for a station");
+                Assert.That(StationPortCertificates.NextPin(controller),        Is.EqualTo(nextPin));
 
             });
 

@@ -291,9 +291,10 @@ namespace cloud.charging.open.LocalController.Tests
         #region ACPOMayLookAtTheCertificatesAndIsToldWhoMayChangeThem()
 
         /// <summary>
-        /// Over the wire, as a browser signed in as a CPO sees it: the page
-        /// opens, a signing request is refused with the role to ask for, and
-        /// what the browser is told it may do says the same beforehand.
+        /// Over the wire, as a browser signed in as a CPO sees it: the server
+        /// keys of the station port are shown, a server key is refused with the
+        /// role to ask for, and what the browser is told it may do says the
+        /// same beforehand.
         /// </summary>
         [Test]
         public async Task ACPOMayLookAtTheCertificatesAndIsToldWhoMayChangeThem()
@@ -303,8 +304,8 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var cpo    = await SignedInAs("cpo1", "cpo");
 
-            var looked       = await cpo.GetAsync("api/v1/configuration/ocpp-server/certificates");
-            var requested    = await Post(cpo, "api/v1/configuration/ocpp-server/certificates", "{}");
+            var looked       = await cpo.GetAsync("api/v1/certificates/serverKeys/ocpp");
+            var requested    = await Post(cpo, "api/v1/certificates/serverKeys/ocpp", "{}");
             var refusal      = await requested.Content.ReadAsStringAsync();
             var me           = JObject.Parse(await (await cpo.GetAsync("api/v1/auth/me")).Content.ReadAsStringAsync());
             var permissions  = me["permissions"]!.Values<String>().OfType<String>().ToArray();
@@ -435,13 +436,6 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("POST",    "api/v1/configuration/ocpp-server/groups",                  "stations:edit")]
         [TestCase("PUT",     "api/v1/configuration/ocpp-server/groups/site",             "stations:edit")]
         [TestCase("DELETE",  "api/v1/configuration/ocpp-server/groups/site",             "stations:edit")]
-        [TestCase("GET",     "api/v1/configuration/ocpp-server/certificates",            "certificates:read")]
-        [TestCase("POST",    "api/v1/configuration/ocpp-server/certificates",            "certificates:edit")]
-        [TestCase("GET",     "api/v1/configuration/ocpp-server/certificates/k1/csr",     "certificates:read")]
-        [TestCase("PUT",     "api/v1/configuration/ocpp-server/certificates/k1",         "certificates:edit")]
-        [TestCase("DELETE",  "api/v1/configuration/ocpp-server/certificates/k1",         "certificates:edit")]
-        [TestCase("POST",    "api/v1/configuration/ocpp-server/serverKeys",              "certificates:edit")]
-        [TestCase("POST",    "api/v1/configuration/ocpp-server/serverKeys/switch",       "certificates:edit")]
         [TestCase("GET",     "api/v1/configuration/ocpp-server/trust",                   "certificates:read")]
         [TestCase("POST",    "api/v1/configuration/ocpp-server/trust",                   "certificates:edit")]
         [TestCase("PUT",     "api/v1/configuration/ocpp-server/trust/t1",                "certificates:edit")]
@@ -457,6 +451,10 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("POST",    "api/v1/certificates/requests",                             "certificates:run")]
         [TestCase("POST",    "api/v1/certificates/requests/answer",                      "certificates:run")]
         [TestCase("DELETE",  "api/v1/certificates/requests/r1",                          "certificates:run")]
+        [TestCase("GET",     "api/v1/certificates/serverKeys",                           "certificates:read")]
+        [TestCase("GET",     "api/v1/certificates/serverKeys/ocpp",                      "certificates:read")]
+        [TestCase("POST",    "api/v1/certificates/serverKeys/ocpp",                      "certificates:edit")]
+        [TestCase("POST",    "api/v1/certificates/serverKeys/ocpp/switch",               "certificates:edit")]
         [TestCase("GET",     "api/v1/logs",                                              "log:read")]
         [TestCase("GET",     "api/v1/state",                                             "state:read")]
         public async Task EveryRouteAsksForItsOwnPermission(String Method, String Path, String Permission)

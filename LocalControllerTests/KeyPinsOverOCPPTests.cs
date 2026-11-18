@@ -284,17 +284,18 @@ namespace cloud.charging.open.LocalController.Tests
 
             // Before the controller is built, because whether the port speaks
             // TLS at all is decided when it starts.
-            using (var store = new ServerCertificateStore(Path.Combine(directory, ServerCertificateStore.DefaultDirectoryName)))
-            {
+            // The server keys of the station port, the listener "ocpp" of the
+            // node's store.
+            var keys     = StationPortCertificates.StoreIn(directory);
 
-                Assert.That(store.TryCreateServerKey(null, AsNext: false, out _,       out var current, out var error),     Is.True, error);
-                Assert.That(store.TryCreateServerKey(null, AsNext: true,  out var id,  out var next,    out var nextError), Is.True, nextError);
+            currentPin   = StationPortCertificates.AServerKey(keys).KeyPin;
 
-                currentPin  = current!;
-                nextPin     = next!;
-                nextId      = id!;
+            var next     = StationPortCertificates.AServerKey(keys, AsNext: true);
 
-            }
+            nextPin      = next.KeyPin;
+
+            // What a next key is taken away by: its carrier.
+            nextId       = next.CarrierId;
 
             #endregion
 
@@ -706,7 +707,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(tlsServer["KeyPins"].      Value,                  Is.EqualTo($"{currentPin.ToHex()},{nextPin.ToHex()}"));
                 Assert.That(tlsServer["NextKeyPin"].   Value,                  Is.EqualTo(nextPin.ToHex()));
                 Assert.That(tlsServer["ActiveKeyPin"]. Value,                  Is.EqualTo(currentPin.ToHex()));
-                Assert.That(tlsServer["KeyCreated"].   Value,                  Is.EqualTo(controller.ServerCertificates.CurrentKey!.CreatedAt.ToISO8601()));
+                Assert.That(tlsServer["KeyCreated"].   Value,                  Is.EqualTo(controller.Certificates.GetCurrentAndNextKey(StationPortCertificates.Listener, out _)!.CreatedAt.ToISO8601()));
                 Assert.That(tlsServer["RawPublicKeys"].Value,                  Is.EqualTo("Off"));
 
             });
@@ -749,9 +750,9 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(() => {
 
                 Assert.That(switched.Status,                            Is.EqualTo("Accepted"), switched.Info);
-                Assert.That(controller.ServerCertificates.CurrentKey?.KeyPin,
+                Assert.That(StationPortCertificates.CurrentPin(controller),
                                                                         Is.EqualTo(nextPin),    "the store was not switched");
-                Assert.That(controller.ServerCertificates.NextKey,      Is.Null);
+                Assert.That(StationPortCertificates.NextKeyOf(controller), Is.Null);
 
                 Assert.That(stillUp,                                    Is.True,                "the station connected before the switch was dropped");
                 Assert.That(cs001.Connected,                            Is.True,                "the station connected before the switch was dropped");
@@ -772,7 +773,7 @@ namespace cloud.charging.open.LocalController.Tests
 
                 Assert.That(back.Status,                                Is.EqualTo("Rejected"), "the key switched away from is a way back");
                 Assert.That(back.Info ?? "",                            Does.Contain("none announced"));
-                Assert.That(controller.ServerCertificates.CurrentKey?.KeyPin,
+                Assert.That(StationPortCertificates.CurrentPin(controller),
                                                                         Is.EqualTo(nextPin));
 
             });
@@ -796,8 +797,8 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(result.Status,                                       Is.EqualTo("Accepted"), result.Info);
-                Assert.That(controller.ServerCertificates.CurrentKey?.KeyPin,    Is.EqualTo(currentPin));
-                Assert.That(controller.ServerCertificates.NextKey?.KeyPin,       Is.EqualTo(nextPin));
+                Assert.That(StationPortCertificates.CurrentPin(controller),    Is.EqualTo(currentPin));
+                Assert.That(StationPortCertificates.NextPin(controller),       Is.EqualTo(nextPin));
                 Assert.That(events,                                              Is.Empty, "a switch was reported where nothing switched");
             });
 
@@ -822,8 +823,8 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(result.Status,                                       Is.EqualTo("Rejected"));
                 Assert.That(result.Reason,                                       Is.EqualTo("InvalidValue"));
                 Assert.That(result.Info ?? "",                                   Does.Contain(currentPin.ToHex()).And.Contain(nextPin.ToHex()), "the reason does not name the current and the next key");
-                Assert.That(controller.ServerCertificates.CurrentKey?.KeyPin,    Is.EqualTo(currentPin));
-                Assert.That(controller.ServerCertificates.NextKey?.KeyPin,       Is.EqualTo(nextPin));
+                Assert.That(StationPortCertificates.CurrentPin(controller),    Is.EqualTo(currentPin));
+                Assert.That(StationPortCertificates.NextPin(controller),       Is.EqualTo(nextPin));
                 Assert.That(events,                                              Is.Empty);
             });
 
@@ -841,7 +842,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task SetVariables_WithoutANextKey_IsRejected()
         {
 
-            Assert.That(controller.ServerCertificates.TryRemove(nextId, out var error), Is.True, error);
+            Assert.That(controller.Certificates.Remove(nextId, out var error), Is.True, error);
 
             var former  = await SetActiveKeyPin(nextPin.ToHex());
             var other   = await SetActiveKeyPin(APin().ToHex());
@@ -850,7 +851,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(former.Status,                                       Is.EqualTo("Rejected"), "a key taken away was switched to");
                 Assert.That(former.Info ?? "",                                   Does.Contain("none announced"));
                 Assert.That(other. Status,                                       Is.EqualTo("Rejected"));
-                Assert.That(controller.ServerCertificates.CurrentKey?.KeyPin,    Is.EqualTo(currentPin));
+                Assert.That(StationPortCertificates.CurrentPin(controller),    Is.EqualTo(currentPin));
             });
 
         }
@@ -870,49 +871,55 @@ namespace cloud.charging.open.LocalController.Tests
         {
 
             var keySwitch  = new LocalController.TLSServerKeys(controller);
-            var store      = controller.ServerCertificates;
+            var store      = controller.Certificates;
+            var ocpp       = StationPortCertificates.Listener;
 
             #region The next key the CSMS saw was taken away, and another announced
 
-            Assert.That(store.TryRemove(nextId, out var removeError), Is.True, removeError);
-            Assert.That(store.TryCreateServerKey(null, AsNext: true, out _, out var otherNext, out var createError), Is.True, createError);
+            Assert.That(store.Remove(nextId, out var removeError), Is.True, removeError);
+            Assert.That(store.TryCreateServerKey(ocpp, null, AsNext: true, out var otherKey, out var createError), Is.True, createError);
+
+            var otherNext = otherKey!.KeyPin;
 
             var replaced = await keySwitch.SwitchToNextKeyAsync(nextPin, null, CancellationToken.None);
 
             Assert.Multiple(() => {
                 Assert.That(replaced?.ReasonCode,              Is.EqualTo("InvalidValue"), "the switch to a key no longer announced was accepted");
                 Assert.That(replaced?.AdditionalInfo ?? "",    Does.Contain(currentPin.ToHex()).And.Contain(otherNext!.ToHex()));
-                Assert.That(store.CurrentKey?.KeyPin,          Is.EqualTo(currentPin), "another key than the one asked for was switched to");
-                Assert.That(store.NextKey?.KeyPin,             Is.EqualTo(otherNext));
+                Assert.That(StationPortCertificates.CurrentPin(controller),          Is.EqualTo(currentPin), "another key than the one asked for was switched to");
+                Assert.That(StationPortCertificates.NextPin(controller),             Is.EqualTo(otherNext));
             });
 
             #endregion
 
             #region No next key at all
 
-            Assert.That(store.TryRemove(store.NextKey!.Id, out var removeAgainError), Is.True, removeAgainError);
+            Assert.That(store.Remove(StationPortCertificates.NextKeyOf(controller)!.CarrierId, out var removeAgainError), Is.True, removeAgainError);
 
             var none = await keySwitch.SwitchToNextKeyAsync(otherNext!, null, CancellationToken.None);
 
             Assert.Multiple(() => {
                 Assert.That(none?.ReasonCode,                  Is.EqualTo("InvalidValue"), "a switch with no next key was accepted");
-                Assert.That(store.CurrentKey?.KeyPin,          Is.EqualTo(currentPin));
+                Assert.That(StationPortCertificates.CurrentPin(controller),          Is.EqualTo(currentPin));
             });
 
             #endregion
 
             #region Switched meanwhile, on the command line, and a new next key announced after it
 
-            Assert.That(store.TryCreateServerKey(null, AsNext: true, out _, out var third,  out var thirdError),  Is.True, thirdError);
-            Assert.That(store.TrySwitchToNextKey(out _, out var switchError),                                     Is.True, switchError);
-            Assert.That(store.TryCreateServerKey(null, AsNext: true, out _, out var fourth, out var fourthError), Is.True, fourthError);
+            Assert.That(store.TryCreateServerKey(ocpp, null, AsNext: true, out var thirdKey,  out var thirdError),  Is.True, thirdError);
+            Assert.That(store.TrySwitchToNextKey(ocpp, null, out _, out var switchError),                          Is.True, switchError);
+            Assert.That(store.TryCreateServerKey(ocpp, null, AsNext: true, out var fourthKey, out var fourthError), Is.True, fourthError);
+
+            var third   = thirdKey! .KeyPin;
+            var fourth  = fourthKey!.KeyPin;
 
             var done = await keySwitch.SwitchToNextKeyAsync(third!, null, CancellationToken.None);
 
             Assert.Multiple(() => {
                 Assert.That(done,                              Is.Null,               $"a switch made meanwhile was refused: {done?.AdditionalInfo}");
-                Assert.That(store.CurrentKey?.KeyPin,          Is.EqualTo(third),     "the switch was made again, to the key announced after it");
-                Assert.That(store.NextKey?.KeyPin,             Is.EqualTo(fourth));
+                Assert.That(StationPortCertificates.CurrentPin(controller),          Is.EqualTo(third),     "the switch was made again, to the key announced after it");
+                Assert.That(StationPortCertificates.NextPin(controller),             Is.EqualTo(fourth));
             });
 
             #endregion
@@ -945,8 +952,8 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(() => {
                 Assert.That(atStation,                                           Has.Length.EqualTo(1), "the station did not get the request");
                 Assert.That(result.Status,                                       Is.EqualTo("UnknownComponent"), "the answer is not the station's");
-                Assert.That(controller.ServerCertificates.CurrentKey?.KeyPin,    Is.EqualTo(currentPin), "the controller's key was switched by a request for a station");
-                Assert.That(controller.ServerCertificates.NextKey?.KeyPin,       Is.EqualTo(nextPin));
+                Assert.That(StationPortCertificates.CurrentPin(controller),    Is.EqualTo(currentPin), "the controller's key was switched by a request for a station");
+                Assert.That(StationPortCertificates.NextPin(controller),       Is.EqualTo(nextPin));
                 Assert.That(events,                                              Is.Empty);
             });
 
@@ -984,8 +991,8 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(asCSMS?  [0].Value<Int32>(),                         Is.EqualTo(4), $"a station calling itself the CSMS was not refused: {asCSMS?.ToString(Formatting.None)}");
                 Assert.That(asCSMS?  [2].Value<String>(),                        Is.EqualTo("SecurityError"));
 
-                Assert.That(controller.ServerCertificates.CurrentKey?.KeyPin,    Is.EqualTo(currentPin), "a station switched the controller's key");
-                Assert.That(controller.ServerCertificates.NextKey?.KeyPin,       Is.EqualTo(nextPin));
+                Assert.That(StationPortCertificates.CurrentPin(controller),    Is.EqualTo(currentPin), "a station switched the controller's key");
+                Assert.That(StationPortCertificates.NextPin(controller),       Is.EqualTo(nextPin));
                 Assert.That(events,                                              Is.Empty);
 
             });
@@ -1004,7 +1011,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ASwitchOnTheCommandLine_IsToldToTheCSMS()
         {
 
-            Assert.That(controller.ServerCertificates.TrySwitchToNextKey(out _, out var error), Is.True, error);
+            Assert.That(controller.Certificates.TrySwitchToNextKey(StationPortCertificates.Listener, null, out _, out var error), Is.True, error);
 
             var events = await KeySwitchEvents(EventPatience);
 

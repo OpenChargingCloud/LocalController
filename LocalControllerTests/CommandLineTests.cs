@@ -357,11 +357,11 @@ namespace cloud.charging.open.LocalController.Tests
 
             var none      = await cli.Execute("serverKeys");
             var made      = await cli.Execute("serverKeys create");
-            var current   = lc.ServerCertificates.CurrentKey!;
+            var current   = lc.Certificates.GetCurrentAndNextKey(StationPortCertificates.Listener, out _)!;
             var listed    = await cli.Execute("serverKeys list");
             var again     = await cli.Execute("serverKeys create");
             var announced = await cli.Execute("serverKeys next");
-            var next      = lc.ServerCertificates.NextKey!;
+            var next      = StationPortCertificates.NextKeyOf(lc)!;
             var both      = await cli.Execute("serverKeys");
             var switched  = await cli.Execute("serverKeys switch");
             var unknown   = await cli.Execute("serverKeys rotate");
@@ -376,7 +376,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(both,               Has.Some.StartWith($"key pin       {current.KeyPin}"));
                 Assert.That(both,               Has.Some.StartWith($"next key pin  {next.KeyPin}"));
                 Assert.That(switched.First(),   Does.Contain($"'{next.Id}'").And.Contain($"{next.KeyPin}"));
-                Assert.That(lc.ServerCertificates.CurrentKey?.Id, Is.EqualTo(next.Id));
+                Assert.That(lc.Certificates.GetCurrentAndNextKey(StationPortCertificates.Listener, out _)?.Id, Is.EqualTo(next.Id));
                 Assert.That(unknown.Single(),   Does.StartWith("Usage: serverKeys "));
 
                 lock (said)
@@ -455,7 +455,7 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(() => {
                 Assert.That(looked.First(),    Does.StartWith("No key is presented"));
                 Assert.That(refused.Single(),  Does.StartWith("'cleo' may not do that here: it needs the "));
-                Assert.That(controller!.ServerCertificates.Entries, Is.Empty);
+                Assert.That(controller!.Certificates.ServerKeys(StationPortCertificates.Listener), Is.Empty);
                 Assert.That(given.First(),     Does.StartWith("'cs001' is a charging station of this local controller now"));
                 Assert.That(controller.StationLogins.TryGet("cs001", out var login) && login.Pins.Single().AddedBy == "cleo", Is.True);
             });

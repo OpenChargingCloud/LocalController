@@ -126,9 +126,11 @@ namespace cloud.charging.open.LocalController
         /// chain to - a time server, a name server, the CSMS - the certificates
         /// of such servers, kept to hold one to by its fingerprint, and what
         /// this controller presents in TLS itself. What its station port
-        /// presents and which chains it accepts from charging stations stay in
-        /// the stores of their own they have always had: ocpp-server-keys and
-        /// ocpp-client-trust. Who its web interface is, where that is served
+        /// presents is a TLS server identity as well, told the listener
+        /// "ocpp" - one an authority issued, or the carrier of a server key the
+        /// stations pin, see OCPPServingNode.StationCertificate; which chains it
+        /// accepts from charging stations stays in the store of its own it has
+        /// always had, ocpp-client-trust. Who its web interface is, where that is served
         /// over HTTPS from the store - "web": { "tls": { "certificate":
         /// "store" } }, or --https - is a TLS server identity: kept whether
         /// or not HTTPS is served yet, as a charging station keeps it, so
@@ -279,9 +281,10 @@ namespace cloud.charging.open.LocalController
                    // that comes back for it. The key never leaves. And
                    // who its own web interface is, as a charging station
                    // does it: a key made here need not be carried to the
-                   // controller. What the charging station port presents is
-                   // not among them - that is a store of its own, see
-                   // ServerCertificateStore.
+                   // controller. And what the charging station port
+                   // presents, a TLS server identity told "ocpp", which
+                   // every serving node makes keys for - see
+                   // OCPPServingNode.
                    CertificateRequestKinds: [ CertificateKind.TLSIdentity, CertificateKind.TLSServerIdentity ],
 
                    Log:                Log,

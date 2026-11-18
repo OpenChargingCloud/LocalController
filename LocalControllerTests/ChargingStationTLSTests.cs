@@ -29,6 +29,7 @@ using NUnit.Framework;
 using cloud.charging.open.LocalController.OCPP;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
+using cloud.charging.open.protocols.WWCP.Node.Certificates;
 
 #endregion
 
@@ -86,18 +87,9 @@ namespace cloud.charging.open.LocalController.Tests
 
             #region A key and a certificate, put there before anything starts
 
-            using (var store = new ServerCertificateStore(Path.Combine(directory, ServerCertificateStore.DefaultDirectoryName)))
-            {
-
-                Assert.That(store.TryCreateKey("127.0.0.1", [ "127.0.0.1" ], null, out _, out var csr, out var keyError),
-                            Is.True, keyError);
-
-                using var certificate = ca.Sign(csr!, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
-
-                Assert.That(store.TryAddCertificate(ca.ChainPEM(certificate), [ "127.0.0.1" ], out _, out _, out var addError),
-                            Is.True, addError);
-
-            }
+            // What the station port presents, issued by the authority for a key made in
+            // the node's store: a TLS server identity told "ocpp".
+            StationPortCertificates.AnIdentityIn(directory, ca, [ "127.0.0.1" ], DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
 
             #endregion
 
@@ -246,7 +238,7 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(() => {
                 Assert.That(controller.OCPPServerTLS,                  Is.True,
                             "A controller that found a certificate is still serving its charging stations unencrypted.");
-                Assert.That(controller.ServerCertificates.HasCertificate, Is.True);
+                Assert.That(controller.OCPPServerHasCertificate,         Is.True);
                 Assert.That(controller.OCPPServerURL,                   Does.StartWith("wss://"));
             });
 
@@ -258,7 +250,7 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// The whole point of the store, proved over a socket: what
-        /// <see cref="ServerCertificateStore.Select"/> picked is what a charging
+        /// the station port chose out of the node's store is what a charging
         /// station is shown.
         /// </summary>
         [Test]
@@ -267,15 +259,14 @@ namespace cloud.charging.open.LocalController.Tests
 
             var (connected, why, presented, chainLength) = await Connect();
 
-            var chosen = controller.ServerCertificates.Entries.
-                             Single(entry => entry.Id == controller.ServerCertificates.ServedId);
+            var chosen = controller.StationCertificate.Entry!;
 
             Assert.Multiple(() => {
 
                 Assert.That(connected,  Is.True, why);
                 Assert.That(presented,  Is.Not.Null, "No certificate arrived at the charging station.");
 
-                Assert.That(presented!.Thumbprint, Is.EqualTo(chosen.Certificate!.Thumbprint),
+                Assert.That(CertificateEntry.ThumbprintOf(presented!), Is.EqualTo(chosen.Thumbprint),
                             "The charging station was shown a different certificate than the one this controller chose.");
 
                 // Leaf and the issuing authority: the intermediate travelled,
@@ -306,13 +297,8 @@ namespace cloud.charging.open.LocalController.Tests
 
             #region A second certificate, valid from a moment ago
 
-            Assert.That(controller.ServerCertificates.TryCreateKey("127.0.0.1", [ "127.0.0.1" ], null, out _, out var csr, out var keyError),
-                        Is.True, keyError);
-
-            using var replacement = ca.Sign(csr!, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddYears(2));
-
-            Assert.That(controller.ServerCertificates.TryAddCertificate(ca.ChainPEM(replacement), [ "127.0.0.1" ], out var newId, out _, out var addError),
-                        Is.True, addError);
+            var replacement = StationPortCertificates.AnIdentity(controller.Certificates, ca, [ "127.0.0.1" ],
+                                                                 DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddYears(2));
 
             #endregion
 
@@ -326,8 +312,8 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(second!.Thumbprint, Is.Not.EqualTo(first!.Thumbprint),
                             "The replacement did not take over; the old certificate is still being presented.");
 
-                Assert.That(second.Thumbprint,  Is.EqualTo(replacement.Thumbprint));
-                Assert.That(controller.ServerCertificates.ServedId, Is.EqualTo(newId));
+                Assert.That(CertificateEntry.ThumbprintOf(second), Is.EqualTo(replacement.Thumbprint));
+                Assert.That(controller.StationCertificate.Entry?.Id, Is.EqualTo(replacement.Id));
 
             });
 
