@@ -381,7 +381,7 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region ATokenToBeBoundIsNotDialledWhereTheLineDoesNotNameHTTP3(Named)
+        #region ATokenToBeBoundIsNotConnectedWhereTheLineDoesNotNameHTTP3(Named)
 
         /// <summary>
         /// Left the choice of the version, or told HTTP/1.1 or HTTP/2, the
@@ -393,7 +393,7 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("auto")]
         [TestCase("1.1")]
         [TestCase("2")]
-        public async Task ATokenToBeBoundIsNotDialledWhereTheLineDoesNotNameHTTP3(String? Named)
+        public async Task ATokenToBeBoundIsNotConnectedWhereTheLineDoesNotNameHTTP3(String? Named)
         {
 
             var controller = await AControllerThatDials(Named, Bound: true);
@@ -402,7 +402,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(controller.CSMSConnected,    Is.False);
-                Assert.That(controller.CSMSLastProblem,  Does.Contain("Not dialled").And.Contain("Name HTTP/3"));
+                Assert.That(controller.CSMSLastProblem,  Does.Contain("Not connected").And.Contain("Name HTTP/3"));
                 Assert.That(upstream.StationServer?.WebSocketConnections.Any(), Is.Not.True,
                             "The CSMS was dialled all the same.");
             });

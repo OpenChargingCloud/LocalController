@@ -393,10 +393,10 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region AnIdentityThatIsSwitchedOffIsSaidAndNotDialled()
+        #region AnIdentityThatIsSwitchedOffIsSaidAndNotConnected()
 
         [Test]
-        public async Task AnIdentityThatIsSwitchedOffIsSaidAndNotDialled()
+        public async Task AnIdentityThatIsSwitchedOffIsSaidAndNotConnected()
         {
 
             var controller = await AControllerThatDials(
@@ -416,10 +416,10 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region WhatIsNotAnIdentityIsSaidAndNotDialled()
+        #region WhatIsNotAnIdentityIsSaidAndNotConnected()
 
         [Test]
-        public async Task WhatIsNotAnIdentityIsSaidAndNotDialled()
+        public async Task WhatIsNotAnIdentityIsSaidAndNotConnected()
         {
 
             var root       = CertificateEntry.ThumbprintOf(ca.Certificate)[..16];

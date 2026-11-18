@@ -139,7 +139,7 @@ the TLS identity of the certificate store the `csms` section names by its
 handle as `clientCertificate`, looked after on the Client identities page and chosen
 on the CSMS page, which every line over `wss://` that names no certificate of
 its own holds up. One that is not in the store, switched off or out of its
-validity is said so, and the line not dialled with it. Over TLS, the CSMS's
+validity is said so, and the line not connected with it. Over TLS, the CSMS's
 certificate is judged by the node as a time server's is: issued for the name it
 is dialled at, and chaining to a root this machine trusts or to a TLS root of
 the store kept for every use. What it was believed with is
