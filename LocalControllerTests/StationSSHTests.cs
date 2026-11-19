@@ -695,6 +695,172 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+
+        #region AStationWithAPassword_SignsInWithIt()
+
+        private const String ThePassword      = "the-password-cs001-has-at-the-controller";
+        private const String AnotherPassword  = "a-password-nobody-here-has-ever-heard-of";
+
+        private void GiveAPassword(String Id, String Password, String? Group = null)
+        {
+
+            Assert.That(Controller.WebSocketLogins.TrySetPassword(Id, Password, Group, "tests", out var error),
+                        Is.True, error);
+
+        }
+
+        /// <summary>
+        /// A station connecting over SSH with no key at all, and the given
+        /// password: the connection, or why it was not let in.
+        /// </summary>
+        private async Task<(SshMessageConnection? Connection, String? Why)> ConnectWithPassword(String Id, String Password)
+        {
+
+            var client = new SshMessageClient(new SshMessageClientOptions {
+                                                  Host          = "127.0.0.1",
+                                                  Port          = Controller.SSHPort!.Value.ToUInt16(),
+                                                  Ssh           = new SshClientOptions {
+                                                                      Username       = Id,
+                                                                      VerifyHostKey  = blob => Controller.SSHHostKey == $"ssh-ed25519 {SshFingerprint.Sha256(blob)}",
+                                                                      Credentials    = [],
+                                                                      Password       = Password
+                                                                  },
+                                                  Subsystem     = Subsystem,
+                                                  Subprotocols  = [ "ocpp2.1" ]
+                                              });
+
+            try
+            {
+                return (await client.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(15)), null);
+            }
+            catch (TimeoutException)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                return (null, e.Message);
+            }
+
+        }
+
+        /// <summary>
+        /// "password" at the controller's SSH server: the password a station
+        /// has here for HTTP Basic lets it in with no key - and it is a station
+        /// of the controller then, as with a key. Another password does not,
+        /// and neither does one for a station that has none, nor the secret of
+        /// a station's one-time passwords sent as a password.
+        /// </summary>
+        [Test]
+        public async Task AStationWithAPassword_SignsInWithIt()
+        {
+
+            GiveAPassword("cs001", ThePassword);
+            GiveASecret  ("cs002", TheSecret);
+
+            var (wrongPassword, _)  = await ConnectWithPassword("cs001", AnotherPassword);
+            var (noPassword,    _)  = await ConnectWithPassword("cs002", TheSecret);
+            var (nobody,        _)  = await ConnectWithPassword("cs003", ThePassword);
+
+            var (cs001, why)        = await ConnectWithPassword("cs001", ThePassword);
+
+            Assert.Multiple(() => {
+                Assert.That(wrongPassword,  Is.Null,      "Another password let the station in.");
+                Assert.That(noPassword,     Is.Null,      "A password let a station in that has no password here.");
+                Assert.That(nobody,         Is.Null,      "A password let a station in that is not listed.");
+                Assert.That(cs001,          Is.Not.Null,  $"Its password did not let the station in: {why}");
+            });
+
+            Assert.That(await RegisteredWithin("cs001", TimeSpan.FromSeconds(10)), Is.True,
+                        "A station that signed in with its password is no station of the controller.");
+
+        }
+
+        #endregion
+
+        #region TheGroup_Decides_WhetherAPasswordLetsAStationIn()
+
+        /// <summary>
+        /// The group has to accept passwords, as over the WebSocket port -
+        /// accepting SSH keys or one-time passwords is not it - and a group
+        /// switched off ends the session.
+        /// </summary>
+        [Test]
+        public async Task TheGroup_Decides_WhetherAPasswordLetsAStationIn()
+        {
+
+            Assert.That(Controller.WebSocketLogins.TryAddOrUpdateGroup("field-test", "Field test", true, [ AuthMethod.TOTP, AuthMethod.SSHKey ], [ WebSocketClientAuthentication.HTTPAuthWithoutTLS, WebSocketClientAuthentication.HTTPAuthOverTLS ], null, out var error),
+                        Is.True, error);
+
+            GiveAPassword("cs001", ThePassword, "field-test");
+
+            var (before, _) = await ConnectWithPassword("cs001", ThePassword);
+
+            Assert.That(before, Is.Null, "A group that accepts no passwords let a station in with one.");
+
+            Assert.That(Controller.WebSocketLogins.TryAddOrUpdateGroup("field-test", "Field test", true, [ AuthMethod.Basic ], [ WebSocketClientAuthentication.HTTPAuthWithoutTLS ], null, out error),
+                        Is.True, error);
+
+            var (after, why) = await ConnectWithPassword("cs001", ThePassword);
+
+            Assert.That(after, Is.Not.Null,
+                        $"A group that accepts passwords - and no SSH keys - did not let the station in: {why}");
+
+            Assert.That(Controller.WebSocketLogins.TryAddOrUpdateGroup("field-test", "Field test", false, [ AuthMethod.Basic ], [ WebSocketClientAuthentication.HTTPAuthWithoutTLS ], null, out error),
+                        Is.True, error);
+
+            Assert.That(await EndsWithin(after!, TimeSpan.FromSeconds(10)), Is.True, "A station of a group switched off stayed connected.");
+
+        }
+
+        #endregion
+
+        #region AStationWhosePasswordIsChangedOrTakenAway_IsSignedOutAtOnce()
+
+        /// <summary>
+        /// A session that came with a password is held to the password it
+        /// came with, as one that came with a key is to its key.
+        /// </summary>
+        [Test]
+        public async Task AStationWhosePasswordIsChangedOrTakenAway_IsSignedOutAtOnce()
+        {
+
+            // Longer than the test, so that only the store's own news can do it.
+            Controller.SSHSessionRecheckEvery = TimeSpan.FromMinutes(10);
+
+            GiveAPassword("cs001", ThePassword);
+            GiveAPassword("cs002", ThePassword);
+
+            var (cs001, why1) = await ConnectWithPassword("cs001", ThePassword);
+            var (cs002, why2) = await ConnectWithPassword("cs002", ThePassword);
+
+            Assert.That(cs001, Is.Not.Null, why1);
+            Assert.That(cs002, Is.Not.Null, why2);
+
+            GiveAPassword("cs001", AnotherPassword);
+
+            Assert.That(await EndsWithin(cs001!, TimeSpan.FromSeconds(10)), Is.True, "A station whose password was changed stayed connected over SSH.");
+            Assert.That(cs002!.IsAlive, Is.True, "Changing one station's password ended another's session.");
+
+            var (old,  _)    = await ConnectWithPassword("cs001", ThePassword);
+            var (anew, why)  = await ConnectWithPassword("cs001", AnotherPassword);
+
+            Assert.Multiple(() => {
+                Assert.That(old,   Is.Null,      "The password a station had before still let it in.");
+                Assert.That(anew,  Is.Not.Null,  $"The password a station has now did not let it in: {why}");
+            });
+
+            Assert.That(Controller.WebSocketLogins.TryClearPassword("cs002", out var error), Is.True, error);
+            Assert.That(await EndsWithin(cs002, TimeSpan.FromSeconds(10)), Is.True, "A station whose password was taken away stayed connected over SSH.");
+
+            var (again, _) = await ConnectWithPassword("cs002", ThePassword);
+
+            Assert.That(again, Is.Null, "A password taken away still let its station in.");
+
+        }
+
+        #endregion
+
         #region AKeysOwnFromOption_IsHeldTo()
 
         /// <summary>
