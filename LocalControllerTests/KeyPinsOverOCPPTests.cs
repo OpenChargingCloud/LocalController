@@ -35,6 +35,7 @@ using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 using cloud.charging.open.LocalController.OCPP;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 
@@ -314,11 +315,11 @@ namespace cloud.charging.open.LocalController.Tests
                                                     new JProperty("nts",  new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
                                                     new JProperty("ocpp", new JObject(new JProperty("nodeId", "lc002"))),
 
-                                                    new JProperty("ocppServer", new JObject(
+                                                    new JProperty("webSocketServer", new JObject(
                                                         new JProperty("enabled",           true),
                                                         new JProperty("address",           "127.0.0.1"),
                                                         new JProperty("port",              port),
-                                                        new JProperty("securityProfiles",  new JArray(2, 3))
+                                                        new JProperty("clientAuthentication",  new JArray("httpAuthOverTLS", "tlsClientCertificate"))
                                                     )),
 
                                                     new JProperty("csms", new JObject(
@@ -338,8 +339,8 @@ namespace cloud.charging.open.LocalController.Tests
 
                                 Assert.That(lc.TrySetUplinkPassword("lc002", ThePassword, out var loginError), Is.True, loginError);
 
-                                Assert.That(lc.StationLogins.TryAddKeyPin("cs001", KeyPin.FromKey(cs001Key).ToHex(), "bay 1", null, null, null, out _, out var error1), Is.True, error1);
-                                Assert.That(lc.StationLogins.TryAddKeyPin("cs002", KeyPin.FromKey(cs002Key).ToHex(), "bay 2", null, null, null, out _, out var error2), Is.True, error2);
+                                Assert.That(lc.WebSocketLogins.TryAddKeyPin("cs001", KeyPin.FromKey(cs001Key).ToHex(), "bay 1", null, null, null, out _, out var error1), Is.True, error1);
+                                Assert.That(lc.WebSocketLogins.TryAddKeyPin("cs002", KeyPin.FromKey(cs002Key).ToHex(), "bay 2", null, null, null, out _, out var error2), Is.True, error2);
 
                                 return lc;
 

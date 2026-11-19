@@ -39,7 +39,7 @@ namespace cloud.charging.open.LocalController.Configuration
     /// and how it dials it.
     /// </summary>
     /// <remarks>
-    /// <b>The mirror image of <see cref="OCPPServerConfiguration"/>.</b> Down
+    /// <b>The mirror image of <see cref="WebSocketServerConfiguration"/>.</b> Down
     /// below this controller is a server that charging stations sign in to; up
     /// here it is a client that signs in to somebody else. The same three OCPP
     /// security profiles, the same three ways of proving who you are - only the

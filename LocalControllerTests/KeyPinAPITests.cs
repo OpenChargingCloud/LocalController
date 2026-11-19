@@ -25,6 +25,7 @@ using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 using org.GraphDefined.Vanaheimr.Hermod;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 
@@ -97,7 +98,7 @@ namespace cloud.charging.open.LocalController.Tests
             using var key  = ECDsa.Create(ECCurve.NamedCurves.nistP256);
 
             var pin      = KeyPin.FromKey(key);
-            var root     = "/api/v1/configuration/ocpp-server/stations";
+            var root     = "/api/v1/configuration/ocpp-server/logins";
 
             var given    = await http.PostAsync($"{root}/cs001/keyPins", JSONBody(new JProperty("pin",    pin.ToHexWithColons()),
                                                                                    new JProperty("label",  "bay 1")));
@@ -105,7 +106,7 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.That(given.StatusCode, Is.EqualTo(HttpStatusCode.OK), await given.Content.ReadAsStringAsync());
 
             var stations = await GetJSON(http, root);
-            var cs001    = stations["stations"]!.OfType<JObject>().Single(station => station.Value<String>("id") == "cs001");
+            var cs001    = stations["logins"]!.OfType<JObject>().Single(station => station.Value<String>("id") == "cs001");
 
             var shared   = await http.PostAsync($"{root}/cs002/keyPins", JSONBody(new JProperty("pin", pin.ToHex())));
             var bad      = await http.PostAsync($"{root}/cs002/keyPins", JSONBody(new JProperty("pin", "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU")));
@@ -122,7 +123,7 @@ namespace cloud.charging.open.LocalController.Tests
             var taken    = await http.DeleteAsync($"{root}/cs001/keyPins/{pin.ToHex()}");
 
             Assert.That(taken.StatusCode, Is.EqualTo(HttpStatusCode.OK), await taken.Content.ReadAsStringAsync());
-            Assert.That(Controller.StationLogins.TryGet("cs001", out var login) && !login.HasKeyPin, Is.True);
+            Assert.That(Controller.WebSocketLogins.TryGet("cs001", out var login) && !login.HasKeyPin, Is.True);
 
             var again    = await http.DeleteAsync($"{root}/cs001/keyPins/{pin.ToHex()}");
 

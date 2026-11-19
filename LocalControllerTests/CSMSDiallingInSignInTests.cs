@@ -47,16 +47,18 @@ namespace cloud.charging.open.LocalController.Tests
 
     /// <summary>
     /// A CSMS that dials the controller signs in with what is more than a
-    /// password: a client certificate - known by the key pin of its key, or by
-    /// the CA of the operator, issued to the name it comes under - or a
-    /// one-time password bound to the TLS session of its line, over HTTP/3.
+    /// password: a client certificate - known by the key pin of its WebSocket
+    /// login, or by a chain the station port accepts, issued to the name it
+    /// comes under - or a one-time password of its login, bound to the TLS
+    /// session of its line, over HTTP/3.
     /// </summary>
     /// <remarks>
     /// The CSMS is a second controller here, whose line up dials the first:
     /// what it sends - a certificate with its chain, a bound one-time
     /// password over HTTP/3 - is what WWCPNode sends, which the CSMS
     /// that dials uses unchanged. The controller under test lets it in on the
-    /// port of its charging stations, by what its connection names.
+    /// port of its charging stations, by its WebSocket login, as it lets in a
+    /// charging station.
     /// </remarks>
     public class CSMSDiallingInSignInTests
     {
@@ -114,11 +116,11 @@ namespace cloud.charging.open.LocalController.Tests
                                              new JObject(
                                                  new JProperty("nts",        new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
                                                  new JProperty("ocpp",       new JObject(new JProperty("nodeId", "lc001"))),
-                                                 new JProperty("ocppServer", new JObject(
+                                                 new JProperty("webSocketServer", new JObject(
                                                      new JProperty("enabled",           true),
                                                      new JProperty("address",           "127.0.0.1"),
                                                      new JProperty("port",              port),
-                                                     new JProperty("securityProfiles",  new JArray(2, 3)),
+                                                     new JProperty("clientAuthentication",  new JArray("httpAuthOverTLS", "tlsClientCertificate")),
                                                      new JProperty("reachableAs",       new JArray("127.0.0.1")),
                                                      new JProperty("subprotocols",      new JArray("ocpp2.1")),
                                                      new JProperty("http3",             true)
@@ -272,9 +274,10 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// Write down, on the controller under test, the CSMS that dials it:
-        /// by the key pin of its client certificate, by the group of roots its
-        /// chain has to end at - the root of the given authority, the site's
-        /// where none is given -, or by credentials.
+        /// its WebSocket login, with the key pin of its client certificate or
+        /// a one-time password bound to its TLS session - or, by its CA, the
+        /// chain of the given authority, the site's where none is given, which
+        /// the station port accepts -, and the connection it makes.
         /// </summary>
         private String TheCSMSIsWrittenDown(String?  KeyPins           = null,
                                             Boolean  ByCA              = false,
@@ -282,26 +285,30 @@ namespace cloud.charging.open.LocalController.Tests
                                             TestCA?  Operator          = null)
         {
 
-            String? login = null;
-
             if (BoundOneTimePass)
-                Assert.That(controller.Connections.TryAddAuthentication("What the CSMS signs in with", "totp", CSMSName, TheSharedSecret,
-                                                                        out login, out var loginError,
-                                                                        TLSChannelBinding: true),
+            {
+
+                Assert.That(controller.WebSocketLogins.TrySetTOTP(CSMSName, TheSharedSecret, null, null, null, null, null, "What the CSMS signs in with",
+                                                                  out _, out var loginError),
                             Is.True, loginError);
 
-            if (ByCA)
-                Assert.That(controller.Certificates.Import(Encoding.ASCII.GetBytes((Operator ?? ca).Certificate.ExportCertificatePem()),
-                                                           CertificateKind.TLSRoot, null, "The operator's authority",
-                                                           [ ServerPins.MarkOf(controller.ConnectionsCertificateUsage, RootGroup) ],
-                                                           out _, out var rootError),
-                            Is.True, rootError);
+                Assert.That(controller.WebSocketLogins.TrySetTOTPBinding(CSMSName, true, out loginError), Is.True, loginError);
 
-            Assert.That(controller.Connections.TryAddConnection("The CSMS, dialling in", $"wss://127.0.0.1:{port}/{CSMSName}", "CSMS", true, login, null,
+            }
+
+            if (KeyPins is not null)
+                Assert.That(controller.WebSocketLogins.TryAddKeyPin(CSMSName, KeyPins, "its client certificate", null, "What the CSMS signs in with", "tests",
+                                                                    out _, out var pinError),
+                            Is.True, pinError);
+
+            if (ByCA)
+                Assert.That(controller.ClientTrust.TryAdd((Operator ?? ca).Certificate.ExportCertificatePem(), "The operator's authority",
+                                                          out _, out _, out var trustError),
+                            Is.True, trustError);
+
+            Assert.That(controller.Connections.TryAddConnection("The CSMS, dialling in", $"wss://127.0.0.1:{port}/{CSMSName}", "CSMS", true, null, null,
                                                                 out var id, out var error,
-                                                                ServerKeyPins:  KeyPins,
-                                                                Pins:           ByCA ? new OCPPConnections.ServerPinsChange(new ServerPins([], [], RootGroup: RootGroup)) : null,
-                                                                Inbound:        true),
+                                                                Inbound: true),
                         Is.True, error);
 
             return id!;
@@ -414,7 +421,7 @@ namespace cloud.charging.open.LocalController.Tests
         /// The charging stations of the controller hold certificates of the
         /// site's authority as well: a certificate of the CSMS gets through the
         /// handshake as a station's would, and what keeps it out of the name
-        /// of the CSMS is the CSMS's connection alone.
+        /// of the CSMS is the WebSocket login of the CSMS alone.
         /// </summary>
         private void TheStationsAreOfTheSiteToo()
 
@@ -474,8 +481,8 @@ namespace cloud.charging.open.LocalController.Tests
         #region ByTheKeyPinOfItsCertificate_ItIsLetIn_WhateverTheCertificateSays()
 
         /// <summary>
-        /// Its connection pins the key of its client certificate: the key is
-        /// the whole check, and the name in the certificate is not the one it
+        /// Its WebSocket login pins the key of its client certificate: the key
+        /// is the whole check, and the name in the certificate is not the one it
         /// comes under. Let in, as security profile 3, with no password at all.
         /// </summary>
         [Test]
@@ -491,7 +498,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(Log, Does.Contain($"The back end '{CSMSName}' dialled this local controller"));
-                Assert.That(Log, Does.Contain("a client certificate, by its key pin"));
+                Assert.That(Log, Does.Contain("signed in with its key pin"));
                 Assert.That(Log, Does.Contain("security profile 3"));
                 Assert.That(controller.StateJSON()["stations"]?["connected"]?.Value<Int32>(), Is.Zero, "the CSMS is counted among the charging stations");
             });
@@ -504,9 +511,8 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// A certificate of the site's authority, which the stations are of as
-        /// well, with another key than the one the connection pins: through
-        /// the handshake as a station's, and not let in under the name of the
-        /// CSMS.
+        /// well, with another key than the one its login pins: through the
+        /// handshake as a station's, and not let in under the name of the CSMS.
         /// </summary>
         [Test]
         public async Task AnotherKey_IsNotLetIn()
@@ -518,7 +524,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             await ACSMSThatDials(CSMSName, Identity: AnIdentity(CSMSName));
 
-            Assert.That(await NeverConnected(id), Is.True, "a key the connection does not pin was let in");
+            Assert.That(await NeverConnected(id), Is.True, "a key its login does not pin was let in");
 
         }
 
@@ -527,9 +533,9 @@ namespace cloud.charging.open.LocalController.Tests
         #region ByItsCA_IssuedToItsName_ItIsLetIn()
 
         /// <summary>
-        /// Its connection holds its certificate to a group of roots of the
-        /// controller's store: issued by that authority, through a sub-CA it
-        /// sends beside it, to the name the CSMS comes under. Let in.
+        /// The station port accepts the chain of its authority: issued by that
+        /// authority, through a sub-CA it sends beside it, to the name the CSMS
+        /// comes under. Let in, without a login, as a charging station is.
         /// </summary>
         [Test]
         public async Task ByItsCA_IssuedToItsName_ItIsLetIn()
@@ -541,10 +547,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.That(await UntilConnected(id), Is.True, $"{csms?.CSMSLastProblem}{Environment.NewLine}{Log}");
 
-            Assert.Multiple(() => {
-                Assert.That(Log, Does.Contain($"a client certificate of 'The operator's authority', issued to '{CSMSName}'"));
-                Assert.That(Log, Does.Contain("security profile 3"));
-            });
+            Assert.That(Log, Does.Contain($"The back end '{CSMSName}' dialled this local controller").And.Contain("signed in with a certificate (security profile 3)"));
 
         }
 
@@ -576,8 +579,6 @@ namespace cloud.charging.open.LocalController.Tests
             // of the name of the CSMS by the name it is issued to - at the door of
             // the station server, which takes no certificate for a path that is
             // not its common name (403), before the connection is asked.
-            else
-                TheStationsAreOfTheSiteToo();
 
             await ACSMSThatDials(CSMSName, Identity: AnIdentity(IssuedTo, another));
 
@@ -591,9 +592,9 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// The certificate the CSMS signs in with gets through the handshake by
-        /// the key pin its connection names. On the path of a charging station
-        /// it is no station's: not held to the stations' authorities, it lets
-        /// nobody in.
+        /// the key pin of its login. On the path of a charging station it is no
+        /// station's: the key pin lets in its login, on its own path, and
+        /// nobody else.
         /// </summary>
         [Test]
         public async Task ItsCertificate_OpensNoStationsPath()
@@ -607,7 +608,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(async () => {
                 Assert.That(await NeverConnected(null),  Is.True, "the certificate of the CSMS let a charging station in");
-                Assert.That(Log,                         Does.Contain("is the one a back end that dials signs in with"));
+                Assert.That(Log,                         Does.Contain($"is the WebSocket login '{CSMSName}''s, and it asked to connect as 'cs009'"));
             });
 
         }
@@ -617,8 +618,8 @@ namespace cloud.charging.open.LocalController.Tests
         #region AOneTimePasswordBoundToItsLine_LetsItInOverHTTP3()
 
         /// <summary>
-        /// Its credentials bind the one-time password to the TLS session: over
-        /// HTTP/3, whose TLS exports what it is bound with, it is let in.
+        /// Its WebSocket login binds the one-time password to the TLS session:
+        /// over HTTP/3, whose TLS exports what it is bound with, it is let in.
         /// </summary>
         [Test]
         public async Task AOneTimePasswordBoundToItsLine_LetsItInOverHTTP3()
@@ -632,7 +633,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.That(await UntilConnected(id), Is.True, $"{csms?.CSMSLastProblem}{Environment.NewLine}{Log}");
 
-            Assert.That(Log, Does.Contain("a one-time password bound to its TLS session (security profile 2"));
+            Assert.That(Log, Does.Contain($"The back end '{CSMSName}' dialled this local controller").And.Contain("bound to its").And.Contain("(security profile 2"));
 
         }
 
@@ -690,192 +691,11 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region ACertificateOfAConnectionOfAnotherVersion_IsNotClaimed_UnderTheSameName(ByCA)
-
-        /// <summary>
-        /// The name of an inbound connection is its own within its version of
-        /// OCPP alone: here a connection of OCPP 1.6 that signs in with a client
-        /// certificate, and one of OCPP 2.1 under the same name that signs in
-        /// with a password. At a handshake of the server of OCPP 2.1 nobody
-        /// claims the certificate of the first - or a server that takes the
-        /// common name of a certificate its handshake accepted for who it is,
-        /// one not shared with others, would let it in as the second without
-        /// its password. Over OCPP 1.6 it is claimed, and passes.
-        /// </summary>
-        /// <remarks>
-        /// The controller serves OCPP 2.1 alone; its station server is served
-        /// for OCPP 1.6 as well here, as a node that serves both would, and the
-        /// checks are asked as the validator of each server asks them.
-        /// </remarks>
-        [TestCase(false)]
-        [TestCase(true)]
-        public void ACertificateOfAConnectionOfAnotherVersion_IsNotClaimed_UnderTheSameName(Boolean ByCA)
-        {
-
-            AsTheNode("ServeInbound", OCPPConnections.OCPPVersion.OCPP1_6, controller.StationServer!, true);
-
-            var identity = AnIdentity(CSMSName);
-
-            if (ByCA)
-                Assert.That(controller.Certificates.Import(Encoding.ASCII.GetBytes(ca.Certificate.ExportCertificatePem()),
-                                                           CertificateKind.TLSRoot, null, "The operator's authority",
-                                                           [ ServerPins.MarkOf(controller.ConnectionsCertificateUsage, RootGroup) ],
-                                                           out _, out var rootError),
-                            Is.True, rootError);
-
-            Assert.That(controller.Connections.TryAddConnection("The CSMS, dialling in over OCPP 1.6", $"wss://127.0.0.1:{port}/{CSMSName}", "CSMS", true, null, null,
-                                                                out _, out var error,
-                                                                OCPPVersion:    "1.6",
-                                                                ServerKeyPins:  ByCA ? null : KeyPinOf(identity),
-                                                                Pins:           ByCA ? new OCPPConnections.ServerPinsChange(new ServerPins([], [], RootGroup: RootGroup)) : null,
-                                                                Inbound:        true),
-                        Is.True, error);
-
-            Assert.That(controller.Connections.TryAddAuthentication("What the CSMS signs in with over OCPP 2.1", "basic", CSMSName, TheSharedSecret,
-                                                                    out var login, out var loginError),
-                        Is.True, loginError);
-
-            Assert.That(controller.Connections.TryAddConnection("The CSMS, dialling in over OCPP 2.1", $"wss://127.0.0.1:{port}/{CSMSName}", "CSMS", true, login, null,
-                                                                out _, out var error21,
-                                                                OCPPVersion:    "2.1",
-                                                                Inbound:        true),
-                        Is.True, error21);
-
-            var certificates = X509CertificateLoader.LoadPkcs12Collection(identity, null);
-
-            try
-            {
-
-                var certificate  = certificates.First(one => one.HasPrivateKey);
-
-                // The chain as a handshake builds it: with what was sent beside
-                // the certificate, and a root this machine does not trust.
-                using var chain  = new X509Chain();
-                chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-                chain.ChainPolicy.ExtraStore.AddRange(certificates.Where(one => !one.HasPrivateKey).ToArray());
-
-                var errors       = chain.Build(certificate) ? SslPolicyErrors.None : SslPolicyErrors.RemoteCertificateChainErrors;
-
-                var over21       = AsTheNode("InboundCertificateCheck", OCPPConnections.OCPPVersion.OCPP2_1, certificate, chain, errors);
-                var over16       = AsTheNode("InboundCertificateCheck", OCPPConnections.OCPPVersion.OCPP1_6, certificate, chain, errors);
-
-                Assert.Multiple(() => {
-
-                    Assert.That(over21,                                                                                          Is.Null,  "the certificate of the connection of OCPP 1.6 was claimed at a handshake of OCPP 2.1");
-                    Assert.That(AsTheNode("IsAnInboundCertificate", OCPPConnections.OCPPVersion.OCPP2_1, certificate),           Is.False, "an inbound certificate of OCPP 2.1");
-                    Assert.That(AsTheNode("IsInboundKeyPinned",     OCPPConnections.OCPPVersion.OCPP2_1, certificate),           Is.False, "key-pinned over OCPP 2.1");
-
-                    Assert.That(over16?.GetType().GetProperty("IsValid")?.GetValue(over16),                                      Is.True,  "over OCPP 1.6 it did not pass: " + over16);
-                    Assert.That(AsTheNode("IsAnInboundCertificate", OCPPConnections.OCPPVersion.OCPP1_6, certificate),           Is.True,  "not an inbound certificate of OCPP 1.6");
-                    Assert.That(AsTheNode("IsInboundKeyPinned",     OCPPConnections.OCPPVersion.OCPP1_6, certificate),           Is.EqualTo(!ByCA));
-
-                });
-
-            }
-            finally
-            {
-                foreach (var one in certificates)
-                    one.Dispose();
-            }
-
-        }
-
-        /// <summary>
-        /// Ask the controller what only the kind of node itself asks: the
-        /// protected methods of the node of connections, WWCPNode.
-        /// </summary>
-        private Object? AsTheNode(String Method, params Object[] Arguments)
-
-            => typeof(WWCPNode).GetMethods(BindingFlags.NonPublic | BindingFlags.Instance).
-                                Single(method => method.Name == Method && method.GetParameters().Length == Arguments.Length).
-                                Invoke(controller, Arguments);
-
-        #endregion
-
-        #region AHint_SaysWhatACertificateOfItsCA_HasToBeIssuedTo(IssuedTo, ByAnotherCA, Hinted)
-
-        /// <summary>
-        /// A certificate refused at the station port that leads to the roots a
-        /// CSMS that dials is checked by, and is issued to another name than it
-        /// comes under: the hint for the log says what it has to be issued to.
-        /// Of another CA, or issued to the name of the CSMS - and so claimed by
-        /// its connection -, there is nothing to hint at.
-        /// </summary>
-        [TestCase("csms-02", false, true)]
-        [TestCase("csms-02", true,  false)]
-        [TestCase(CSMSName,  false, false)]
-        public void AHint_SaysWhatACertificateOfItsCA_HasToBeIssuedTo(String IssuedTo, Boolean ByAnotherCA, Boolean Hinted)
-        {
-
-            TheCSMSIsWrittenDown(ByCA: true);
-
-            TestCA? another = null;
-
-            if (ByAnotherCA)
-            {
-                another = TestCA.Create($"Another CA {Guid.NewGuid()}", WithIntermediate: true);
-                more.Add(another);
-            }
-
-            var certificates = X509CertificateLoader.LoadPkcs12Collection(AnIdentity(IssuedTo, another), null);
-
-            try
-            {
-
-                var certificate  = certificates.First(one => one.HasPrivateKey);
-
-                using var chain  = new X509Chain();
-                chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-                chain.ChainPolicy.ExtraStore.AddRange(certificates.Where(one => !one.HasPrivateKey).ToArray());
-
-                var errors       = chain.Build(certificate) ? SslPolicyErrors.None : SslPolicyErrors.RemoteCertificateChainErrors;
-
-                var hint         = AsTheNode("InboundCertificateHint", OCPPConnections.OCPPVersion.OCPP2_1, certificate, chain, errors) as String;
-
-                if (Hinted)
-                    Assert.That(hint, Does.Contain($"has to be issued to '{CSMSName}'").And.Contain($"issued to '{IssuedTo}'"));
-                else
-                    Assert.That(hint, Is.Null);
-
-            }
-            finally
-            {
-                foreach (var one in certificates)
-                    one.Dispose();
-            }
-
-        }
-
-        #endregion
-
-        #region ACertificateOfItsCA_IssuedToAnotherName_IsRefusedWithAHint()
-
-        /// <summary>
-        /// The stations are not of the CA of the CSMS: a certificate of that CA
-        /// issued to another name is refused at the handshake as a station's,
-        /// and the log says what it has to be issued to.
-        /// </summary>
-        [Test]
-        public async Task ACertificateOfItsCA_IssuedToAnotherName_IsRefusedWithAHint()
-        {
-
-            var id = TheCSMSIsWrittenDown(ByCA: true);
-
-            await ACSMSThatDials(CSMSName, Identity: AnIdentity("csms-02"));
-
-            Assert.That(await NeverConnected(id), Is.True, "a certificate issued to another name was let in");
-
-            Assert.That(Log, Does.Contain($"has to be issued to '{CSMSName}'"), Log);
-
-        }
-
-        #endregion
-
         #region ThroughASubCA_WhichItSendsAlong_ItIsLetIn(NamedByItsConnection)
 
         /// <summary>
         /// Its certificate comes from a sub-CA of its operator's authority, and
-        /// the controller is told the root of that authority alone: the CSMS
+        /// the station port accepts the root of that authority alone: the CSMS
         /// sends the sub-CA beside its certificate, and the controller builds
         /// the chain with it. Whether its identity is the one its connection
         /// names, or the one the section "csms" chose.
@@ -903,7 +723,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.That(await UntilConnected(id), Is.True, $"{csms?.CSMSLastProblem}{Environment.NewLine}{Log}");
 
-            Assert.That(Log, Does.Contain($"a client certificate of 'The operator's authority', issued to '{CSMSName}'"));
+            Assert.That(Log, Does.Contain($"The back end '{CSMSName}' dialled this local controller").And.Contain("signed in with a certificate"));
 
         }
 
@@ -912,10 +732,10 @@ namespace cloud.charging.open.LocalController.Tests
         #region ThroughASubCA_WhichTheControllerKeeps_ItsCertificateAloneIsLetIn()
 
         /// <summary>
-        /// The other way: the CSMS shows its certificate alone, and the
-        /// controller keeps the sub-CA between it and the root as an issuing
-        /// CA of its certificate store. Not let in while it does not, and let
-        /// in once it does - read at every handshake, without a restart.
+        /// The other way: the CSMS shows its certificate alone, and the station
+        /// port keeps the sub-CA between it and the root with the chain it
+        /// accepts. Not let in while it does not, and let in once it does -
+        /// read at every handshake, without a restart.
         /// </summary>
         [Test]
         public async Task ThroughASubCA_WhichTheControllerKeeps_ItsCertificateAloneIsLetIn()
@@ -924,20 +744,19 @@ namespace cloud.charging.open.LocalController.Tests
             var operatorCA = TestCA.Create($"Operator CA {Guid.NewGuid()}", WithIntermediate: true);
             more.Add(operatorCA);
 
-            var id = TheCSMSIsWrittenDown(ByCA: true, Operator: operatorCA);
+            var id = TheCSMSIsWrittenDown();
 
             await ACSMSThatDials(CSMSName, Identity: AnIdentity(CSMSName, operatorCA, WithItsSubCA: false), NamedByItsConnection: true);
 
             Assert.That(await NeverConnected(id), Is.True, "its certificate alone was let in, though nobody told the controller the sub-CA above it");
 
-            Assert.That(controller.Certificates.Import(Encoding.ASCII.GetBytes(operatorCA.Intermediate!.ExportCertificatePem()),
-                                                       CertificateKind.TLSIntermediate, null, "The operator's issuing CA", null,
-                                                       out _, out var keptError),
+            Assert.That(controller.ClientTrust.TryAdd(operatorCA.Intermediate!.ExportCertificatePem() + "\n" + operatorCA.Certificate.ExportCertificatePem(),
+                                                      "The operator's authority, with its issuing CA", out _, out _, out var keptError),
                         Is.True, keptError);
 
             Assert.That(await UntilConnected(id), Is.True, $"{csms?.CSMSLastProblem}{Environment.NewLine}{Log}");
 
-            Assert.That(Log, Does.Contain($"a client certificate of 'The operator's authority', issued to '{CSMSName}'"));
+            Assert.That(Log, Does.Contain($"The back end '{CSMSName}' dialled this local controller").And.Contain("signed in with a certificate"));
 
         }
 
@@ -946,9 +765,10 @@ namespace cloud.charging.open.LocalController.Tests
         #region AnIssuingCAOfAnotherAuthority_OpensNothing()
 
         /// <summary>
-        /// A sub-CA the controller keeps is believed nothing by itself: a
-        /// certificate of it, of an authority the connection is not held to,
-        /// is not let in, whether it is shown alone or with the sub-CA.
+        /// A sub-CA the controller keeps in its store is believed nothing by
+        /// the station port: a certificate of it, of an authority the station
+        /// port does not accept, is not let in, whether it is shown alone or
+        /// with the sub-CA.
         /// </summary>
         [TestCase(false)]
         [TestCase(true)]

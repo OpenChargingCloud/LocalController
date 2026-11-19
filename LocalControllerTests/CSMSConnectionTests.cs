@@ -24,6 +24,7 @@ using NUnit.Framework;
 using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 
@@ -124,17 +125,17 @@ namespace cloud.charging.open.LocalController.Tests
                            Directory,
                            new JObject(
                                new JProperty("nts", new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
-                               new JProperty("ocppServer", new JObject(
+                               new JProperty("webSocketServer", new JObject(
                                    new JProperty("enabled",           true),
                                    new JProperty("address",           "127.0.0.1"),
                                    new JProperty("port",              Port),
-                                   new JProperty("securityProfiles",  new JArray(1)),
+                                   new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS")),
                                    new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1"))
                                ))
                            )
                        );
 
-            if (!csms.StationLogins.TrySetPassword("lc002", Password, null, "The controller below", out _, out var error))
+            if (!csms.WebSocketLogins.TrySetPassword("lc002", Password, null, "The controller below", out var error))
                 throw new InvalidOperationException($"The test's own upstream login was refused: {error}");
 
             return csms;
@@ -341,7 +342,7 @@ namespace cloud.charging.open.LocalController.Tests
         private LocalController AControllerThatDialsWithAOneTimePassword(String SharedSecret = TheSharedSecret)
         {
 
-            if (!upstream.StationLogins.TrySetTOTP("lc002", TheSharedSecret, null, null, null, null, null, null, out _, out var upstreamError))
+            if (!upstream.WebSocketLogins.TrySetTOTP("lc002", TheSharedSecret, null, null, null, null, null, null, out _, out var upstreamError))
                 throw new InvalidOperationException($"The test's own upstream TOTP login was refused: {upstreamError}");
 
             var controller = AControllerThatDials(Password: null);

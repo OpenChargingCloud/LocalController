@@ -29,6 +29,7 @@ using NUnit.Framework;
 using cloud.charging.open.protocols.WWCP.NetworkingNode;
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
 using cloud.charging.open.protocols.OCPPv2_1;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 
@@ -130,17 +131,17 @@ namespace cloud.charging.open.LocalController.Tests
                                upstreamDirectory,
                                new JObject(
                                    new JProperty("nts",        NoTimeServers),
-                                   new JProperty("ocppServer", new JObject(
+                                   new JProperty("webSocketServer", new JObject(
                                        new JProperty("enabled",           true),
                                        new JProperty("address",           "127.0.0.1"),
                                        new JProperty("port",              csmsPort = TestPorts.Free()),
-                                       new JProperty("securityProfiles",  new JArray(1)),
+                                       new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS")),
                                        new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1"))
                                    ))
                                )
                            );
 
-                if (!csms.StationLogins.TrySetPassword("lc002", UplinkPassword, null, "The controller below", out _, out var error))
+                if (!csms.WebSocketLogins.TrySetPassword("lc002", UplinkPassword, null, "The controller below", out var error))
                     throw new InvalidOperationException($"The test's own upstream login was refused: {error}");
 
                 csms.Node.OCPP.IN.AnycastIds.Add(NetworkingNode_Id.CSMS);
@@ -193,11 +194,11 @@ namespace cloud.charging.open.LocalController.Tests
                                              : new JObject(
                                                    new JProperty("enabled",          false)
                                                )),
-                                         new JProperty("ocppServer", new JObject(
+                                         new JProperty("webSocketServer", new JObject(
                                              new JProperty("enabled",           true),
                                              new JProperty("address",           "127.0.0.1"),
                                              new JProperty("port",              TestPorts.Free()),
-                                             new JProperty("securityProfiles",  new JArray(1)),
+                                             new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS")),
                                              new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1"))
                                          ))
                                      )
@@ -206,7 +207,7 @@ namespace cloud.charging.open.LocalController.Tests
                 if (WithACSMS && !controller.TrySetUplinkPassword("lc002", UplinkPassword, out var loginError))
                     throw new InvalidOperationException($"The test's own credentials were refused: {loginError}");
 
-                if (!controller.StationLogins.TrySetPassword("cs001", ThePassword, null, "A station", out _, out var error))
+                if (!controller.WebSocketLogins.TrySetPassword("cs001", ThePassword, null, "A station", out var error))
                     throw new InvalidOperationException($"The test's own station login was refused: {error}");
 
                 return controller;

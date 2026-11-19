@@ -39,7 +39,7 @@ export * from '@ocpp/api/connections';
  */
 export type Resource = NodeResource
                      | 'log' | 'node' | 'reset' | 'reset-immediate' | 'state' | 'firmware' | 'signatures'
-                     | 'csms' | 'stations' | 'openadr';
+                     | 'csms' | 'stations' | 'openadr' | 'commissioning';
 
 /** What somebody signed in to this local controller may do: an operation on a resource, written "dns:edit". */
 export type Permission = `${Resource}:${Operation}`;

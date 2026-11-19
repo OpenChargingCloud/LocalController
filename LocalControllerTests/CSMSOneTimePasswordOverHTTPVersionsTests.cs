@@ -28,6 +28,7 @@ using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 using cloud.charging.open.LocalController.OCPP;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 
@@ -94,11 +95,11 @@ namespace cloud.charging.open.LocalController.Tests
                                           upstreamDirectory,
                                           new JObject(
                                               new JProperty("nts", new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
-                                              new JProperty("ocppServer", new JObject(
+                                              new JProperty("webSocketServer", new JObject(
                                                   new JProperty("enabled",           true),
                                                   new JProperty("address",           "127.0.0.1"),
                                                   new JProperty("port",              csmsPort),
-                                                  new JProperty("securityProfiles",  new JArray(2)),
+                                                  new JProperty("clientAuthentication",  new JArray("httpAuthOverTLS")),
                                                   new JProperty("reachableAs",       new JArray("127.0.0.1")),
                                                   new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1")),
                                                   new JProperty("http3",             true)
@@ -106,7 +107,7 @@ namespace cloud.charging.open.LocalController.Tests
                                           )
                                       );
 
-                           if (!made.StationLogins.TrySetTOTP("lc002", TheSharedSecret, null, null, null, null, null, "The controller below", out _, out var error))
+                           if (!made.WebSocketLogins.TrySetTOTP("lc002", TheSharedSecret, null, null, null, null, null, "The controller below", out _, out var error))
                                throw new InvalidOperationException($"The test's own upstream TOTP login was refused: {error}");
 
                            return made;
@@ -336,7 +337,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ATokenBoundToTheLineSignsItInOverHTTP3()
         {
 
-            Assert.That(upstream.StationLogins.TrySetTOTPBinding("lc002", true, out var bindingError), Is.True, bindingError);
+            Assert.That(upstream.WebSocketLogins.TrySetTOTPBinding("lc002", true, out var bindingError), Is.True, bindingError);
 
             TheCSMSTakesHTTP3();
 
@@ -364,7 +365,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ARawTokenIsRefusedByACSMSThatAsksForTheBinding()
         {
 
-            Assert.That(upstream.StationLogins.TrySetTOTPBinding("lc002", true, out var bindingError), Is.True, bindingError);
+            Assert.That(upstream.WebSocketLogins.TrySetTOTPBinding("lc002", true, out var bindingError), Is.True, bindingError);
 
             TheCSMSTakesHTTP3();
 

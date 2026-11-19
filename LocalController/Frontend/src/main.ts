@@ -16,6 +16,7 @@ import { statePage }              from './pages/state';
 
 import { sshKeysSection }         from '@ocpp/sshKeys';
 import { connectionsPage }        from '@ocpp/pages/connections';
+import { commissioningPage }      from '@ocpp/pages/commissioning';
 import { setConnectionsResource, setNodeNoun, setNodeTraits } from '@ocpp/settings';
 
 // The lines up to the CSMS are connections, drawn by the pages a charging
@@ -60,8 +61,9 @@ startNode({
             nodeMenu.identities,
             nodeMenu.serverIdentities,
             { path: '/configuration/ocpp-server',              label: 'Charging stations',   icon: 'fa-charging-station',  permission: [ 'stations:read' ]     },
-            { path: '/configuration/ocpp-server/logins',        label: 'Logins and groups',   icon: 'fa-users-gear',        permission: [ 'stations:read' ]     },
-            { path: '/configuration/ocpp-server/trust',         label: 'Accepted chains',     icon: 'fa-user-shield',       permission: [ 'certificates:read' ] }
+            { path: '/configuration/ocpp-server/logins',        label: 'WebSocket logins',    icon: 'fa-users-gear',        permission: [ 'stations:read' ]     },
+            { path: '/configuration/ocpp-server/trust',         label: 'Accepted chains',     icon: 'fa-user-shield',       permission: [ 'certificates:read' ] },
+            { path: '/configuration/commissioning',             label: 'Commissioning',       icon: 'fa-screwdriver-wrench', permission: [ 'commissioning:read' ] }
         ]),
         { path: '/state', label: 'State', icon: 'fa-heart-pulse', permission: [ 'state:read' ] },
         nodeMenu.logs
@@ -110,6 +112,7 @@ startNode({
         // a page of its own.
         '/configuration/ocpp-server/certificates':  movedTo('/configuration/server-identities', 'Server identities'),
         '/configuration/ocpp-server/trust':         clientTrustPage,
+        '/configuration/commissioning':             commissioningPage,
 
         '/state':                                   statePage
 

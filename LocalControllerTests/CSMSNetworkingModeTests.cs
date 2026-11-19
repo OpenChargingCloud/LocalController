@@ -35,6 +35,7 @@ using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 using cloud.charging.open.LocalController.OCPP;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 
@@ -342,11 +343,11 @@ namespace cloud.charging.open.LocalController.Tests
                                                     new JProperty("nts",  new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
                                                     new JProperty("ocpp", new JObject(new JProperty("nodeId", ControllerId))),
 
-                                                    new JProperty("ocppServer", new JObject(
+                                                    new JProperty("webSocketServer", new JObject(
                                                         new JProperty("enabled",           true),
                                                         new JProperty("address",           "127.0.0.1"),
                                                         new JProperty("port",              port),
-                                                        new JProperty("securityProfiles",  new JArray(2, 3))
+                                                        new JProperty("clientAuthentication",  new JArray("httpAuthOverTLS", "tlsClientCertificate"))
                                                     )),
 
                                                     new JProperty("csms", new JObject(
@@ -365,8 +366,8 @@ namespace cloud.charging.open.LocalController.Tests
 
                                 Assert.That(lc.TrySetUplinkPassword(ControllerId, ThePassword, out var loginError), Is.True, loginError);
 
-                                Assert.That(lc.StationLogins.TryAddKeyPin("cs001", KeyPin.FromKey(cs001Key).ToHex(), "bay 1", null, null, null, out _, out var error1), Is.True, error1);
-                                Assert.That(lc.StationLogins.TryAddKeyPin("cs002", KeyPin.FromKey(cs002Key).ToHex(), "bay 2", null, null, null, out _, out var error2), Is.True, error2);
+                                Assert.That(lc.WebSocketLogins.TryAddKeyPin("cs001", KeyPin.FromKey(cs001Key).ToHex(), "bay 1", null, null, null, out _, out var error1), Is.True, error1);
+                                Assert.That(lc.WebSocketLogins.TryAddKeyPin("cs002", KeyPin.FromKey(cs002Key).ToHex(), "bay 2", null, null, null, out _, out var error2), Is.True, error2);
 
                                 return lc;
 
@@ -620,6 +621,37 @@ namespace cloud.charging.open.LocalController.Tests
                 {
                     Assert.That(DestinationOf(told!),  Is.EqualTo("CSMS"));
                     Assert.That(PathOf(told!),         Is.EqualTo(new[] { ControllerId }), "the controller's own request names another source");
+                }
+
+            });
+
+        }
+
+        #endregion
+
+        #region TheControllersBootNotification_GoesUpInTheFrameOfTheMode()
+
+        /// <summary>
+        /// The BootNotification of the controller goes up as its other requests do: in the overlay
+        /// network to the CSMS by the name the CSMS answers to - not by the name the controller's own
+        /// routing has for the line, which the CSMS does not know and turned away as a request to pass on.
+        /// </summary>
+        [Test]
+        public async Task TheControllersBootNotification_GoesUpInTheFrameOfTheMode()
+        {
+
+            var boot = await csms.SentRequest("BootNotification", _ => true, EventPatience);
+
+            Assert.That(boot, Is.Not.Null, "the controller sent no BootNotification");
+
+            Assert.Multiple(() => {
+
+                Assert.That(IsOverlay(boot!),  Is.EqualTo(Overlay), boot!.ToString(Formatting.None));
+
+                if (Overlay)
+                {
+                    Assert.That(DestinationOf(boot!),  Is.EqualTo("CSMS"), "the BootNotification names a destination the CSMS does not answer to");
+                    Assert.That(PathOf(boot!),         Is.EqualTo(new[] { ControllerId }));
                 }
 
             });

@@ -103,11 +103,11 @@ namespace cloud.charging.open.LocalController.Tests
                                           upstreamDirectory,
                                           new JObject(
                                               new JProperty("nts", new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
-                                              new JProperty("ocppServer", new JObject(
+                                              new JProperty("webSocketServer", new JObject(
                                                   new JProperty("enabled",           true),
                                                   new JProperty("address",           "127.0.0.1"),
                                                   new JProperty("port",              csmsPort),
-                                                  new JProperty("securityProfiles",  new JArray(3)),
+                                                  new JProperty("clientAuthentication",  new JArray("tlsClientCertificate")),
                                                   new JProperty("reachableAs",       new JArray("127.0.0.1")),
                                                   new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1"))
                                               ))

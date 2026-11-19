@@ -18,6 +18,7 @@
 #region Usings
 
 using org.GraphDefined.Vanaheimr.Hermod;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 using OCPPv2_1    = cloud.charging.open.protocols.OCPPv2_1;
 using OCPPv2_1_LC = cloud.charging.open.protocols.OCPPv2_1.LocalController;
@@ -66,7 +67,7 @@ namespace cloud.charging.open.LocalController
                                                                                  new OCPPv2_1.StatusInfo("NotSupported", "This local controller lets its stations in over SSH for OCPP only."),
                                                                                  HostKeys: HostKeyFingerprints));
 
-                if (!StationLogins.TryAddSSHKey(request.NetworkingNodeId.ToString(),
+                if (!WebSocketLogins.TryAddSSHKey(request.NetworkingNodeId.ToString(),
                                                 request.PublicKey,
                                                 "Installed by the CSMS",
                                                 null,
@@ -100,7 +101,7 @@ namespace cloud.charging.open.LocalController
 
             Node.OCPP.IN.OnDeleteSSHKey += (timestamp, sender, connection, request, cancellationToken) => {
 
-                var deleted = StationLogins.TryRemoveSSHKey(request.NetworkingNodeId.ToString(), request.KeyFingerprint, out var error);
+                var deleted = WebSocketLogins.TryRemoveSSHKey(request.NetworkingNodeId.ToString(), request.KeyFingerprint, out var error);
 
                 return Task.FromResult(deleted
                                            ? new OCPPv2_1.CS.DeleteSSHKeyResponse(request, OCPPv2_1.GenericStatus.Accepted)
@@ -112,7 +113,7 @@ namespace cloud.charging.open.LocalController
 
                 var keys = request.Purpose is OCPPv2_1.SSHKeyPurpose purpose && purpose != OCPPv2_1.SSHKeyPurpose.Station
                                ? []
-                               : StationLogins.Logins.
+                               : WebSocketLogins.Logins.
                                      Where     (login => request.NetworkingNodeId is null || login.Id == request.NetworkingNodeId.Value.ToString()).
                                      SelectMany(login => login.Keys.Select(key => new OCPPv2_1.InstalledSSHKey(protocols.WWCP.NetworkingNode.NetworkingNode_Id.Parse(login.Id),
                                                                                                                OCPPv2_1.SSHKeyPurpose.Station,

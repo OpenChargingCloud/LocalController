@@ -30,7 +30,7 @@ namespace cloud.charging.open.LocalController.Tests
 {
 
     /// <summary>
-    /// The section "ocppServer" as a part of a local controller's configuration
+    /// The section "webSocketServer" as a part of a local controller's configuration
     /// document. The section itself is WWCP_OCPP_Node's, and tested there (its
     /// OCPPServerConfigurationTests); what is tested here is that the document
     /// of a local controller carries it like every other of its sections.
@@ -48,11 +48,11 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(() => {
 
                 Assert.That(ControllerConfiguration.TryParse(
-                                new JObject(new JProperty("ocppServer", "on")),
+                                new JObject(new JProperty("webSocketServer", "on")),
                                 out _, out var error
                             ), Is.False);
 
-                Assert.That(error, Does.Contain("ocppServer"));
+                Assert.That(error, Does.Contain("webSocketServer"));
 
             });
 
@@ -67,7 +67,7 @@ namespace cloud.charging.open.LocalController.Tests
         {
 
             var document = new JObject(
-                               new JProperty("ocppServer", new JObject(
+                               new JProperty("webSocketServer", new JObject(
                                    new JProperty("enabled", true),
                                    new JProperty("port",    9000)
                                ))
@@ -79,7 +79,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(configuration!.OCPPServer?.Enabled,            Is.True);
                 Assert.That(configuration.OCPPServer?.TCPPort?.ToUInt16(),  Is.EqualTo(9000));
                 Assert.That(configuration.IsEmpty,                          Is.False);
-                Assert.That(configuration.ToJSON()["ocppServer"]?.Value<Int32>("port"), Is.EqualTo(9000));
+                Assert.That(configuration.ToJSON()["webSocketServer"]?.Value<Int32>("port"), Is.EqualTo(9000));
             });
 
         }

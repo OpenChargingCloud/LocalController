@@ -91,11 +91,11 @@ namespace cloud.charging.open.LocalController.Tests
                                                     new JProperty("nts",  new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
                                                     new JProperty("ocpp", new JObject(new JProperty("nodeId", "lc003"))),
 
-                                                    new JProperty("ocppServer", new JObject(
+                                                    new JProperty("webSocketServer", new JObject(
                                                         new JProperty("enabled",           true),
                                                         new JProperty("address",           "127.0.0.1"),
                                                         new JProperty("port",              port),
-                                                        new JProperty("securityProfiles",  new JArray(1))
+                                                        new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS"))
                                                     )),
 
                                                     new JProperty("csms", new JObject(
@@ -222,10 +222,10 @@ namespace cloud.charging.open.LocalController.Tests
         #region (private) InTheFile / Log / Listens(Port)
 
         /// <summary>
-        /// The section "ocppServer" as the configuration file has it now.
+        /// The section "webSocketServer" as the configuration file has it now.
         /// </summary>
         private JObject InTheFile
-            => JObject.Parse(File.ReadAllText(controller.ConfigFile.Path))["ocppServer"] as JObject ?? [];
+            => JObject.Parse(File.ReadAllText(controller.ConfigFile.Path))["webSocketServer"] as JObject ?? [];
 
         /// <summary>
         /// What the controller said, for the message of an assertion.
@@ -312,11 +312,11 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(read["LogMessages"].Value,       Is.EqualTo("true"));
                 Assert.That(read["WaitingForARestart"].Value, Is.EqualTo(""));
 
-                Assert.That(InTheFile["securityProfiles"]?.Values<Int32>(),  Is.EqualTo(new[] { 1, 2 }));
+                Assert.That(InTheFile["clientAuthentication"]?.Values<String>(),  Is.EqualTo(new[] { "httpAuthWithoutTLS", "httpAuthOverTLS" }));
                 Assert.That(InTheFile["reachableAs"]?.Values<String>(),      Is.EqualTo(new[] { "lc.example", "192.0.2.1" }));
                 Assert.That(InTheFile["logging"]?["messages"]?.Value<Boolean>(), Is.True);
 
-                Assert.That(page["securityProfiles"]?.Values<Int32>(),       Is.EqualTo(new[] { 1, 2 }), "the page reads something else");
+                Assert.That(page["clientAuthentication"]?.Values<String>(),       Is.EqualTo(new[] { "httpAuthWithoutTLS", "httpAuthOverTLS" }), "the page reads something else");
                 Assert.That(Log, Does.Contain("Over OCPP, OCPPServerController.SecurityProfiles, OCPPServerController.ReachableAs, OCPPServerController.LogMessages were set."));
 
             });
@@ -400,8 +400,8 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(() => {
                 Assert.That(set["SecurityProfiles"].Status,  Is.EqualTo("Rejected"));
                 Assert.That(set["SecurityProfiles"].Reason,  Is.EqualTo("InvalidValue"));
-                Assert.That(set["SecurityProfiles"].Info,    Does.Contain("Security profiles 2 and 3 both need TLS"));
-                Assert.That(InTheFile["securityProfiles"]?.Values<Int32>(), Is.EqualTo(new[] { 1 }));
+                Assert.That(set["SecurityProfiles"].Info,    Does.Contain("(security profiles 2 and 3) both need TLS"));
+                Assert.That(InTheFile["clientAuthentication"]?.Values<String>(), Is.EqualTo(new[] { "httpAuthWithoutTLS" }));
             });
 
         }

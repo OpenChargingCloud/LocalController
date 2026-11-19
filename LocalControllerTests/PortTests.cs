@@ -94,7 +94,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                  directory,
                                                  new JObject(
                                                      new JProperty("nts",         new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
-                                                     new JProperty("ocppServer",  new JObject(
+                                                     new JProperty("webSocketServer",  new JObject(
                                                          new JProperty("enabled",  true),
                                                          new JProperty("address",  "127.0.0.1"),
                                                          new JProperty("port",     taken)

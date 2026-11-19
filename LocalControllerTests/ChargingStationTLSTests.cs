@@ -30,6 +30,7 @@ using cloud.charging.open.LocalController.OCPP;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
 using cloud.charging.open.protocols.WWCP.Node.Certificates;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 
@@ -105,18 +106,18 @@ namespace cloud.charging.open.LocalController.Tests
 
                                                  new JProperty("nts", new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
 
-                                                 new JProperty("ocppServer", new JObject(
+                                                 new JProperty("webSocketServer", new JObject(
                                                      new JProperty("enabled",           true),
                                                      new JProperty("address",           "127.0.0.1"),
                                                      new JProperty("port",              port),
-                                                     new JProperty("securityProfiles",  new JArray(2)),
+                                                     new JProperty("clientAuthentication",  new JArray("httpAuthOverTLS")),
                                                      new JProperty("reachableAs",       new JArray("127.0.0.1"))
                                                  ))
 
                                              )
                                          );
 
-                             made.StationLogins.TrySetPassword("cs001", ThePassword, null, null, out _, out _);
+                             made.WebSocketLogins.TrySetPassword("cs001", ThePassword, null, null, out _);
 
                              return made;
 

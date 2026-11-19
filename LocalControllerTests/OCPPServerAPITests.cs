@@ -26,6 +26,7 @@ using NUnit.Framework;
 
 using cloud.charging.open.LocalController.OCPP;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 
@@ -72,7 +73,7 @@ namespace cloud.charging.open.LocalController.Tests
                             "A controller nobody configured is listening for charging stations.");
 
                 Assert.That(server.Value<Int32>("port"),                     Is.EqualTo(2351));
-                Assert.That(server["securityProfiles"]?.Values<Int32>(),     Is.EquivalentTo(new[] { 1, 2, 3 }));
+                Assert.That(server["clientAuthentication"]?.Values<String>(), Is.EquivalentTo(new[] { "httpAuthWithoutTLS", "httpAuthOverTLS", "tlsClientCertificate" }));
                 Assert.That(server["subprotocols"]?.Values<String>(),        Is.EquivalentTo(new[] { "ocpp2.1", "ocpp2.0.1" }));
                 Assert.That(server["state"]?.Value<Boolean>("running"),      Is.False);
                 Assert.That(server["state"]?.Value<Boolean>("tls"),          Is.False);
@@ -96,7 +97,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             // What the station port presents is the node's store's, asked for
             // where the node's routes are: its server keys among them.
-            foreach (var path in new[] { Root, "/api/v1/certificates/serverKeys/ocpp", $"{Root}/trust", $"{Root}/stations" })
+            foreach (var path in new[] { Root, "/api/v1/certificates/serverKeys/ocpp", $"{Root}/trust", $"{Root}/logins" })
             {
                 var response = await http.GetAsync(path);
                 Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized), $"GET {path}");
@@ -158,12 +159,12 @@ namespace cloud.charging.open.LocalController.Tests
 
             var response = await http.PutAsync(
                                      Root,
-                                     JSONBody(new JProperty("securityProfiles", new JArray(4)))
+                                     JSONBody(new JProperty("clientAuthentication", new JArray("securityProfile4")))
                                  );
 
             Assert.Multiple(() => {
                 Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
-                Assert.That(Controller.OCPPServerSettings.SecurityProfiles, Is.EquivalentTo(new Byte[] { 1, 2, 3 }));
+                Assert.That(Controller.OCPPSecurityProfiles,                Is.EquivalentTo(new Byte[] { 1, 2, 3 }));
             });
 
         }
@@ -185,7 +186,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var response = await http.PutAsync(
                                      Root,
-                                     JSONBody(new JProperty("securityProfiles", new JArray(2, 3)))
+                                     JSONBody(new JProperty("clientAuthentication", new JArray("httpAuthOverTLS", "tlsClientCertificate")))
                                  );
 
             await Assert.MultipleAsync(async () => {
@@ -445,40 +446,53 @@ namespace cloud.charging.open.LocalController.Tests
         #endregion
 
 
-        #region AStationIsAddedWithAPasswordShownOnce()
+        #region AStationIsAddedWithItsPasswordWhichIsNotShownAgain()
 
+        /// <summary>
+        /// The password is given, and none is made up: it is kept only as a
+        /// hash, and neither the answer nor the list shows it again.
+        /// </summary>
         [Test]
-        public async Task AStationIsAddedWithAPasswordShownOnce()
+        public async Task AStationIsAddedWithItsPasswordWhichIsNotShownAgain()
         {
 
             using var http = await SignedIn();
 
-            var added = await http.PostAsync(
-                                  $"{Root}/stations",
+            const String password = "a-password-long-enough-for-ocpp";
+
+            var none  = await http.PostAsync(
+                                  $"{Root}/logins",
                                   JSONBody(
                                       new JProperty("id",    "cs001"),
                                       new JProperty("note",  "Ladepunkt 1")
                                   )
                               );
 
+            Assert.That(none.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest), "A charging station was added without a password.");
+
+            var added = await http.PostAsync(
+                                  $"{Root}/logins",
+                                  JSONBody(
+                                      new JProperty("id",        "cs001"),
+                                      new JProperty("password",  password),
+                                      new JProperty("note",      "Ladepunkt 1")
+                                  )
+                              );
+
             Assert.That(added.IsSuccessStatusCode, Is.True, await added.Content.ReadAsStringAsync());
 
-            var answer   = JObject.Parse(await added.Content.ReadAsStringAsync());
-            var password = answer.Value<String>("password");
+            var answer = await added.Content.ReadAsStringAsync();
 
             await Assert.MultipleAsync(async () => {
 
-                Assert.That(password, Is.Not.Null.And.Not.Empty,
-                            "No password came back, so nobody can configure the charging station.");
+                Assert.That(Controller.WebSocketLogins.Verify("cs001", password), Is.True);
+                Assert.That(answer,                                             Does.Not.Contain(password));
 
-                Assert.That(Controller.StationLogins.Verify("cs001", password!), Is.True);
+                var listed = await GetJSON(http, $"{Root}/logins");
 
-                // And a second look is not a second copy of it.
-                var listed = await GetJSON(http, $"{Root}/stations");
-
-                Assert.That(listed.ToString(), Does.Not.Contain(password!));
+                Assert.That(listed.ToString(), Does.Not.Contain(password));
                 Assert.That(listed.ToString(), Does.Not.Contain("$pbkdf2"));
-                Assert.That(listed["stations"]?[0]?.Value<String>("note"), Is.EqualTo("Ladepunkt 1"));
+                Assert.That(listed["logins"]?[0]?.Value<String>("note"), Is.EqualTo("Ladepunkt 1"));
 
             });
 
@@ -494,20 +508,19 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var http = await SignedIn();
 
-            var added    = JObject.Parse(await (await http.PostAsync($"{Root}/stations",
-                               JSONBody(new JProperty("id", "cs001")))).Content.ReadAsStringAsync());
+            const String password = "a-password-long-enough-for-ocpp";
 
-            var password = added.Value<String>("password")!;
+            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("id", "cs001"), new JProperty("password", password)));
 
-            await http.PutAsync($"{Root}/stations/cs001", JSONBody(new JProperty("enabled", false)));
+            await http.PutAsync($"{Root}/logins/cs001", JSONBody(new JProperty("enabled", false)));
 
-            Assert.That(Controller.StationLogins.Verify("cs001", password), Is.False);
+            Assert.That(Controller.WebSocketLogins.Verify("cs001", password), Is.False);
 
-            var gone = await http.DeleteAsync($"{Root}/stations/cs001");
+            var gone = await http.DeleteAsync($"{Root}/logins/cs001");
 
             Assert.Multiple(() => {
                 Assert.That(gone.IsSuccessStatusCode,        Is.True);
-                Assert.That(Controller.StationLogins.Logins, Is.Empty);
+                Assert.That(Controller.WebSocketLogins.Logins, Is.Empty);
             });
 
         }
@@ -522,7 +535,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var http = await SignedIn();
 
-            var response = await http.DeleteAsync($"{Root}/stations/cs404");
+            var response = await http.DeleteAsync($"{Root}/logins/cs404");
 
             Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
 
@@ -558,27 +571,27 @@ namespace cloud.charging.open.LocalController.Tests
             // What makes each change a fine one: a station with a password and
             // a token, in the default group, and a group of its own, empty.
             foreach (var made in new[] {
-                                     await http.PostAsync($"{Root}/stations",           JSONBody(new JProperty("id", "cs001"))),
-                                     await http.PutAsync ($"{Root}/stations/cs001/totp", JSONBody()),
+                                     await http.PostAsync($"{Root}/logins",           JSONBody(new JProperty("id", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp"))),
+                                     await http.PutAsync ($"{Root}/logins/cs001/totp", JSONBody()),
                                      await http.PostAsync($"{Root}/groups",             JSONBody(new JProperty("id", "field-test")))
                                  })
                 Assert.That(made.IsSuccessStatusCode, Is.True, await made.Content.ReadAsStringAsync());
 
             // Where the file's next version is written first is a directory.
-            System.IO.Directory.CreateDirectory(Controller.StationLogins.Path + ".tmp");
+            System.IO.Directory.CreateDirectory(Controller.WebSocketLogins.Path + ".tmp");
 
             var response = Change switch {
                 "POST groups"                    => await http.PostAsync  ($"{Root}/groups",                 JSONBody(new JProperty("id",      "another"))),
                 "PUT groups/{id}"                => await http.PutAsync   ($"{Root}/groups/field-test",      JSONBody(new JProperty("enabled", false))),
                 "DELETE groups/{id}"             => await http.DeleteAsync($"{Root}/groups/field-test"),
-                "POST stations"                  => await http.PostAsync  ($"{Root}/stations",               JSONBody(new JProperty("id",      "cs002"))),
-                "PUT stations/{id}, enabled"     => await http.PutAsync   ($"{Root}/stations/cs001",         JSONBody(new JProperty("enabled", false))),
-                "PUT stations/{id}, group"       => await http.PutAsync   ($"{Root}/stations/cs001",         JSONBody(new JProperty("group",   "field-test"))),
-                "PUT stations/{id}/totp"         => await http.PutAsync   ($"{Root}/stations/cs001/totp",    JSONBody()),
-                "DELETE stations/{id}/totp"      => await http.DeleteAsync($"{Root}/stations/cs001/totp"),
-                "PUT stations/{id}/totp/binding" => await http.PutAsync   ($"{Root}/stations/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", true))),
-                "DELETE stations/{id}/password"  => await http.DeleteAsync($"{Root}/stations/cs001/password"),
-                "DELETE stations/{id}"           => await http.DeleteAsync($"{Root}/stations/cs001"),
+                "POST stations"                  => await http.PostAsync  ($"{Root}/logins",               JSONBody(new JProperty("id",      "cs002"), new JProperty("password", "a-password-long-enough-for-ocpp"))),
+                "PUT stations/{id}, enabled"     => await http.PutAsync   ($"{Root}/logins/cs001",         JSONBody(new JProperty("enabled", false))),
+                "PUT stations/{id}, group"       => await http.PutAsync   ($"{Root}/logins/cs001",         JSONBody(new JProperty("group",   "field-test"))),
+                "PUT stations/{id}/totp"         => await http.PutAsync   ($"{Root}/logins/cs001/totp",    JSONBody()),
+                "DELETE stations/{id}/totp"      => await http.DeleteAsync($"{Root}/logins/cs001/totp"),
+                "PUT stations/{id}/totp/binding" => await http.PutAsync   ($"{Root}/logins/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", true))),
+                "DELETE stations/{id}/password"  => await http.DeleteAsync($"{Root}/logins/cs001/password"),
+                "DELETE stations/{id}"           => await http.DeleteAsync($"{Root}/logins/cs001"),
                 _                                => throw new ArgumentException($"No change '{Change}' here.", nameof(Change))
             };
 
@@ -586,7 +599,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(response.StatusCode,                         Is.EqualTo(HttpStatusCode.InternalServerError), body);
-                Assert.That(JObject.Parse(body).Value<String>("error"),  Does.StartWith($"'{Controller.StationLogins.Path}' could not be written: "));
+                Assert.That(JObject.Parse(body).Value<String>("error"),  Does.StartWith($"'{Controller.WebSocketLogins.Path}' could not be written: "));
             });
 
         }
@@ -609,15 +622,15 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var http = await SignedIn();
 
-            var added = await http.PostAsync($"{Root}/stations", JSONBody(new JProperty("id", "cs001"), new JProperty("group", "default")));
+            var added = await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("id", "cs001"), new JProperty("group", "default"), new JProperty("password", "a-password-long-enough-for-ocpp")));
             Assert.That(added.IsSuccessStatusCode, Is.True, await added.Content.ReadAsStringAsync());
 
-            System.IO.Directory.CreateDirectory(Controller.StationLogins.Path + ".tmp");
+            System.IO.Directory.CreateDirectory(Controller.WebSocketLogins.Path + ".tmp");
 
-            var unknown   = await http.DeleteAsync($"{Root}/stations/cs404");
-            var tooShort  = await http.PostAsync  ($"{Root}/stations",               JSONBody(new JProperty("id", "cs002"), new JProperty("password", "short")));
+            var unknown   = await http.DeleteAsync($"{Root}/logins/cs404");
+            var tooShort  = await http.PostAsync  ($"{Root}/logins",               JSONBody(new JProperty("id", "cs002"), new JProperty("password", "short")));
             var notEmpty  = await http.DeleteAsync($"{Root}/groups/default");
-            var noToken   = await http.DeleteAsync($"{Root}/stations/cs001/totp");
+            var noToken   = await http.DeleteAsync($"{Root}/logins/cs001/totp");
 
             Assert.Multiple(() => {
                 Assert.That(unknown. StatusCode,  Is.EqualTo(HttpStatusCode.NotFound),    "a station this controller never heard of");
@@ -862,7 +875,7 @@ namespace cloud.charging.open.LocalController.Tests
             File.Delete(chainMeta);
             System.IO.Directory.CreateDirectory(chainMeta);
 
-            var profile     = await http.PutAsync   (Root,                                JSONBody(new JProperty("securityProfiles", new JArray(4))));
+            var profile     = await http.PutAsync   (Root,                                JSONBody(new JProperty("clientAuthentication", new JArray("securityProfile4"))));
             var noChain     = await http.PostAsync  ($"{Root}/trust",                     JSONBody(new JProperty("pem", "trust us, we are a charging network")));
             var noName      = await http.PutAsync   ($"{Root}/trust/{chainId}",           JSONBody(new JProperty("name", new String('x', ClientTrustStore.MaxNameLength + 1))));
             var noSuchChain = await http.DeleteAsync($"{Root}/trust/0123456789abcdef");
@@ -894,20 +907,20 @@ namespace cloud.charging.open.LocalController.Tests
                 ("POST groups",           http.PostAsync  ($"{Root}/groups",                   JSONBody(new JProperty("id", "sneaky")))),
                 ("PUT groups/{id}",       http.PutAsync   ($"{Root}/groups/default",           JSONBody(new JProperty("enabled", false)))),
                 ("DELETE groups/{id}",    http.DeleteAsync($"{Root}/groups/default")),
-                ("POST stations",         http.PostAsync  ($"{Root}/stations",                 JSONBody(new JProperty("id", "cs666")))),
-                ("PUT stations/../totp",  http.PutAsync   ($"{Root}/stations/cs001/totp",      JSONBody())),
-                ("DELETE ../totp",        http.DeleteAsync($"{Root}/stations/cs001/totp")),
-                ("DELETE ../password",    http.DeleteAsync($"{Root}/stations/cs001/password"))
+                ("POST stations",         http.PostAsync  ($"{Root}/logins",                 JSONBody(new JProperty("id", "cs666")))),
+                ("PUT stations/../totp",  http.PutAsync   ($"{Root}/logins/cs001/totp",      JSONBody())),
+                ("DELETE ../totp",        http.DeleteAsync($"{Root}/logins/cs001/totp")),
+                ("DELETE ../password",    http.DeleteAsync($"{Root}/logins/cs001/password"))
             };
 
             foreach (var (what, response) in attempts)
                 Assert.That((await response).StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized), what);
 
             Assert.Multiple(() => {
-                Assert.That(Controller.StationLogins.Logins,                        Is.Empty);
-                Assert.That(Controller.StationLogins.GetGroup("sneaky"),            Is.Null);
-                Assert.That(Controller.StationLogins.GetGroup(LoginGroup.DefaultId), Is.Not.Null);
-                Assert.That(Controller.StationLogins.GetGroup(LoginGroup.DefaultId)!.Enabled, Is.True);
+                Assert.That(Controller.WebSocketLogins.Logins,                        Is.Empty);
+                Assert.That(Controller.WebSocketLogins.GetGroup("sneaky"),            Is.Null);
+                Assert.That(Controller.WebSocketLogins.GetGroup(WebSocketLoginGroup.DefaultId), Is.Not.Null);
+                Assert.That(Controller.WebSocketLogins.GetGroup(WebSocketLoginGroup.DefaultId)!.Enabled, Is.True);
             });
 
         }
@@ -929,19 +942,19 @@ namespace cloud.charging.open.LocalController.Tests
                                      new JProperty("name",              "Field test"),
                                      new JProperty("enabled",           true),
                                      new JProperty("authMethods",       new JArray("basic", "totp")),
-                                     new JProperty("securityProfiles",  new JArray(1, 2))
+                                     new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS", "httpAuthOverTLS"))
                                  )
                              );
 
             Assert.That(made.IsSuccessStatusCode, Is.True, await made.Content.ReadAsStringAsync());
 
-            var group = Controller.StationLogins.GetGroup("field-test");
+            var group = Controller.WebSocketLogins.GetGroup("field-test");
 
             Assert.That(group, Is.Not.Null);
 
             Assert.Multiple(() => {
                 Assert.That(group!.AuthMethods,       Is.EquivalentTo(new[] { AuthMethod.Basic, AuthMethod.TOTP }));
-                Assert.That(group.SecurityProfiles,   Is.EquivalentTo(new Byte[] { 1, 2 }));
+                Assert.That(group.ClientAuthentication,   Is.EquivalentTo(new[] { WebSocketClientAuthentication.HTTPAuthWithoutTLS, WebSocketClientAuthentication.HTTPAuthOverTLS }));
                 Assert.That(group.Allows(AuthMethod.Certificate), Is.False);
             });
 
@@ -953,22 +966,22 @@ namespace cloud.charging.open.LocalController.Tests
                                          new JProperty("name",              "Field test"),
                                          new JProperty("enabled",           true),
                                          new JProperty("authMethods",       new JArray("totp")),
-                                         new JProperty("securityProfiles",  new JArray(2))
+                                         new JProperty("clientAuthentication",  new JArray("httpAuthOverTLS"))
                                      )
                                  );
 
             Assert.That(narrowed.IsSuccessStatusCode, Is.True, await narrowed.Content.ReadAsStringAsync());
 
             Assert.Multiple(() => {
-                Assert.That(Controller.StationLogins.GetGroup("field-test")!.Allows(AuthMethod.Basic),  Is.False);
-                Assert.That(Controller.StationLogins.GetGroup("field-test")!.Allows((Byte) 1),          Is.False);
+                Assert.That(Controller.WebSocketLogins.GetGroup("field-test")!.Allows(AuthMethod.Basic),  Is.False);
+                Assert.That(Controller.WebSocketLogins.GetGroup("field-test")!.Allows(WebSocketClientAuthentication.HTTPAuthWithoutTLS),          Is.False);
             });
 
             var gone = await http.DeleteAsync($"{Root}/groups/field-test");
 
             Assert.Multiple(() => {
                 Assert.That(gone.IsSuccessStatusCode,                   Is.True);
-                Assert.That(Controller.StationLogins.GetGroup("field-test"), Is.Null);
+                Assert.That(Controller.WebSocketLogins.GetGroup("field-test"), Is.Null);
             });
 
         }
@@ -986,18 +999,19 @@ namespace cloud.charging.open.LocalController.Tests
             await http.PostAsync($"{Root}/groups",
                                  JSONBody(new JProperty("id",           "field-test"),
                                           new JProperty("authMethods",  new JArray("basic")),
-                                          new JProperty("securityProfiles", new JArray(1))));
+                                          new JProperty("clientAuthentication", new JArray("httpAuthWithoutTLS"))));
 
-            await http.PostAsync($"{Root}/stations",
-                                 JSONBody(new JProperty("id",     "cs001"),
-                                          new JProperty("group",  "field-test")));
+            await http.PostAsync($"{Root}/logins",
+                                 JSONBody(new JProperty("id",        "cs001"),
+                                          new JProperty("group",     "field-test"),
+                                          new JProperty("password",  "a-password-long-enough-for-ocpp")));
 
             var refused = await http.DeleteAsync($"{Root}/groups/field-test");
 
             Assert.Multiple(() => {
                 Assert.That(refused.StatusCode,                              Is.EqualTo(HttpStatusCode.Conflict));
-                Assert.That(Controller.StationLogins.GetGroup("field-test"),  Is.Not.Null);
-                Assert.That(Controller.StationLogins.Logins.Single().GroupId, Is.EqualTo("field-test"));
+                Assert.That(Controller.WebSocketLogins.GetGroup("field-test"),  Is.Not.Null);
+                Assert.That(Controller.WebSocketLogins.Logins.Single().GroupId, Is.EqualTo("field-test"));
             });
 
         }
@@ -1012,9 +1026,9 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var http = await SignedIn();
 
-            await http.PostAsync($"{Root}/stations", JSONBody(new JProperty("id", "cs001")));
+            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("id", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp")));
 
-            var given = await http.PutAsync($"{Root}/stations/cs001/totp", JSONBody());
+            var given = await http.PutAsync($"{Root}/logins/cs001/totp", JSONBody());
 
             Assert.That(given.IsSuccessStatusCode, Is.True, await given.Content.ReadAsStringAsync());
 
@@ -1026,14 +1040,14 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(secret, Is.Not.Null.And.Not.Empty,
                             "No shared secret came back, so nobody can configure the charging station.");
 
-                Assert.That(Controller.StationLogins.TryGet("cs001", out var login) && login.HasTOTP, Is.True);
+                Assert.That(Controller.WebSocketLogins.TryGet("cs001", out var login) && login.HasTOTP, Is.True);
 
                 // The list the page reads must never carry it, however often it
                 // is asked - this is the one credential that works as it stands.
-                var listed = await GetJSON(http, $"{Root}/stations");
+                var listed = await GetJSON(http, $"{Root}/logins");
 
                 Assert.That(listed.ToString(), Does.Not.Contain(secret!));
-                Assert.That(listed["stations"]?[0]?.Value<Boolean>("hasTOTP"), Is.True);
+                Assert.That(listed["logins"]?[0]?.Value<Boolean>("hasTOTP"), Is.True);
 
             });
 
@@ -1053,23 +1067,23 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var http = await SignedIn();
 
-            await http.PostAsync($"{Root}/stations", JSONBody(new JProperty("id", "cs001")));
+            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("id", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp")));
 
-            var nothingYet  = await http.PutAsync($"{Root}/stations/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", true)));
+            var nothingYet  = await http.PutAsync($"{Root}/logins/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", true)));
 
-            await http.PutAsync ($"{Root}/stations/cs001/totp", JSONBody());
+            await http.PutAsync ($"{Root}/logins/cs001/totp", JSONBody());
 
-            Controller.StationLogins.TryGet("cs001", out var before);
+            Controller.WebSocketLogins.TryGet("cs001", out var before);
 
-            var mistyped    = await http.PutAsync($"{Root}/stations/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", "yes")));
-            var bound       = await http.PutAsync($"{Root}/stations/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", true)));
+            var mistyped    = await http.PutAsync($"{Root}/logins/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", "yes")));
+            var bound       = await http.PutAsync($"{Root}/logins/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", true)));
             var answer      = JObject.Parse(await bound.Content.ReadAsStringAsync());
 
-            Controller.StationLogins.TryGet("cs001", out var after);
+            Controller.WebSocketLogins.TryGet("cs001", out var after);
 
-            var unbound     = await http.PutAsync($"{Root}/stations/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", false)));
+            var unbound     = await http.PutAsync($"{Root}/logins/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", false)));
 
-            Controller.StationLogins.TryGet("cs001", out var atLast);
+            Controller.WebSocketLogins.TryGet("cs001", out var atLast);
 
             Assert.Multiple(() => {
                 Assert.That((Int32) nothingYet.StatusCode,           Is.EqualTo(404),  "a token that is not there was bound");
@@ -1078,7 +1092,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(after?.TOTP?.TLSChannelBinding,          Is.True);
                 Assert.That(after?.TOTP?.SharedSecret,               Is.EqualTo(before?.TOTP?.SharedSecret),  "the secret was changed");
                 Assert.That(answer.ToString(),                       Does.Not.Contain(before!.TOTP!.SharedSecret));
-                Assert.That(answer["stations"]?[0]?["totp"]?.Value<Boolean>("tlsChannelBinding"), Is.True);
+                Assert.That(answer["logins"]?[0]?["totp"]?.Value<Boolean>("tlsChannelBinding"), Is.True);
                 Assert.That(unbound.IsSuccessStatusCode,             Is.True);
                 Assert.That(atLast?.TOTP?.TLSChannelBinding,         Is.False);
             });
@@ -1091,15 +1105,15 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var http = await SignedIn();
 
-            await http.PostAsync($"{Root}/stations", JSONBody(new JProperty("id", "cs001")));
-            await http.PutAsync ($"{Root}/stations/cs001/totp", JSONBody());
+            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("id", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp")));
+            await http.PutAsync ($"{Root}/logins/cs001/totp", JSONBody());
 
-            var gone = await http.DeleteAsync($"{Root}/stations/cs001/totp");
+            var gone = await http.DeleteAsync($"{Root}/logins/cs001/totp");
 
             Assert.Multiple(() => {
                 Assert.That(gone.IsSuccessStatusCode, Is.True);
-                Assert.That(Controller.StationLogins.TryGet("cs001", out var login) && login.HasTOTP, Is.False);
-                Assert.That(Controller.StationLogins.TryGet("cs001", out var still) && still.HasPassword, Is.True,
+                Assert.That(Controller.WebSocketLogins.TryGet("cs001", out var login) && login.HasTOTP, Is.False);
+                Assert.That(Controller.WebSocketLogins.TryGet("cs001", out var still) && still.HasPassword, Is.True,
                             "Taking the token away took the password with it.");
             });
 
@@ -1115,16 +1129,16 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var http = await SignedIn();
 
-            await http.PostAsync($"{Root}/stations", JSONBody(new JProperty("id", "cs001")));
+            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("id", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp")));
 
             var refused = await http.PutAsync(
-                                    $"{Root}/stations/cs001/totp",
+                                    $"{Root}/logins/cs001/totp",
                                     JSONBody(new JProperty("sharedSecret", "short"))
                                 );
 
             Assert.Multiple(() => {
                 Assert.That(refused.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
-                Assert.That(Controller.StationLogins.TryGet("cs001", out var login) && login.HasTOTP, Is.False);
+                Assert.That(Controller.WebSocketLogins.TryGet("cs001", out var login) && login.HasTOTP, Is.False);
             });
 
         }

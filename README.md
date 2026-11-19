@@ -30,7 +30,7 @@ and the HTTP server all of that sits behind - is not here. That is
 vehicle, a charging station and a local controller share, and
 `LocalController` is one `WWCPNode` with an OCPP node, a port for the charging
 stations below it and a line up to the CSMS above: its sections - `ocpp`,
-`ocppServer`, `csms` - go into the same configuration file, and its routes into
+`webSocketServer`, `csms` - go into the same configuration file, and its routes into
 the JSON API every node has below `/api` - the node's `NodeHTTPAPI`, with the
 CSMS and the charging station port on top.
 
@@ -48,9 +48,10 @@ CSMS and the charging station port on top.
 | Connections | the lines up to the CSMS: where each dials - or, where **The other end dials** is ticked, where the CSMS dials the controller -, what it signs in with, how its server is believed, how it is doing - and a test of one; on its tab **Credentials**, the passwords and one-time tokens the connections sign in with | `csms:edit`, `csms:run` |
 | Certificate store | the TLS roots of the servers the controller connects to, and their certificates - certificates alone, no private key | `certificates:edit` |
 | Client identities | who the controller is as a client, each with its private key: the TLS identities its lines up to the CSMS hold up - brought with their key, or whose key is made here (tab **New key**) and waits for its certificate - and, under **SSH keys**, the keys an `ssh://` line signs in with beside the controller's own | `certificates:edit`; `certificates:run` to make a key and bring its certificate, and to make or remove an SSH key |
-| Charging stations | the server the charging stations connect to: its port, the security profiles it accepts, the names it is reachable as, what it logs, and whether they may connect over SSH as well | `stations:edit` |
+| Charging stations | the server the charging stations connect to: its port, how a station may authenticate (`clientAuthentication`, OCPP's security profiles), the names it is reachable as, what it logs, and whether they may connect over SSH as well | `stations:edit` |
 | Logins and groups | which charging stations may sign in, with what - a password, a one-time token (over SSH as well, bound to its session), an SSH key - and what their group allows them | `stations:edit` |
 | Accepted chains | which certificate authorities a charging station may be vouched for by | `certificates:edit` |
+| Commissioning | whether a tool may speak OCPP to the controller over its SSH server, as its CSMS would - on or off at once; where a tool connects, and who is connected | `commissioning:edit` |
 | State | nothing - it shows whether the line up to the CSMS stands and since when, which charging stations were seen when and over what, and the grid operator's limits in force | `state:read` |
 | Logs | nothing - it reads | `log:read` |
 
@@ -91,9 +92,9 @@ each is dialled by itself, and the next endpoint of a peer where one cannot be
 reached. The oldest that dials by itself leads to the CSMS in charge, which is
 told what the controller says of its own accord.
 
-The station port is shared code as well: the `ocppServer` section, the
+The station port is shared code as well: the `webSocketServer` section, the
 charging stations that may sign in and their login groups
-(`ocpp-stations.json`), the chains a station's certificate may lead to
+(`websocket-logins.json`), the chains a station's certificate may lead to
 (`ocpp-client-trust/`), OCPP over SSH, a CSMS that dials on the same port,
 the routes below `/api/v1/configuration/ocpp-server` and the three pages that
 look after them are WWCP_OCPP_Node's `OCPPServingNode`, which a gateway has
@@ -205,28 +206,24 @@ is no port of its own for it: the CSMS comes in over the port of the charging
 stations. On the Connections page a connection is written down with **The other
 end dials** ticked: its URL is the one the CSMS dials -
 `wss://controller.example.org:9000/csms-01` - and the last part of it the name
-the CSMS comes under. The CSMS signs in with a client certificate or with
-credentials, never both - the page does not take a connection that names both:
+the CSMS comes under. That is the name of its **WebSocket login**, and it signs
+in as a charging station does - one way in for both, judged by the login and
+its group:
 
-- **A client certificate known by its key**: the connection's key pins name the
-  keys it may hold, and the key is the whole check - no chain, no name, no
-  validity period.
-- **A client certificate checked by its CA**: the connection holds it to roots
-  of the controller's certificate store - a group of roots, kept for `csms`
-  and marked for the group, or roots by their fingerprints -, and its common
-  name has to be the name the CSMS comes under. Nothing is learned on first use,
-  and a certificate that does not match is refused. One issued by a CA below
-  such a root is checked either way: the CSMS sends the certificates of the CAs
-  between beside its own, or shows its certificate alone and the controller
-  knows them already - kept in its certificate store as issuing CAs
-  (`tlsIntermediate`), which help to build a chain and are believed nothing:
-  the chain still has to end at a root the connection is held to.
-- **Credentials**: a login of that name with a password (HTTP Basic) or a
-  one-time token. A token bound to the TLS session is checked with keying
-  material only the TLS of HTTP/3 exports: such a CSMS is let in where it opens
-  its WebSocket over HTTP/3 - which the station port takes where `ocppServer`
-  says `"http3": true`, and not where it says nothing -, and a raw token is
-  not taken instead.
+- **A password or a one-time token** of its login. A token bound to the TLS
+  session is checked with keying material only the TLS of HTTP/3 exports: such
+  a CSMS is let in where it opens its WebSocket over HTTP/3 - which the station
+  port takes where `webSocketServer` says `"http3": true`, and not where it says
+  nothing -, and a raw token is not taken instead.
+- **A client certificate known by its key**: a key pin of its login, and the key
+  is the whole check - no chain, no name, no validity period.
+- **A client certificate checked by its CA**: of a chain the station port
+  accepts (Accepted chains), issued to the name the CSMS comes under - with or
+  without a login of that name, as for a station.
+
+The connection names nothing it signs in with: credentials of the controller,
+key pins and roots on it are refused, with what to do instead - they are what
+the controller proves itself with, and holds a server to, where it dials.
 
 A client certificate is security profile 3, as it is for a charging station;
 it opens no charging station's path, and a key a station has opens nothing
@@ -234,11 +231,11 @@ under the name of the CSMS. "Connect by itself" is what lets it in: off,
 nothing comes in under its name, and one that is in is let go of. The page
 shows it as *waiting* until the CSMS dials and as *connected* from then on.
 
-At the door the name decides, before any credentials: whoever comes under the
-name of such a connection is let in as that or not at all - by what the
-connection names, on the security profile the port would be for a password -
-and a charging station's password opens nothing under it. So a name a charging
-station has cannot be given to a CSMS that dials. Once in, it is the line up of
+At the door the login is judged first, as for a station; then the name
+decides: whoever comes under the name of such a connection is let in as that
+or not at all - by its own login, on its own path - and a charging station's
+password opens nothing under it. A login whose name a connection the other end
+makes comes under is that back end's, and no charging station's. Once in, it is the line up of
 the controller as much as one the controller dialled: what the stations send on
 goes up over it, what it asks of a station goes down, what only a CSMS asks of
 the controller it may ask, and it is neither counted nor listed among the
@@ -248,8 +245,22 @@ dials; one that says nothing speaks the plain frame of OCPP, and what it sends
 is for the controller. All of it needs the station server switched on and the
 controller reporting to a CSMS at all (`"csms": { "enabled": true }`).
 
+**Registering.** Over every line up - one the controller dials, and one a CSMS
+dials - the controller registers as a charging station does, and with the same
+code (WWCP_OCPP_Node's `OCPPServingNode.Registration.cs`): once the line is up
+its OCPP node sends a BootNotification - its vendor, model and serial number,
+and that it powered up -, asks again after the interval a Pending or a Rejected
+gives, or a minute where the CSMS does not answer, and sends heartbeats at the
+interval an Accepted gives, to every back end that accepted it. Where it
+stands, the primary's registration, is `RegistrationJSON()` - `{"2.1":
+{"state", "since", "interval", "nextTry", "problem"}}`, as a station says it
+for each of its two nodes. A CSMS of WWCP_OCPP knows a controller that
+registers by the mark of its login, or by the connection it dials it over, and
+does not take it for a charging station: it installs no station roots on it and
+renews no certificate of it.
+
 The charging stations may speak OCPP over SSH as well, where `ssh` in the
-`ocppServer` section says so - `"ssh": { "enabled": true }`, switched off
+`webSocketServer` section says so - `"ssh": { "enabled": true }`, switched off
 unless somebody says otherwise, and on and off without a restart. There is no
 port of its own: a station signs in to the controller's SSH server - the one
 of the command line, the `ssh` section's port - under its identification, with
@@ -279,6 +290,19 @@ The whole way from both ends, step by step - the options of a key, the
 settings and what to look at when a station does not connect - is in
 [Charging stations over SSH: a walk-through](https://github.com/OpenChargingCloud/LocalControllerCLI/blob/master/docs/Charging-stations-over-SSH.md)
 of LocalControllerCLI.
+
+A commissioning tool may speak OCPP to the controller on the same subsystem,
+as its CSMS would, where the `commissioning` section switches it on -
+`"commissioning": { "enabled": true }`, off where the file says nothing, and
+on and off at once on the page Commissioning or with
+`PUT /api/v1/configuration/commissioning {"enabled": false}`. Who signed in
+says what comes: an account that may run `commissioning` - the system
+administrator, unless a role in the file says otherwise - is a tool, a
+WebSocket login with an SSH key a charging station. The tool is a networking
+node of its own, named after its account and never the CSMS; its connection is
+read as the controller's line up, so that what it asks is answered by the
+controller, and not sent on to the CSMS as a station's request is. Switched
+off, every tool is let go of at once, and no station.
 
 The grid operator the charging pool is connected behind may limit it over
 OpenADR 3: the controller is then a VEN of the grid operator's VTN, as the
@@ -792,7 +816,7 @@ there (`StationLoginController`, `StationLoginGroupController`) `stations`,
 anything else `configuration`. The controller shows its name servers and its time over
 OCPP as a charging station does, through WWCP_OCPP_Node's `DeviceModelBridge`,
 and its station port as the page **Charging stations** shows it: the section
-`ocppServer`, OCPP over SSH and the logging of the port, besides what the port
+`webSocketServer`, OCPP over SSH and the logging of the port, besides what the port
 is doing. A CSMS may change all of it, as the page may: what takes effect at
 the next start - the address, the port, the OCPP and TLS versions, the
 connections, the pings and the revocation checks - is written down and

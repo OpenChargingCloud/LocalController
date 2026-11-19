@@ -445,9 +445,16 @@ namespace cloud.charging.open.LocalController
         /// station server; the node lets go of the web interface's port again
         /// on the way out.
         /// </remarks>
-        protected override Task OnListening()
+        protected override async Task OnListening()
+        {
 
-            => StartOCPPServer();
+            await StartOCPPServer();
+
+            // A tool speaking OCPP to this controller over its SSH server,
+            // where the file says so - see OCPPServingNode.Commissioning.cs.
+            StartCommissioning();
+
+        }
 
         #endregion
 
@@ -495,6 +502,8 @@ namespace cloud.charging.open.LocalController
             await StopOpenADR();
 
             await DisconnectCSMS();
+
+            StopCommissioning("the local controller is stopping");
 
             await StopOCPPServer();
 

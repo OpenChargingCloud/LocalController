@@ -174,7 +174,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                    String?               Password,
                                                    out String?           Error)
 
-            => Controller.Connections.TryAddAuthentication("The password of the line up", "basic", Login, Password, out var id, out Error) &&
+            => Controller.Connections.TryAddBasicAuthentication(Login, Password, "The password of the line up", out var id, out Error) &&
                Controller.SignsInWith(id, out Error);
 
         #endregion
@@ -206,7 +206,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                out Boolean           NotSaved,
                                                Boolean?              Bound   = null)
 
-            => Controller.Connections.TryAddAuthentication("The one-time token of the line up", "totp", Login, SharedSecret, out var id, out Error, out NotSaved,
+            => Controller.Connections.TryAddTOTPAuthentication(Login, SharedSecret, "The one-time token of the line up", out var id, out Error, out NotSaved,
                                                            ValiditySeconds:    Validity?.TotalSeconds,
                                                            Length:             Length,
                                                            Alphabet:           Alphabet,

@@ -31,6 +31,7 @@ using org.GraphDefined.Vanaheimr.Hermod.Mail;
 using cloud.charging.open.protocols.WWCP.Node;
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
 using cloud.charging.open.protocols.WWCP.Node.Web;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 
@@ -211,7 +212,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(lc.Roles,             Is.EqualTo(new[] { "viewer", "support", "cpo", WWCPNode.AdminRole }));
                 Assert.That(lc.Access.Resources,  Is.EqualTo(new[] { "configuration", "dns", "nts", "certificates", "ssh", "log",
                                                                      "node", "reset", "reset-immediate", "state", "firmware", "signatures",
-                                                                     "csms", "stations", "openadr" }));
+                                                                     "csms", "stations", "openadr", "commissioning" }));
             });
 
         }
@@ -348,7 +349,7 @@ namespace cloud.charging.open.LocalController.Tests
             using var helpdesk = await SignedInAs("helper", "helpdesk");
 
             var dns            = await helpdesk.GetAsync("api/v1/configuration/dns");
-            var stations       = await helpdesk.GetAsync("api/v1/configuration/ocpp-server/stations");
+            var stations       = await helpdesk.GetAsync("api/v1/configuration/ocpp-server/logins");
             var csms           = await helpdesk.GetAsync("api/v1/configuration/csms");
             var refusal        = await csms.Content.ReadAsStringAsync();
 
@@ -424,15 +425,15 @@ namespace cloud.charging.open.LocalController.Tests
         [TestCase("POST",    "api/v1/configuration/openADR/poll",                        "openadr:run")]
         [TestCase("GET",     "api/v1/configuration/ocpp-server",                         "stations:read")]
         [TestCase("PUT",     "api/v1/configuration/ocpp-server",                         "stations:edit")]
-        [TestCase("GET",     "api/v1/configuration/ocpp-server/stations",                "stations:read")]
-        [TestCase("POST",    "api/v1/configuration/ocpp-server/stations",                "stations:edit")]
-        [TestCase("PUT",     "api/v1/configuration/ocpp-server/stations/cs001",          "stations:edit")]
-        [TestCase("DELETE",  "api/v1/configuration/ocpp-server/stations/cs001",          "stations:edit")]
-        [TestCase("PUT",     "api/v1/configuration/ocpp-server/stations/cs001/totp",     "stations:edit")]
-        [TestCase("DELETE",  "api/v1/configuration/ocpp-server/stations/cs001/totp",     "stations:edit")]
-        [TestCase("DELETE",  "api/v1/configuration/ocpp-server/stations/cs001/password", "stations:edit")]
-        [TestCase("POST",    "api/v1/configuration/ocpp-server/stations/cs001/keyPins",  "stations:edit")]
-        [TestCase("DELETE",  "api/v1/configuration/ocpp-server/stations/cs001/keyPins/" + "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff", "stations:edit")]
+        [TestCase("GET",     "api/v1/configuration/ocpp-server/logins",                "stations:read")]
+        [TestCase("POST",    "api/v1/configuration/ocpp-server/logins",                "stations:edit")]
+        [TestCase("PUT",     "api/v1/configuration/ocpp-server/logins/cs001",          "stations:edit")]
+        [TestCase("DELETE",  "api/v1/configuration/ocpp-server/logins/cs001",          "stations:edit")]
+        [TestCase("PUT",     "api/v1/configuration/ocpp-server/logins/cs001/totp",     "stations:edit")]
+        [TestCase("DELETE",  "api/v1/configuration/ocpp-server/logins/cs001/totp",     "stations:edit")]
+        [TestCase("DELETE",  "api/v1/configuration/ocpp-server/logins/cs001/password", "stations:edit")]
+        [TestCase("POST",    "api/v1/configuration/ocpp-server/logins/cs001/keyPins",  "stations:edit")]
+        [TestCase("DELETE",  "api/v1/configuration/ocpp-server/logins/cs001/keyPins/" + "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff", "stations:edit")]
         [TestCase("POST",    "api/v1/configuration/ocpp-server/groups",                  "stations:edit")]
         [TestCase("PUT",     "api/v1/configuration/ocpp-server/groups/site",             "stations:edit")]
         [TestCase("DELETE",  "api/v1/configuration/ocpp-server/groups/site",             "stations:edit")]
@@ -464,7 +465,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             foreach (var resource in new[] { "configuration", "dns", "nts", "certificates", "ssh", "log",
                                                "node", "reset", "reset-immediate", "state", "firmware", "signatures",
-                                               "csms", "stations", "openadr" })
+                                               "csms", "stations", "openadr", "commissioning" })
                 foreach (var operation in new[] { "read", "edit", "run" })
                     roles.Add($"r-{resource}-{operation}", new JArray($"{resource}:{operation}"));
 
@@ -589,16 +590,16 @@ namespace cloud.charging.open.LocalController.Tests
                                                                           new JProperty("enabled",           false),
                                                                           new JProperty("url",               "wss://csms.example.org/ocpp")
                                                                       )),
-                                                                      new JProperty("ocppServer",  new JObject(
+                                                                      new JProperty("webSocketServer",  new JObject(
                                                                           new JProperty("enabled",           true),
                                                                           new JProperty("address",           "127.0.0.1"),
                                                                           new JProperty("port",              TestPorts.Free()),
-                                                                          new JProperty("securityProfiles",  new JArray(1)),
+                                                                          new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS")),
                                                                           new JProperty("subprotocols",      new JArray("ocpp2.1"))
                                                                       ))
                                                                   )));
 
-            Assert.That(controller!.StationLogins.TrySetPassword("cs001", stationPassword, null, "Ladepunkt 1", out _, out var error), Is.True, error);
+            Assert.That(controller!.WebSocketLogins.TrySetPassword("cs001", stationPassword, null, "Ladepunkt 1", out var error), Is.True, error);
 
             using var support  = await SignedInAs("support2", "support");
             using var station  = new System.Net.WebSockets.ClientWebSocket();
@@ -615,7 +616,7 @@ namespace cloud.charging.open.LocalController.Tests
             var seen           = state["stations"]?["seen"] as JArray;
 
             var csms           = await support.GetAsync("api/v1/configuration/csms");
-            var stations       = await support.GetAsync("api/v1/configuration/ocpp-server/stations");
+            var stations       = await support.GetAsync("api/v1/configuration/ocpp-server/logins");
 
             Assert.Multiple(() => {
                 Assert.That(whileThere.StatusCode,                         Is.EqualTo(HttpStatusCode.OK), text);

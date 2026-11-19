@@ -82,9 +82,18 @@ namespace cloud.charging.open.LocalController
         public const String  OpenADR   = "openadr";
 
         /// <summary>
-        /// All three.
+        /// Commissioning over SSH, a tool speaking OCPP to this controller on
+        /// its own SSH server: read, whether it is served and where; edited,
+        /// switched on or off; run, the tool let in. The administrators',
+        /// unless the file gives it to a role: whoever speaks OCPP to a
+        /// controller may tell it nearly anything its CSMS may.
         /// </summary>
-        public static readonly IReadOnlyList<String>  Resources = [ CSMS, Stations, OpenADR ];
+        public const String  Commissioning  = cloud.charging.open.protocols.OCPP.Node.OCPPServingNode.CommissioningResource;
+
+        /// <summary>
+        /// All four.
+        /// </summary>
+        public static readonly IReadOnlyList<String>  Resources = [ CSMS, Stations, OpenADR, Commissioning ];
 
         #endregion
 

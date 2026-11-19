@@ -30,6 +30,7 @@ using org.GraphDefined.Vanaheimr.Hermod.SSH;
 using org.GraphDefined.Vanaheimr.Hermod.SSH.Client;
 
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 
@@ -82,11 +83,11 @@ namespace cloud.charging.open.LocalController.Tests
 
                 var configuration = TestControllers.Offline;
 
-                configuration["ocppServer"] = new JObject(
+                configuration["webSocketServer"] = new JObject(
                                                   new JProperty("enabled",           true),
                                                   new JProperty("address",           "127.0.0.1"),
                                                   new JProperty("port",              TestPorts.Free()),
-                                                  new JProperty("securityProfiles",  new JArray(1)),
+                                                  new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS")),
                                                   new JProperty("subprotocols",      new JArray("ocpp2.1")),
                                                   new JProperty("ssh",               new JObject(
                                                       new JProperty("enabled",       true)
@@ -124,7 +125,7 @@ namespace cloud.charging.open.LocalController.Tests
         /// </summary>
         private String[] KeysOf(String Id)
 
-            => [.. Controller.StationLogins.Logins.
+            => [.. Controller.WebSocketLogins.Logins.
                        Where     (login => login.Id == Id).
                        SelectMany(login => login.Keys.Select(key => key.Fingerprint))];
 
@@ -173,7 +174,7 @@ namespace cloud.charging.open.LocalController.Tests
         private async Task<ClientWebSocket> ConnectOverWebSocket(String Id)
         {
 
-            Assert.That(Controller.StationLogins.TrySetPassword(Id, ThePassword, null, null, out _, out var error), Is.True, error);
+            Assert.That(Controller.WebSocketLogins.TrySetPassword(Id, ThePassword, null, null, out var error), Is.True, error);
 
             var client = new ClientWebSocket();
 
@@ -588,11 +589,11 @@ namespace cloud.charging.open.LocalController.Tests
                                                  new JProperty("nts",  new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
                                                  new JProperty("ocpp", new JObject(new JProperty("nodeId", "lc002"))),
 
-                                                 new JProperty("ocppServer", new JObject(
+                                                 new JProperty("webSocketServer", new JObject(
                                                      new JProperty("enabled",           true),
                                                      new JProperty("address",           "127.0.0.1"),
                                                      new JProperty("port",              TestPorts.Free()),
-                                                     new JProperty("securityProfiles",  new JArray(1))
+                                                     new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS"))
                                                  )),
 
                                                  new JProperty("csms", new JObject(

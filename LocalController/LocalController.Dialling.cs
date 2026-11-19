@@ -38,6 +38,7 @@ using cloud.charging.open.protocols.WWCP.Node.KeyPins;
 using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.LocalController.OCPP;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 
@@ -122,7 +123,8 @@ namespace cloud.charging.open.LocalController
 
             Connections = new ConnectionStore(
                               System.IO.Path.Combine(directory, ConnectionStore.DefaultDirectoryName),
-                              TimeProvider
+                              TimeProvider,
+                              NodeNoun
                           );
 
             keyPinning       = NewKeyPinning();
@@ -133,13 +135,6 @@ namespace cloud.charging.open.LocalController
             // told once.
             Connections.KnownCertificateIds   = () => Certificates.ByKind(CertificateKind.TLSIdentity).Select(entry => entry.Id);
             Connections.OnNotice             += (level, message) => Log.Log(level, message, "ocpp", "connections");
-
-            // A back end that dials comes in over the port of the charging
-            // stations, under a name: one a charging station has is not free.
-            Connections.WhyInboundNameIsTaken = name => StationLogins?.TryGet(name, out _) == true
-                                                            ? $"'{name}' is a charging station of this local controller, and a back end that dials comes in over the " +
-                                                              "same port: under that name the two could not be told apart at the door. Give it another name."
-                                                            : null;
 
             // What a controller of before kept in a directory of its own:
             // its keys and their certificates, into the certificate store -
@@ -158,7 +153,8 @@ namespace cloud.charging.open.LocalController
 
             SshKey = new SshClientKey(
                          System.IO.Path.Combine(Connections.Path, SshClientKey.DirectoryName),
-                         $"localcontroller@{Environment.MachineName}"
+                         $"localcontroller@{Environment.MachineName}",
+                         NodeNoun:  NodeNoun
                      );
 
             SshKey.OnNotice += (level, message) => Log.Log(level, message, "ocpp", "connections", "ssh", "security");
@@ -229,7 +225,7 @@ namespace cloud.charging.open.LocalController
                 {
 
                     if (credentials.PasswordOfBefore is String password &&
-                        !Connections.TryAddAuthentication("The password this local controller signs in to its CSMS with", "basic", login, password,
+                        !Connections.TryAddBasicAuthentication(login, password, "The password this local controller signs in to its CSMS with",
                                                           out withPassword, out var refusedPassword))
                     {
                         Log.Critical($"The line up to the CSMS of before is not taken over: its password is refused: {refusedPassword}", "ocpp", "connections", "auth");
@@ -237,7 +233,7 @@ namespace cloud.charging.open.LocalController
                     }
 
                     if (credentials.TOTPOfBefore is TOTPSettings token &&
-                        !Connections.TryAddAuthentication("The one-time token this local controller signs in to its CSMS with", "totp", login, token.SharedSecret,
+                        !Connections.TryAddTOTPAuthentication(login, token.SharedSecret, "The one-time token this local controller signs in to its CSMS with",
                                                           out withToken, out var refusedToken,
                                                           ValiditySeconds:    token.ValidityTime.TotalSeconds,
                                                           Length:             token.Length,
@@ -381,6 +377,18 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
+        #region (protected override) NetworkingModeOf(Connection)
+
+        /// <summary>
+        /// Every line up to the CSMS is dialled in the networking mode the
+        /// section "csms" says: the overlay network, where it says nothing.
+        /// </summary>
+        protected override NetworkingMode? NetworkingModeOf(ConnectionEntry Connection)
+
+            => csmsSettings.NetworkingMode ?? CSMSConfiguration.DefaultNetworkingMode;
+
+        #endregion
+
         #region (protected override) ConnectOverWebSocket(Connection, Basic, Validator, Certificates, TOTP, TOTPLogin, CancellationToken)
 
         /// <summary>
@@ -431,7 +439,7 @@ namespace cloud.charging.open.LocalController
                        NextHopNetworkingNodeId:     NextHopOf(Connection),
                        RoutingNetworkingNodeIds:    names,
 
-                       NetworkingMode:              csmsSettings.NetworkingMode ?? CSMSConfiguration.DefaultNetworkingMode,
+                       NetworkingMode:              NetworkingModeOf(Connection),
 
                        SecWebSocketProtocols:       SubProtocolsOf(Connection),
                        HTTPAuthentication:          Basic,

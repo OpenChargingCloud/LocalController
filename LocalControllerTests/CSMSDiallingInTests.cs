@@ -29,6 +29,7 @@ using NUnit.Framework;
 
 using cloud.charging.open.protocols.WWCP.NetworkingNode;
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 using OCPPConnections = cloud.charging.open.protocols.WWCP.Node.Connections;
 
@@ -291,11 +292,11 @@ namespace cloud.charging.open.LocalController.Tests
                                                   new JProperty("nodeId",            ControllerId)
                                               );
 
-                configuration["ocppServer"] = new JObject(
+                configuration["webSocketServer"] = new JObject(
                                                   new JProperty("enabled",           true),
                                                   new JProperty("address",           "127.0.0.1"),
                                                   new JProperty("port",              TestPorts.Free()),
-                                                  new JProperty("securityProfiles",  new JArray(1)),
+                                                  new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS")),
                                                   new JProperty("subprotocols",      new JArray("ocpp2.1"))
                                               );
 
@@ -329,16 +330,16 @@ namespace cloud.charging.open.LocalController.Tests
             => $"ws://127.0.0.1:{Controller.OCPPServerSettings.TCPPort}/{Name}";
 
         /// <summary>
-        /// Write down the CSMS that dials: what it signs in with, and the connection the other end makes.
+        /// Write down the CSMS that dials: its WebSocket login with what it signs in with, and the
+        /// connection the other end makes.
         /// </summary>
         private String WriteDownTheCSMS(String Name = CSMSName)
         {
 
-            Assert.That(Controller.Connections.TryAddAuthentication("What the CSMS signs in with", "basic", Name, ItsPassword,
-                                                                    out var login, out var error),
+            Assert.That(Controller.WebSocketLogins.TrySetPassword(Name, ItsPassword, null, "What the CSMS signs in with", out var error),
                         Is.True, error);
 
-            Assert.That(Controller.Connections.TryAddConnection("The CSMS, dialling in", Door(Name), "CSMS", true, login, null,
+            Assert.That(Controller.Connections.TryAddConnection("The CSMS, dialling in", Door(Name), "CSMS", true, null, null,
                                                                 out var id, out error,
                                                                 Inbound: true),
                         Is.True, error);
@@ -356,7 +357,7 @@ namespace cloud.charging.open.LocalController.Tests
             var connection = Controller.Connections.Connections.Single(one => one.Id == Id);
 
             Assert.That(Controller.Connections.TryUpdateConnection(Id, connection.Description, connection.URL.ToString(), "CSMS", LetIn,
-                                                                   connection.AuthenticationId, null,
+                                                                   null, null,
                                                                    out var error),
                         Is.True, error);
 
@@ -410,7 +411,7 @@ namespace cloud.charging.open.LocalController.Tests
         private async Task<Line> AStation(String Id)
         {
 
-            Assert.That(Controller.StationLogins.TrySetPassword(Id, ThePassword, null, null, out _, out var error), Is.True, error);
+            Assert.That(Controller.WebSocketLogins.TrySetPassword(Id, ThePassword, null, null, out var error), Is.True, error);
 
             var station = new Line(Id);
 
@@ -617,31 +618,63 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region ItRegistersWithTheCSMSThatDials_AsAStationDoes()
+
+        /// <summary>
+        /// A CSMS that dials is a back end like one the controller dials: once it is in, the controller
+        /// sends it its BootNotification - who it is, and that it powered up - and stands accepted, as a
+        /// charging station does: the same registration, read the same way.
+        /// </summary>
+        [Test]
+        public async Task ItRegistersWithTheCSMSThatDials_AsAStationDoes()
+        {
+
+            var (csms, _) = await TheCSMSIsIn();
+
+            await using var theCSMS = csms;
+
+            var boot = await csms.Asked("BootNotification");
+
+            Assert.That(boot, Is.Not.Null, $"no BootNotification reached the CSMS that dialled.{Environment.NewLine}{Log}");
+
+            await Until(() => Controller.RegistrationJSON()["2.1"]?["state"]?.Value<String>() == "Accepted", "The controller being accepted");
+
+            Assert.Multiple(() => {
+                Assert.That(CSMSNetworkingModeTests.PayloadOf(boot!)?["reason"]?.Value<String>(),                         Is.EqualTo("PowerUp"));
+                Assert.That(CSMSNetworkingModeTests.PayloadOf(boot!)?["chargingStation"]?["vendorName"]?.Value<String>(), Is.Not.Empty);
+                Assert.That(Controller.RegistrationJSON()["2.1"]?["interval"]?.Value<Int32>(),                            Is.EqualTo(300));
+                Assert.That(Controller.RegistrationJSON().ContainsKey("1.6"),                                             Is.False, "a local controller speaks no OCPP 1.6 upwards");
+            });
+
+        }
+
+        #endregion
+
         #region ItsName_IsNoStations_AndAStationIsNoCSMS()
 
         /// <summary>
-        /// One port, and names that are told apart at its door: a CSMS cannot be written down under the
-        /// name of a charging station, a station's password opens nothing under the name of the CSMS, and
-        /// the stations sign in beside it as before.
+        /// One port, one way to sign in, and names that are told apart at its door: what the CSMS signs
+        /// in with is its WebSocket login and no credentials of the controller's, a station's password
+        /// opens nothing under the name of the CSMS, and the stations sign in beside it as before.
         /// </summary>
         [Test]
         public async Task ItsName_IsNoStations_AndAStationIsNoCSMS()
         {
 
-            Assert.That(Controller.StationLogins.TrySetPassword("cs001", ThePassword, null, null, out _, out var error), Is.True, error);
+            Assert.That(Controller.WebSocketLogins.TrySetPassword("cs001", ThePassword, null, null, out var error), Is.True, error);
 
-            Assert.That(Controller.Connections.TryAddAuthentication("What it signs in with", "basic", "cs001", ItsPassword,
+            Assert.That(Controller.Connections.TryAddBasicAuthentication("csms-02", ItsPassword, "What the controller signs in with",
                                                                     out var login, out error),
                         Is.True, error);
 
             Assert.Multiple(() => {
 
-                Assert.That(Controller.Connections.TryAddConnection("A CSMS under the name of a station", Door("cs001"), "CSMS", true, login, null,
+                Assert.That(Controller.Connections.TryAddConnection("A CSMS with credentials of the controller", Door("csms-02"), "CSMS", true, login, null,
                                                                     out _, out var refused,
                                                                     Inbound: true),
                             Is.False);
 
-                Assert.That(refused, Does.Contain("is a charging station of this local controller"));
+                Assert.That(refused, Does.Contain("signs in with its WebSocket login"));
 
             });
 

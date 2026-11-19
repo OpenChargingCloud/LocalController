@@ -35,6 +35,7 @@ using cloud.charging.open.LocalController.CommandLine;
 using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
 using cloud.charging.open.protocols.OCPP.Node.Serving.CommandLine;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 
@@ -257,7 +258,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(removed,                                                Is.EqualTo(new[] { $"The key {FingerprintOf(first)} lets 'cs001' in no more." }));
-                Assert.That(lc.StationLogins.TryGet("cs001", out var login),         Is.True);
+                Assert.That(lc.WebSocketLogins.TryGet("cs001", out var login),         Is.True);
                 Assert.That(login!.Keys.Select(key => key.Fingerprint),             Is.EqualTo(new[] { FingerprintOf(second) }));
             });
 
@@ -297,7 +298,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(noVerb.Single(),        Does.StartWith("Usage: stationKeys "));
             });
 
-            Assert.That(lc.StationLogins.TryGet("cs001", out var login) && login.Keys.Count() == 1, Is.True, "a key changed");
+            Assert.That(lc.WebSocketLogins.TryGet("cs001", out var login) && login.Keys.Count() == 1, Is.True, "a key changed");
 
         }
 
@@ -329,7 +330,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(looked,          Has.Some.EqualTo("No charging station of this local controller has an SSH key."));
                 Assert.That(refused.Single(), Does.StartWith("'vera' may not do that here: it needs the ").And.Contain("cpo"));
                 Assert.That(given.First(),    Does.StartWith("'cs001' is a charging station of this local controller now"));
-                Assert.That(controller!.StationLogins.TryGet("cs001", out var login) && login.Keys.Single().CreatedBy == "cleo", Is.True);
+                Assert.That(controller!.WebSocketLogins.TryGet("cs001", out var login) && login.Keys.Single().CreatedBy == "cleo", Is.True);
 
                 lock (said)
                     Assert.That(said,         Has.Some.EqualTo($"'cleo' at the command line over SSH gave the charging station 'cs001' the SSH key {FingerprintOf(key)}."));
@@ -423,7 +424,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(notAPin.Single(),  Does.StartWith("The key pin was not given: "));
                 Assert.That(removed,           Is.EqualTo(new[] { $"The key pin {pin} lets 'cs001' in no more." }));
                 Assert.That(gone,              Is.EqualTo(new[] { $"'cs001' has no key pin {pin}." }));
-                Assert.That(lc.StationLogins.TryGet("cs002", out _), Is.False);
+                Assert.That(lc.WebSocketLogins.TryGet("cs002", out _), Is.False);
 
                 lock (said)
                     Assert.That(said,          Has.Some.EqualTo($"Somebody at the command line gave the charging station 'cs001' the key pin {pin}."));
@@ -458,7 +459,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(refused.Single(),  Does.StartWith("'cleo' may not do that here: it needs the "));
                 Assert.That(controller!.Certificates.ServerKeys(StationPortCertificates.Listener), Is.Empty);
                 Assert.That(given.First(),     Does.StartWith("'cs001' is a charging station of this local controller now"));
-                Assert.That(controller.StationLogins.TryGet("cs001", out var login) && login.Pins.Single().AddedBy == "cleo", Is.True);
+                Assert.That(controller.WebSocketLogins.TryGet("cs001", out var login) && login.Pins.Single().AddedBy == "cleo", Is.True);
             });
 
         }

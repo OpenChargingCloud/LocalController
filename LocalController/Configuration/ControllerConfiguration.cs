@@ -54,7 +54,7 @@ namespace cloud.charging.open.LocalController.Configuration
     /// <param name="CSMS">The charging station management system above it, and how it is dialled.</param>
     /// <param name="OpenADR">The OpenADR 3 VTN of the grid operator it is connected behind, and how it is asked for limits.</param>
     public sealed record ControllerConfiguration(OCPPConfiguration?        OCPP         = null,
-                                                 OCPPServerConfiguration?  OCPPServer   = null,
+                                                 WebSocketServerConfiguration?  OCPPServer   = null,
                                                  CSMSConfiguration?        CSMS         = null,
                                                  OpenADRConfiguration?     OpenADR      = null)
     {
@@ -117,18 +117,18 @@ namespace cloud.charging.open.LocalController.Configuration
 
             #region OCPP server
 
-            OCPPServerConfiguration? ocppServer = null;
+            WebSocketServerConfiguration? ocppServer = null;
 
-            if (JSON[OCPPServerConfiguration.SectionName] is JToken ocppServerToken && ocppServerToken.Type != JTokenType.Null)
+            if (JSON[WebSocketServerConfiguration.SectionName] is JToken ocppServerToken && ocppServerToken.Type != JTokenType.Null)
             {
 
                 if (ocppServerToken is not JObject ocppServerJSON)
                 {
-                    Error = $"'{OCPPServerConfiguration.SectionName}' must be a JSON object.";
+                    Error = $"'{WebSocketServerConfiguration.SectionName}' must be a JSON object.";
                     return false;
                 }
 
-                if (!OCPPServerConfiguration.TryParseForOneServer(ocppServerJSON, out ocppServer, out Error))
+                if (!WebSocketServerConfiguration.TryParse(ocppServerJSON, out ocppServer, out Error, LocalController.LocalControllerKind.Noun))
                     return false;
 
             }
@@ -196,7 +196,7 @@ namespace cloud.charging.open.LocalController.Configuration
                 json.Add(OCPPConfiguration.SectionName,  OCPP.ToJSON());
 
             if (OCPPServer is not null)
-                json.Add(OCPPServerConfiguration.SectionName, OCPPServer.ToJSON());
+                json.Add(WebSocketServerConfiguration.SectionName, OCPPServer.ToJSON());
 
             if (CSMS is not null)
                 json.Add(CSMSConfiguration.SectionName, CSMS.ToJSON());

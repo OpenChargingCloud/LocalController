@@ -37,6 +37,7 @@ using cloud.charging.open.protocols.WWCP.Node.TestKit;
 
 using cloud.charging.open.LocalController.OCPP;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 
@@ -109,11 +110,11 @@ namespace cloud.charging.open.LocalController.Tests
 
                                                  new JProperty("nts", new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
 
-                                                 new JProperty("ocppServer", new JObject(
+                                                 new JProperty("webSocketServer", new JObject(
                                                      new JProperty("enabled",           true),
                                                      new JProperty("address",           "127.0.0.1"),
                                                      new JProperty("port",              port),
-                                                     new JProperty("securityProfiles",  new JArray(2, 3))
+                                                     new JProperty("clientAuthentication",  new JArray("httpAuthOverTLS", "tlsClientCertificate"))
                                                  ))
 
                                              )
@@ -121,8 +122,8 @@ namespace cloud.charging.open.LocalController.Tests
 
                              lc.Log.OnLogged += entry => said.Enqueue(entry.Message);
 
-                             Assert.That(lc.StationLogins.TryAddKeyPin("cs001", KeyPin.FromKey(cs001Key).ToHex(), "bay 1", null, null, null, out _, out var error1), Is.True, error1);
-                             Assert.That(lc.StationLogins.TryAddKeyPin("cs002", KeyPin.FromKey(cs002Key).ToHex(), "bay 2", null, null, null, out _, out var error2), Is.True, error2);
+                             Assert.That(lc.WebSocketLogins.TryAddKeyPin("cs001", KeyPin.FromKey(cs001Key).ToHex(), "bay 1", null, null, null, out _, out var error1), Is.True, error1);
+                             Assert.That(lc.WebSocketLogins.TryAddKeyPin("cs002", KeyPin.FromKey(cs002Key).ToHex(), "bay 2", null, null, null, out _, out var error2), Is.True, error2);
 
                              return lc;
 
@@ -341,7 +342,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.Multiple(() => {
                     Assert.That(status,      Is.Not.EqualTo(HTTPStatusCode.SwitchingProtocols), "a station's key opened another station's path");
                     Assert.That(Registered,  Is.Empty);
-                    Assert.That(said,        Has.Some.Contains("is the charging station 'cs001''s, and it asked to connect as 'cs002'"));
+                    Assert.That(said,        Has.Some.Contains("is the WebSocket login 'cs001''s, and it asked to connect as 'cs002'"));
                 });
             }
 
@@ -397,10 +398,10 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AGroupWithoutKeyPinsIsRefused()
         {
 
-            Assert.That(controller.StationLogins.TryAddOrUpdateGroup("no-pins", "No key pins", true, [ AuthMethod.Certificate, AuthMethod.Basic ], [ 1, 2, 3 ], null, out var error),
+            Assert.That(controller.WebSocketLogins.TryAddOrUpdateGroup("no-pins", "No key pins", true, [ AuthMethod.Certificate, AuthMethod.Basic ], [ WebSocketClientAuthentication.HTTPAuthWithoutTLS, WebSocketClientAuthentication.HTTPAuthOverTLS, WebSocketClientAuthentication.TLSClientCertificate ], null, out var error),
                         Is.True, error);
 
-            Assert.That(controller.StationLogins.TrySetGroup("cs001", "no-pins", out var moveError), Is.True, moveError);
+            Assert.That(controller.WebSocketLogins.TrySetGroup("cs001", "no-pins", out var moveError), Is.True, moveError);
 
             var (client, status) = await Connect("cs001", Certificate(cs001Key, "station.invalid"));
 
@@ -423,10 +424,10 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AGroupWithoutProfile3IsRefused()
         {
 
-            Assert.That(controller.StationLogins.TryAddOrUpdateGroup("profile-2", "Profile 2 only", true, [ AuthMethod.KeyPin, AuthMethod.Basic ], [ 2 ], null, out var error),
+            Assert.That(controller.WebSocketLogins.TryAddOrUpdateGroup("profile-2", "Profile 2 only", true, [ AuthMethod.KeyPin, AuthMethod.Basic ], [ WebSocketClientAuthentication.HTTPAuthOverTLS ], null, out var error),
                         Is.True, error);
 
-            Assert.That(controller.StationLogins.TrySetGroup("cs001", "profile-2", out var moveError), Is.True, moveError);
+            Assert.That(controller.WebSocketLogins.TrySetGroup("cs001", "profile-2", out var moveError), Is.True, moveError);
 
             var (client, status) = await Connect("cs001", Certificate(cs001Key, "station.invalid"));
 
@@ -435,7 +436,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.Multiple(() => {
                     Assert.That(status,      Is.Not.EqualTo(HTTPStatusCode.SwitchingProtocols), "a group without profile 3 let a station in by a client key");
                     Assert.That(Registered,  Is.Empty);
-                    Assert.That(said,        Has.Some.Contains("which does not accept security profile 3"));
+                    Assert.That(said,        Has.Some.Contains("which does not accept tlsClientCertificate (security profile 3)"));
                 });
             }
 
@@ -453,7 +454,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ASwitchedOffStationIsRefused()
         {
 
-            Assert.That(controller.StationLogins.TrySetEnabled("cs001", false, out var error), Is.True, error);
+            Assert.That(controller.WebSocketLogins.TrySetEnabled("cs001", false, out var error), Is.True, error);
 
             var (client, status) = await Connect("cs001", Certificate(cs001Key, "station.invalid"));
 
@@ -480,7 +481,7 @@ namespace cloud.charging.open.LocalController.Tests
             var certificate = Certificate(cs001Key, "cs001");
 
             Assert.That(controller.ClientTrust.TryAdd(TestCA.ToPEM(certificate), "cs001 itself", out _, out _, out var trustError), Is.True, trustError);
-            Assert.That(controller.StationLogins.TrySetEnabled("cs001", false, out var error), Is.True, error);
+            Assert.That(controller.WebSocketLogins.TrySetEnabled("cs001", false, out var error), Is.True, error);
 
             var (client, status) = await Connect("cs001", certificate);
 
@@ -489,7 +490,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.Multiple(() => {
                     Assert.That(status,      Is.Not.EqualTo(HTTPStatusCode.SwitchingProtocols), "a station that is switched off was let in");
                     Assert.That(Registered,  Is.Empty);
-                    Assert.That(said,        Has.Some.Contains("the charging station 'cs001' is switched off here"));
+                    Assert.That(said,        Has.Some.Contains("the WebSocket login 'cs001' is switched off here"));
                 });
             }
 
@@ -594,7 +595,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.That(said, Has.Some.Contains("was accepted by its key pin"), "the handshake did not get through by the pin");
 
-            Assert.That(controller.StationLogins.TryRemoveKeyPin("cs001", KeyPin.FromKey(cs001Key).ToHex(), out var error), Is.True, error);
+            Assert.That(controller.WebSocketLogins.TryRemoveKeyPin("cs001", KeyPin.FromKey(cs001Key).ToHex(), out var error), Is.True, error);
 
             var request = "GET /cs003 HTTP/1.1\r\n" +
                           $"Host: 127.0.0.1:{port}\r\n" +
@@ -635,7 +636,7 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(() => {
                 Assert.That(statusLine,  Does.Not.Contain(" 101 "), "a pin taken away still opened a path it was never listed for");
                 Assert.That(Registered,  Is.Empty);
-                Assert.That(said,        Has.Some.Contains("is no charging station's any more"));
+                Assert.That(said,        Has.Some.Contains("is no WebSocket login's any more"));
             });
 
         }

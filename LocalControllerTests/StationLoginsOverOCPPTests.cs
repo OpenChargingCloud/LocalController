@@ -31,6 +31,7 @@ using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.SSH;
 
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 
@@ -94,11 +95,11 @@ namespace cloud.charging.open.LocalController.Tests
                                                     new JProperty("nts",  new JObject(new JProperty("groups", new JObject(new JProperty("legal", new JObject(new JProperty("enabled", false))))))),
                                                     new JProperty("ocpp", new JObject(new JProperty("nodeId", "lc004"))),
 
-                                                    new JProperty("ocppServer", new JObject(
+                                                    new JProperty("webSocketServer", new JObject(
                                                         new JProperty("enabled",           true),
                                                         new JProperty("address",           "127.0.0.1"),
                                                         new JProperty("port",              port),
-                                                        new JProperty("securityProfiles",  new JArray(1))
+                                                        new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS"))
                                                     )),
 
                                                     new JProperty("csms", new JObject(
@@ -116,7 +117,7 @@ namespace cloud.charging.open.LocalController.Tests
                                 lc.Log.OnLogged += entry => said.Enqueue(entry.Message);
 
                                 Assert.That(lc.TrySetUplinkPassword("lc004", ThePassword, out var loginError), Is.True, loginError);
-                                Assert.That(lc.StationLogins.TrySetPassword("cs001", cs001Password, null, "bay 1", out _, out var error), Is.True, error);
+                                Assert.That(lc.WebSocketLogins.TrySetPassword("cs001", cs001Password, null, "bay 1", out var error), Is.True, error);
 
                                 return lc;
 
@@ -340,7 +341,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(set[$"{Station}[cs003].Enabled"].Status,  Is.EqualTo("UnknownComponent"));
-                Assert.That(controller.StationLogins.TryGet("cs003", out _), Is.False);
+                Assert.That(controller.WebSocketLogins.TryGet("cs003", out _), Is.False);
             });
 
         }
@@ -567,7 +568,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStationListedOnThePage_IsInTheDeviceModel()
         {
 
-            Assert.That(controller.StationLogins.TrySetPassword("cs009", "cs009-password-long-enough", null, null, out _, out var error), Is.True, error);
+            Assert.That(controller.WebSocketLogins.TrySetPassword("cs009", "cs009-password-long-enough", null, null, out var error), Is.True, error);
 
             var read = await Get((Station, "cs009", "HasPassword"));
 
