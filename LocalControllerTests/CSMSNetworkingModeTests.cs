@@ -660,6 +660,54 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region TheBootNotificationOverASecondLine_NamesItsCSMS()
+
+        /// <summary>
+        /// A second line, to a back end of its own - no primary, so not reached by the name "CSMS" in
+        /// the controller's routing, but by the line's own: its BootNotification goes over that line,
+        /// and in the overlay network names the CSMS at its end all the same.
+        /// </summary>
+        [Test]
+        public async Task TheBootNotificationOverASecondLine_NamesItsCSMS()
+        {
+
+            await using var second = new CSMS(TestPorts.Free(), Overlay);
+
+            Assert.That(controller.Connections.TryAddBasicAuthentication(ControllerId, ThePassword, "The second CSMS", out var credentials, out var error), Is.True, error);
+
+            Assert.That(controller.Connections.TryAddConnection("The second CSMS",
+                                                                $"ws://127.0.0.1:{second.Server.IPPort}",
+                                                                "CSMS",
+                                                                true,
+                                                                credentials,
+                                                                null,
+                                                                out var id,
+                                                                out error),
+                        Is.True, error);
+
+            Assert.That(controller.IsPrimary(controller.Connections.Connections.Single(connection => connection.Id == id)), Is.False,
+                        "the second line is the primary, and not what this test is about");
+
+            var boot = await second.SentRequest("BootNotification", _ => true, EventPatience);
+
+            Assert.That(boot, Is.Not.Null, $"the controller sent the second CSMS no BootNotification{Environment.NewLine}{Log}");
+
+            Assert.Multiple(() => {
+
+                Assert.That(IsOverlay(boot!),  Is.EqualTo(Overlay), boot!.ToString(Formatting.None));
+
+                if (Overlay)
+                {
+                    Assert.That(DestinationOf(boot!),  Is.EqualTo("CSMS"), "the BootNotification names the line's own name, which the CSMS does not answer to");
+                    Assert.That(PathOf(boot!),         Is.EqualTo(new[] { ControllerId }));
+                }
+
+            });
+
+        }
+
+        #endregion
+
         #region ARequestForTheController_IsAnsweredByIt()
 
         /// <summary>

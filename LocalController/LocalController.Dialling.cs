@@ -389,6 +389,21 @@ namespace cloud.charging.open.LocalController
 
         #endregion
 
+        #region (protected override) FarEndNameOf(Connection)
+
+        /// <summary>
+        /// What the CSMS at the other end of a line answers to: what the
+        /// section "csms" says it calls itself, "CSMS" where it says nothing.
+        /// </summary>
+        protected override NetworkingNode_Id FarEndNameOf(ConnectionEntry Connection)
+
+            => csmsSettings.NextHopNodeId is String nextHop &&
+               NetworkingNode_Id.TryParse(nextHop, out var named)
+                   ? named
+                   : base.FarEndNameOf(Connection);
+
+        #endregion
+
         #region (protected override) ConnectOverWebSocket(Connection, Basic, Validator, Certificates, TOTP, TOTPLogin, CancellationToken)
 
         /// <summary>
