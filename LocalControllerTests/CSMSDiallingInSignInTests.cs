@@ -28,7 +28,9 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using org.GraphDefined.Vanaheimr.Illias;
 using org.GraphDefined.Vanaheimr.Hermod;
+using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 
 using cloud.charging.open.protocols.WWCP.Node.Certificates;
 using cloud.charging.open.protocols.WWCP.Node.Configuration;
@@ -288,8 +290,8 @@ namespace cloud.charging.open.LocalController.Tests
             if (BoundOneTimePass)
             {
 
-                Assert.That(controller.WebSocketLogins.TrySetTOTP(CSMSName, TheSharedSecret, null, null, null, null, null, "What the CSMS signs in with",
-                                                                  out _, out var loginError),
+                Assert.That(controller.WebSocketLogins.TrySetTOTPAuthentication(CSMSName, TheSharedSecret, null, null, null, null, null, I18NString.Create("What the CSMS signs in with"),
+                                                                  out var loginError),
                             Is.True, loginError);
 
                 Assert.That(controller.WebSocketLogins.TrySetTOTPBinding(CSMSName, true, out loginError), Is.True, loginError);
@@ -297,7 +299,7 @@ namespace cloud.charging.open.LocalController.Tests
             }
 
             if (KeyPins is not null)
-                Assert.That(controller.WebSocketLogins.TryAddKeyPin(CSMSName, KeyPins, "its client certificate", null, "What the CSMS signs in with", "tests",
+                Assert.That(controller.WebSocketLogins.TryAddKeyPin(CSMSName, KeyPins, "its client certificate", null, I18NString.Create("What the CSMS signs in with"), "tests",
                                                                     out _, out var pinError),
                             Is.True, pinError);
 
@@ -306,7 +308,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                           out _, out _, out var trustError),
                             Is.True, trustError);
 
-            Assert.That(controller.Connections.TryAddConnection("The CSMS, dialling in", $"wss://127.0.0.1:{port}/{CSMSName}", "CSMS", true, null, null,
+            Assert.That(controller.Connections.TryAddConnection(I18NString.Create("The CSMS, dialling in"), URL.Parse($"wss://127.0.0.1:{port}/{CSMSName}"), "CSMS", true, null, null,
                                                                 out var id, out var error,
                                                                 Inbound: true),
                         Is.True, error);
@@ -397,7 +399,7 @@ namespace cloud.charging.open.LocalController.Tests
                 if (handle is not null && NamedByItsConnection)
                 {
                     var line = made.Uplink()!;
-                    Assert.That(made.Connections.TryUpdateConnection(line.Id, line.Description, line.URL.ToString(), line.ConnectionType.ToString(), line.AutoConnect,
+                    Assert.That(made.Connections.TryUpdateConnection(line.Id, line.Description, line.URL, line.ConnectionType.ToString(), line.AutoConnect,
                                                                      line.AuthenticationId, handle,
                                                                      out var lineError),
                                 Is.True, lineError);

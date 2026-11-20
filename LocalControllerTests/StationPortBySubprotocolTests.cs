@@ -137,8 +137,8 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task OCPP16OnOfferWithoutANodeOfIt_IsTurnedAwayAndSaidSo()
         {
 
-            Controller.WebSocketLogins.TrySetPassword("cs016", ThePassword, null, null, out _);
-            Controller.WebSocketLogins.TrySetPassword("cs021", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs016", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs021", ThePassword, null, null, out _);
 
             var (connected16, _)             = await Connect("cs016", ThePassword, "ocpp1.6");
             var (connected21, subprotocol21) = await Connect("cs021", ThePassword, "ocpp2.1");

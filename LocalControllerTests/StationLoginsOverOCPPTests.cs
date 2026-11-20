@@ -27,6 +27,7 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using org.GraphDefined.Vanaheimr.Illias;
 using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.SSH;
 
@@ -117,7 +118,7 @@ namespace cloud.charging.open.LocalController.Tests
                                 lc.Log.OnLogged += entry => said.Enqueue(entry.Message);
 
                                 Assert.That(lc.TrySetUplinkPassword("lc004", ThePassword, out var loginError), Is.True, loginError);
-                                Assert.That(lc.WebSocketLogins.TrySetPassword("cs001", cs001Password, null, "bay 1", out var error), Is.True, error);
+                                Assert.That(lc.WebSocketLogins.TrySetPasswordAuthentication("cs001", cs001Password, null, I18NString.Create("bay 1"), out var error), Is.True, error);
 
                                 return lc;
 
@@ -277,7 +278,7 @@ namespace cloud.charging.open.LocalController.Tests
         {
 
             var read = await Get((Station, "cs001", "Group"),       (Station, "cs001", "Enabled"),  (Station, "cs001", "HasPassword"),
-                                 (Station, "cs001", "HasTOTP"),     (Station, "cs001", "Note"),     (Station, "cs001", "Listed"),
+                                 (Station, "cs001", "HasTOTP"),     (Station, "cs001", "Description"),(Station, "cs001", "Listed"),
                                  (Station, "cs001", "Password"),    (Station, "cs001", "TOTPSecret"),
                                  (Group,   "default", "Members"),   (Group,   "default", "Listed"));
 
@@ -286,7 +287,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(read[$"{Station}[cs001].Enabled"],      Is.EqualTo(("Accepted", "true")));
                 Assert.That(read[$"{Station}[cs001].HasPassword"],  Is.EqualTo(("Accepted", "true")));
                 Assert.That(read[$"{Station}[cs001].HasTOTP"],      Is.EqualTo(("Accepted", "false")));
-                Assert.That(read[$"{Station}[cs001].Note"],         Is.EqualTo(("Accepted", "bay 1")));
+                Assert.That(read[$"{Station}[cs001].Description"],  Is.EqualTo(("Accepted", "bay 1")));
                 Assert.That(read[$"{Station}[cs001].Listed"],       Is.EqualTo(("Accepted", "true")));
                 Assert.That(read[$"{Station}[cs001].Password"],     Is.EqualTo(("Rejected", (String?) null)), "a password was read out");
                 Assert.That(read[$"{Station}[cs001].TOTPSecret"],   Is.EqualTo(("Rejected", (String?) null)), "a secret was read out");
@@ -568,7 +569,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStationListedOnThePage_IsInTheDeviceModel()
         {
 
-            Assert.That(controller.WebSocketLogins.TrySetPassword("cs009", "cs009-password-long-enough", null, null, out var error), Is.True, error);
+            Assert.That(controller.WebSocketLogins.TrySetPasswordAuthentication("cs009", "cs009-password-long-enough", null, null, out var error), Is.True, error);
 
             var read = await Get((Station, "cs009", "HasPassword"));
 

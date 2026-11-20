@@ -21,6 +21,7 @@ using cloud.charging.open.protocols.OCPP.Node;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 
+using org.GraphDefined.Vanaheimr.Illias;
 using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 using org.GraphDefined.Vanaheimr.Hermod.WebSocket;
@@ -225,7 +226,7 @@ namespace cloud.charging.open.LocalController
                 {
 
                     if (credentials.PasswordOfBefore is String password &&
-                        !Connections.TryAddBasicAuthentication(login, password, "The password this local controller signs in to its CSMS with",
+                        !Connections.TryAddPasswordAuthentication(login, password, I18NString.Create("The password this local controller signs in to its CSMS with"),
                                                           out withPassword, out var refusedPassword))
                     {
                         Log.Critical($"The line up to the CSMS of before is not taken over: its password is refused: {refusedPassword}", "ocpp", "connections", "auth");
@@ -233,7 +234,7 @@ namespace cloud.charging.open.LocalController
                     }
 
                     if (credentials.TOTPOfBefore is TOTPSettings token &&
-                        !Connections.TryAddTOTPAuthentication(login, token.SharedSecret, "The one-time token this local controller signs in to its CSMS with",
+                        !Connections.TryAddTOTPAuthentication(login, token.SharedSecret, I18NString.Create("The one-time token this local controller signs in to its CSMS with"),
                                                           out withToken, out var refusedToken,
                                                           ValiditySeconds:    token.ValidityTime.TotalSeconds,
                                                           Length:             token.Length,
@@ -301,10 +302,11 @@ namespace cloud.charging.open.LocalController
 
                 }
 
-                if (!Connections.TryAddConnection("CSMS", url, "CSMS", true,
+                if (!ConnectionEntry.TryParseURL(url, out var csmsURL, out var refused) ||
+                    !Connections.TryAddConnection(I18NString.Create("CSMS"), csmsURL, "CSMS", true,
                                                   withPassword ?? withToken,
                                                   null,
-                                                  out var connectionId, out var refused,
+                                                  out var connectionId, out refused,
                                                   ServerKeyPins:  keyPins,
                                                   KeyPinTrust:    trust,
                                                   HTTPVersion:    Written?.HTTPVersion is null ? null : Written.HTTPVersionAsText))

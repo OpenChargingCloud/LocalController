@@ -18,6 +18,7 @@
 #region Usings
 
 using Newtonsoft.Json.Linq;
+using org.GraphDefined.Vanaheimr.Illias;
 
 using NUnit.Framework;
 
@@ -135,7 +136,7 @@ namespace cloud.charging.open.LocalController.Tests
                            )
                        );
 
-            if (!csms.WebSocketLogins.TrySetPassword("lc002", Password, null, "The controller below", out var error))
+            if (!csms.WebSocketLogins.TrySetPasswordAuthentication("lc002", Password, null, I18NString.Create("The controller below"), out var error))
                 throw new InvalidOperationException($"The test's own upstream login was refused: {error}");
 
             return csms;
@@ -342,7 +343,7 @@ namespace cloud.charging.open.LocalController.Tests
         private LocalController AControllerThatDialsWithAOneTimePassword(String SharedSecret = TheSharedSecret)
         {
 
-            if (!upstream.WebSocketLogins.TrySetTOTP("lc002", TheSharedSecret, null, null, null, null, null, null, out _, out var upstreamError))
+            if (!upstream.WebSocketLogins.TrySetTOTPAuthentication("lc002", TheSharedSecret, null, null, null, null, null, null, out var upstreamError))
                 throw new InvalidOperationException($"The test's own upstream TOTP login was refused: {upstreamError}");
 
             var controller = AControllerThatDials(Password: null);

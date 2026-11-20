@@ -17,6 +17,8 @@
 
 #region Usings
 
+using org.GraphDefined.Vanaheimr.Illias;
+
 using cloud.charging.open.protocols.WWCP;
 using cloud.charging.open.protocols.WWCP.NetworkingNode;
 
@@ -93,7 +95,7 @@ namespace cloud.charging.open.LocalController
 
             return name.StartsWith(prefix, StringComparison.Ordinal) &&
                    Connections.Connections.FirstOrDefault(connection => connection.Id == name[prefix.Length..]) is { } line
-                       ? line.Description
+                       ? line.Description.FirstText()
                        : name;
 
         }

@@ -18,6 +18,8 @@
 #region Usings
 
 using System.Net;
+using org.GraphDefined.Vanaheimr.Illias;
+using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 using System.Net.WebSockets;
 using System.Text;
 using System.Collections.Concurrent;
@@ -336,10 +338,10 @@ namespace cloud.charging.open.LocalController.Tests
         private String WriteDownTheCSMS(String Name = CSMSName)
         {
 
-            Assert.That(Controller.WebSocketLogins.TrySetPassword(Name, ItsPassword, null, "What the CSMS signs in with", out var error),
+            Assert.That(Controller.WebSocketLogins.TrySetPasswordAuthentication(Name, ItsPassword, null, I18NString.Create("What the CSMS signs in with"), out var error),
                         Is.True, error);
 
-            Assert.That(Controller.Connections.TryAddConnection("The CSMS, dialling in", Door(Name), "CSMS", true, null, null,
+            Assert.That(Controller.Connections.TryAddConnection(I18NString.Create("The CSMS, dialling in"), URL.Parse(Door(Name)), "CSMS", true, null, null,
                                                                 out var id, out error,
                                                                 Inbound: true),
                         Is.True, error);
@@ -356,7 +358,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var connection = Controller.Connections.Connections.Single(one => one.Id == Id);
 
-            Assert.That(Controller.Connections.TryUpdateConnection(Id, connection.Description, connection.URL.ToString(), "CSMS", LetIn,
+            Assert.That(Controller.Connections.TryUpdateConnection(Id, connection.Description, connection.URL, "CSMS", LetIn,
                                                                    null, null,
                                                                    out var error),
                         Is.True, error);
@@ -411,7 +413,7 @@ namespace cloud.charging.open.LocalController.Tests
         private async Task<Line> AStation(String Id)
         {
 
-            Assert.That(Controller.WebSocketLogins.TrySetPassword(Id, ThePassword, null, null, out var error), Is.True, error);
+            Assert.That(Controller.WebSocketLogins.TrySetPasswordAuthentication(Id, ThePassword, null, null, out var error), Is.True, error);
 
             var station = new Line(Id);
 
@@ -661,15 +663,15 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ItsName_IsNoStations_AndAStationIsNoCSMS()
         {
 
-            Assert.That(Controller.WebSocketLogins.TrySetPassword("cs001", ThePassword, null, null, out var error), Is.True, error);
+            Assert.That(Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out var error), Is.True, error);
 
-            Assert.That(Controller.Connections.TryAddBasicAuthentication("csms-02", ItsPassword, "What the controller signs in with",
+            Assert.That(Controller.Connections.TryAddPasswordAuthentication("csms-02", ItsPassword, I18NString.Create("What the controller signs in with"),
                                                                     out var login, out error),
                         Is.True, error);
 
             Assert.Multiple(() => {
 
-                Assert.That(Controller.Connections.TryAddConnection("A CSMS with credentials of the controller", Door("csms-02"), "CSMS", true, login, null,
+                Assert.That(Controller.Connections.TryAddConnection(I18NString.Create("A CSMS with credentials of the controller"), URL.Parse(Door("csms-02")), "CSMS", true, login, null,
                                                                     out _, out var refused,
                                                                     Inbound: true),
                             Is.False);

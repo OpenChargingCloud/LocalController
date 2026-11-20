@@ -673,10 +673,10 @@ namespace cloud.charging.open.LocalController.Tests
 
             await using var second = new CSMS(TestPorts.Free(), Overlay);
 
-            Assert.That(controller.Connections.TryAddBasicAuthentication(ControllerId, ThePassword, "The second CSMS", out var credentials, out var error), Is.True, error);
+            Assert.That(controller.Connections.TryAddPasswordAuthentication(ControllerId, ThePassword, I18NString.Create("The second CSMS"), out var credentials, out var error), Is.True, error);
 
-            Assert.That(controller.Connections.TryAddConnection("The second CSMS",
-                                                                $"ws://127.0.0.1:{second.Server.IPPort}",
+            Assert.That(controller.Connections.TryAddConnection(I18NString.Create("The second CSMS"),
+                                                                URL.Parse($"ws://127.0.0.1:{second.Server.IPPort}"),
                                                                 "CSMS",
                                                                 true,
                                                                 credentials,

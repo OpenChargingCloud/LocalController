@@ -117,7 +117,7 @@ namespace cloud.charging.open.LocalController.Tests
                                              )
                                          );
 
-                             made.WebSocketLogins.TrySetPassword("cs001", ThePassword, null, null, out _);
+                             made.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
 
                              return made;
 

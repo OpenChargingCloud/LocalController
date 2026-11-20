@@ -21,7 +21,9 @@ using System.Runtime.CompilerServices;
 
 using Newtonsoft.Json.Linq;
 
+using org.GraphDefined.Vanaheimr.Illias;
 using org.GraphDefined.Vanaheimr.Hermod;
+using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 
 using cloud.charging.open.protocols.WWCP.Node.Connections;
 using cloud.charging.open.protocols.WWCP.Node.KeyPins;
@@ -104,7 +106,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             if (Controller.Uplink() is not ConnectionEntry line)
                 return Controller.Connections.TryAddConnection(
-                           "CSMS", URL, "CSMS", true,
+                           I18NString.Create("CSMS"), org.GraphDefined.Vanaheimr.Hermod.HTTP.URL.Parse(URL), "CSMS", true,
                            kept.AuthenticationId,
                            null,
                            out _, out Error,
@@ -114,7 +116,7 @@ namespace cloud.charging.open.LocalController.Tests
                        );
 
             return Controller.Connections.TryUpdateConnection(
-                       line.Id, line.Description, URL, line.ConnectionType.ToString(), line.AutoConnect,
+                       line.Id, line.Description, org.GraphDefined.Vanaheimr.Hermod.HTTP.URL.Parse(URL), line.ConnectionType.ToString(), line.AutoConnect,
                        line.AuthenticationId ?? kept.AuthenticationId,
                        line.CertificateId,
                        out Error,
@@ -174,7 +176,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                    String?               Password,
                                                    out String?           Error)
 
-            => Controller.Connections.TryAddBasicAuthentication(Login, Password, "The password of the line up", out var id, out Error) &&
+            => Controller.Connections.TryAddPasswordAuthentication(Login, Password, I18NString.Create("The password of the line up"), out var id, out Error) &&
                Controller.SignsInWith(id, out Error);
 
         #endregion
@@ -206,7 +208,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                out Boolean           NotSaved,
                                                Boolean?              Bound   = null)
 
-            => Controller.Connections.TryAddTOTPAuthentication(Login, SharedSecret, "The one-time token of the line up", out var id, out Error, out NotSaved,
+            => Controller.Connections.TryAddTOTPAuthentication(Login, SharedSecret, I18NString.Create("The one-time token of the line up"), out var id, out Error, out NotSaved,
                                                            ValiditySeconds:    Validity?.TotalSeconds,
                                                            Length:             Length,
                                                            Alphabet:           Alphabet,
@@ -245,7 +247,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             if (Controller.Uplink() is ConnectionEntry line)
                 return Controller.Connections.TryUpdateConnection(
-                           line.Id, line.Description, line.URL.ToString(), line.ConnectionType.ToString(), line.AutoConnect,
+                           line.Id, line.Description, line.URL, line.ConnectionType.ToString(), line.AutoConnect,
                            line.AuthenticationId, line.CertificateId,
                            out Error,
                            ServerKeyPins:  Pins ?? ""
@@ -269,7 +271,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             if (Controller.Uplink() is ConnectionEntry line)
                 return Controller.Connections.TryUpdateConnection(
-                           line.Id, line.Description, line.URL.ToString(), line.ConnectionType.ToString(), line.AutoConnect,
+                           line.Id, line.Description, line.URL, line.ConnectionType.ToString(), line.AutoConnect,
                            AuthenticationId,
                            line.CertificateId,
                            out Error

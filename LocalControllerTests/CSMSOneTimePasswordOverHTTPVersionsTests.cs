@@ -18,6 +18,7 @@
 #region Usings
 
 using System.Text;
+using org.GraphDefined.Vanaheimr.Illias;
 
 using Newtonsoft.Json.Linq;
 
@@ -107,7 +108,7 @@ namespace cloud.charging.open.LocalController.Tests
                                           )
                                       );
 
-                           if (!made.WebSocketLogins.TrySetTOTP("lc002", TheSharedSecret, null, null, null, null, null, "The controller below", out _, out var error))
+                           if (!made.WebSocketLogins.TrySetTOTPAuthentication("lc002", TheSharedSecret, null, null, null, null, null, I18NString.Create("The controller below"), out var error))
                                throw new InvalidOperationException($"The test's own upstream TOTP login was refused: {error}");
 
                            return made;

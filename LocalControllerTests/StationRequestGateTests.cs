@@ -174,7 +174,7 @@ namespace cloud.charging.open.LocalController.Tests
         private async Task<ClientWebSocket> ConnectOverWebSocket(String Id)
         {
 
-            Assert.That(Controller.WebSocketLogins.TrySetPassword(Id, ThePassword, null, null, out var error), Is.True, error);
+            Assert.That(Controller.WebSocketLogins.TrySetPasswordAuthentication(Id, ThePassword, null, null, out var error), Is.True, error);
 
             var client = new ClientWebSocket();
 

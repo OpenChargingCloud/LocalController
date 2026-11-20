@@ -18,6 +18,7 @@
 #region Usings
 
 using System.Collections.Concurrent;
+using org.GraphDefined.Vanaheimr.Illias;
 using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
@@ -141,7 +142,7 @@ namespace cloud.charging.open.LocalController.Tests
                                )
                            );
 
-                if (!csms.WebSocketLogins.TrySetPassword("lc002", UplinkPassword, null, "The controller below", out var error))
+                if (!csms.WebSocketLogins.TrySetPasswordAuthentication("lc002", UplinkPassword, null, I18NString.Create("The controller below"), out var error))
                     throw new InvalidOperationException($"The test's own upstream login was refused: {error}");
 
                 csms.Node.OCPP.IN.AnycastIds.Add(NetworkingNode_Id.CSMS);
@@ -207,7 +208,7 @@ namespace cloud.charging.open.LocalController.Tests
                 if (WithACSMS && !controller.TrySetUplinkPassword("lc002", UplinkPassword, out var loginError))
                     throw new InvalidOperationException($"The test's own credentials were refused: {loginError}");
 
-                if (!controller.WebSocketLogins.TrySetPassword("cs001", ThePassword, null, "A station", out var error))
+                if (!controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, I18NString.Create("A station"), out var error))
                     throw new InvalidOperationException($"The test's own station login was refused: {error}");
 
                 return controller;

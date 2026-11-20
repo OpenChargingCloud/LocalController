@@ -265,8 +265,8 @@ namespace cloud.charging.open.LocalController.Tests
         private void GiveATokenTo(String Id, String? Group = null)
         {
 
-            if (!Controller.WebSocketLogins.TrySetTOTP(Id, TheSecret, null, null, null, null, Group, null,
-                                                     out _, out var error))
+            if (!Controller.WebSocketLogins.TrySetTOTPAuthentication(Id, TheSecret, null, null, null, null, Group, null,
+                                                     out var error))
             {
                 throw new InvalidOperationException($"The test's own TOTP login was refused: {error}");
             }
@@ -345,7 +345,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStationWithOnlyAPasswordCannotUseAToken()
         {
 
-            Controller.WebSocketLogins.TrySetPassword("cs001", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
 
             var (connected, _) = await Connect(TOTPAuth("cs001"));
 
@@ -392,7 +392,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ALoginMayCarryBothAndEitherOneGetsItIn()
         {
 
-            Controller.WebSocketLogins.TrySetPassword("cs001", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
             GiveATokenTo("cs001");
 
             var withAPassword = await Connect(BasicAuth("cs001", ThePassword));
@@ -413,7 +413,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task TakingThePasswordAwayLeavesTheTokenWorking()
         {
 
-            Controller.WebSocketLogins.TrySetPassword("cs001", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
             GiveATokenTo("cs001");
 
             Assert.That(Controller.WebSocketLogins.TryClearPassword("cs001", out var error), Is.True, error);
@@ -461,7 +461,7 @@ namespace cloud.charging.open.LocalController.Tests
             Controller.WebSocketLogins.TryAddOrUpdateGroup(
                 "tokens-only", "Tokens only", true, [AuthMethod.TOTP], [ WebSocketClientAuthentication.HTTPAuthWithoutTLS, WebSocketClientAuthentication.HTTPAuthOverTLS, WebSocketClientAuthentication.TLSClientCertificate ], null, out _);
 
-            Controller.WebSocketLogins.TrySetPassword("cs001", ThePassword, "tokens-only", null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, "tokens-only", null, out _);
 
             var (connected, _) = await Connect(BasicAuth("cs001", ThePassword));
 
@@ -484,7 +484,7 @@ namespace cloud.charging.open.LocalController.Tests
             Controller.WebSocketLogins.TryAddOrUpdateGroup(
                 "field", "Field test", true, [AuthMethod.Basic, AuthMethod.TOTP], [ WebSocketClientAuthentication.HTTPAuthWithoutTLS, WebSocketClientAuthentication.HTTPAuthOverTLS, WebSocketClientAuthentication.TLSClientCertificate ], null, out _);
 
-            Controller.WebSocketLogins.TrySetPassword("cs001", ThePassword, "field", null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, "field", null, out _);
             GiveATokenTo("cs002", "field");
 
             var beforehand = await Connect(BasicAuth("cs001", ThePassword));
@@ -518,7 +518,7 @@ namespace cloud.charging.open.LocalController.Tests
             Controller.WebSocketLogins.TryAddOrUpdateGroup(
                 "encrypted-only", "Encrypted only", true, [AuthMethod.Basic, AuthMethod.TOTP], [ WebSocketClientAuthentication.HTTPAuthOverTLS, WebSocketClientAuthentication.TLSClientCertificate ], null, out _);
 
-            Controller.WebSocketLogins.TrySetPassword("cs001", ThePassword, "encrypted-only", null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, "encrypted-only", null, out _);
 
             var (connected, _) = await Connect(BasicAuth("cs001", ThePassword));
 
@@ -542,7 +542,7 @@ namespace cloud.charging.open.LocalController.Tests
             Controller.WebSocketLogins.TryAddOrUpdateGroup(
                 "tokens-only", "Tokens only", true, [AuthMethod.TOTP], [ WebSocketClientAuthentication.HTTPAuthWithoutTLS, WebSocketClientAuthentication.HTTPAuthOverTLS, WebSocketClientAuthentication.TLSClientCertificate ], null, out _);
 
-            Controller.WebSocketLogins.TrySetPassword("cs001", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
 
             var beforehand = await Connect(BasicAuth("cs001", ThePassword));
 

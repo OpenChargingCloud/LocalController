@@ -599,7 +599,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                                       ))
                                                                   )));
 
-            Assert.That(controller!.WebSocketLogins.TrySetPassword("cs001", stationPassword, null, "Ladepunkt 1", out var error), Is.True, error);
+            Assert.That(controller!.WebSocketLogins.TrySetPasswordAuthentication("cs001", stationPassword, null, I18NString.Create("Ladepunkt 1"), out var error), Is.True, error);
 
             using var support  = await SignedInAs("support2", "support");
             using var station  = new System.Net.WebSockets.ClientWebSocket();

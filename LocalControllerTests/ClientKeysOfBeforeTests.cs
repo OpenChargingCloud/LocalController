@@ -18,6 +18,8 @@
 #region Usings
 
 using System.Security.Cryptography;
+using org.GraphDefined.Vanaheimr.Illias;
+using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 using System.Security.Cryptography.X509Certificates;
 
 using Newtonsoft.Json.Linq;
@@ -187,7 +189,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.That(Identities, Is.EqualTo(new[] { moved }), "the key with its certificate is no identity of the store");
 
-            Assert.That(controller.Connections.TryAddConnection("CSMS", "wss://127.0.0.1:1/lc001", "CSMS", false, null, moved, out var connection, out var problem),
+            Assert.That(controller.Connections.TryAddConnection(I18NString.Create("CSMS"), URL.Parse("wss://127.0.0.1:1/lc001"), "CSMS", false, null, moved, out var connection, out var problem),
                         Is.True, problem);
 
             Assert.Multiple(() => {
@@ -234,7 +236,7 @@ namespace cloud.charging.open.LocalController.Tests
             // A controller that has a line up, and is stopped.
             controller = TestControllers.New(directory, TestControllers.Offline);
 
-            Assert.That(controller.Connections.TryAddConnection("CSMS", "wss://127.0.0.1:1/lc001", "CSMS", false, null, null, out var connection, out var problem),
+            Assert.That(controller.Connections.TryAddConnection(I18NString.Create("CSMS"), URL.Parse("wss://127.0.0.1:1/lc001"), "CSMS", false, null, null, out var connection, out var problem),
                         Is.True, problem);
 
             // Its key, made as keys of the kind are, and kept as they were.
