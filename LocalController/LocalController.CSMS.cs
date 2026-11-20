@@ -96,16 +96,17 @@ namespace cloud.charging.open.LocalController
             => csmsSettings.Enabled == true;
 
         /// <summary>
-        /// Whether a line up to the CSMS is up: one of its connections.
+        /// Whether a line up to the CSMS is up: one of its connections that
+        /// names no node below.
         /// </summary>
         public Boolean             CSMSConnected
-            => ConnectionStates.Values.Any(state => state.Status == ConnectionStatus.Connected);
+            => LinesUp.Any(state => state.Status == ConnectionStatus.Connected);
 
         /// <summary>
         /// Since when, where one is.
         /// </summary>
         public DateTimeOffset?     CSMSConnectedSince
-            => ConnectionStates.Values.
+            => LinesUp.
                    Where  (state => state.Status == ConnectionStatus.Connected).
                    OrderBy(state => state.Since).
                    Select (state => (DateTimeOffset?) state.Since).
@@ -120,10 +121,11 @@ namespace cloud.charging.open.LocalController
             get
             {
 
-                if (CSMSConnected)
+                // Nothing asked for, where this controller reports to no CSMS.
+                if (CSMSConnected || !CSMSEnabled)
                     return null;
 
-                var last = ConnectionStates.Values.
+                var last = LinesUp.
                                Where            (state => state.Status != ConnectionStatus.Connected && state.Status != ConnectionStatus.Standby).
                                OrderByDescending(state => state.Since).
                                FirstOrDefault();
@@ -138,6 +140,35 @@ namespace cloud.charging.open.LocalController
 
             }
         }
+
+        /// <summary>
+        /// How the lines up to the CSMS stand: the connections that name no
+        /// node at their other end - the ones that do lead to a node below.
+        /// </summary>
+        private IEnumerable<ConnectionState> LinesUp
+        {
+            get
+            {
+
+                var below = Connections.Connections.
+                                Where (IsBelow).
+                                Select(connection => connection.Id).
+                                ToHashSet();
+
+                return ConnectionStates.
+                           Where (state => !below.Contains(state.Key)).
+                           Select(state => state.Value);
+
+            }
+        }
+
+        /// <summary>
+        /// Whether the given connection leads to a node below this controller,
+        /// which it names: dialled whether the controller reports to a CSMS or
+        /// not, and not in the frame the section "csms" says.
+        /// </summary>
+        private static Boolean IsBelow(ConnectionEntry Connection)
+            => Connection.RemoteNodeId is not null;
 
         #endregion
 
@@ -181,9 +212,11 @@ namespace cloud.charging.open.LocalController
         #region (private) ConnectCSMS() / DisconnectCSMS()
 
         /// <summary>
-        /// Dial the CSMS: every connection of the store that dials by itself,
+        /// Dial what the store says: every connection that dials by itself,
         /// peer by peer, the next one of a peer where one cannot be reached -
-        /// as a charging station dials, see WWCPNode.Connections.cs.
+        /// as a charging station dials, see WWCPNode.Connections.cs. A node
+        /// below whether this controller reports to a CSMS or not, a line up
+        /// only where it does (see WhyItIsNotConnected).
         /// </summary>
         /// <remarks>
         /// Nothing here throws, and a connection that cannot be made is a
@@ -192,9 +225,6 @@ namespace cloud.charging.open.LocalController
         /// </remarks>
         private async Task ConnectCSMS()
         {
-
-            if (csmsSettings.Enabled != true)
-                return;
 
             await DialConfiguredConnections();
 

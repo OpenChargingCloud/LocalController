@@ -456,6 +456,14 @@ namespace cloud.charging.open.LocalController.Tests
                             "A connection nobody asked for was attempted and then reported as a problem.");
             });
 
+            // The line up is not connected, and says why: nothing of it was tried.
+            var line = downstream.ConnectionStates.Values.Single();
+
+            Assert.Multiple(() => {
+                Assert.That(line.Status,  Is.EqualTo(protocols.WWCP.Node.Connections.ConnectionStatus.NotConnected));
+                Assert.That(line.Said,    Does.Contain("reports to no CSMS"));
+            });
+
         }
 
         #endregion

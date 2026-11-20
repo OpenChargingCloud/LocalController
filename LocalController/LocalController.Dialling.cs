@@ -148,7 +148,7 @@ namespace cloud.charging.open.LocalController
             // then, and then what is dialled.
             Connections.OnConnectionsChanged += () => OCPPDialling.FollowTLSClientComponents(lc01);
             Connections.OnConnectionsChanged += () => {
-                                                    if (csmsSettings.Enabled == true && started)
+                                                    if (started)
                                                         _ = ApplyConnectionChanges();
                                                 };
 
@@ -383,11 +383,32 @@ namespace cloud.charging.open.LocalController
 
         /// <summary>
         /// Every line up to the CSMS is dialled in the networking mode the
-        /// section "csms" says: the overlay network, where it says nothing.
+        /// section "csms" says: the overlay network, where it says nothing. A
+        /// node below as a CSMS dials it: a local controller and a gateway in
+        /// the overlay network, so that the stations behind them are reached
+        /// through them, a charging station in the plain frame of OCPP.
         /// </summary>
         protected override NetworkingMode? NetworkingModeOf(ConnectionEntry Connection)
 
-            => csmsSettings.NetworkingMode ?? CSMSConfiguration.DefaultNetworkingMode;
+            => IsBelow(Connection)
+                   ? Connection.ConnectionType is protocols.WWCP.Node.Connections.ConnectionType.LocalController or protocols.WWCP.Node.Connections.ConnectionType.Gateway
+                         ? NetworkingMode.OverlayNetwork
+                         : NetworkingMode.Standard
+                   : csmsSettings.NetworkingMode ?? CSMSConfiguration.DefaultNetworkingMode;
+
+        #endregion
+
+        #region (protected override) WhyItIsNotConnected(Connection)
+
+        /// <summary>
+        /// A line up to the CSMS is not connected where this controller
+        /// reports to no CSMS; a node below is dialled all the same.
+        /// </summary>
+        protected override String? WhyItIsNotConnected(ConnectionEntry Connection)
+
+            => !IsBelow(Connection) && csmsSettings.Enabled != true
+                   ? "this local controller reports to no CSMS: that is switched off under Configuration, in the section 'csms'"
+                   : null;
 
         #endregion
 
@@ -396,10 +417,12 @@ namespace cloud.charging.open.LocalController
         /// <summary>
         /// What the CSMS at the other end of a line answers to: what the
         /// section "csms" says it calls itself, "CSMS" where it says nothing.
+        /// A node below answers to its name.
         /// </summary>
         protected override NetworkingNode_Id FarEndNameOf(ConnectionEntry Connection)
 
-            => csmsSettings.NextHopNodeId is String nextHop &&
+            => !IsBelow(Connection) &&
+               csmsSettings.NextHopNodeId is String nextHop &&
                NetworkingNode_Id.TryParse(nextHop, out var named)
                    ? named
                    : base.FarEndNameOf(Connection);
