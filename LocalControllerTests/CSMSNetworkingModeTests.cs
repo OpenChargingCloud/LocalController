@@ -640,6 +640,9 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task TheControllersBootNotification_GoesUpInTheFrameOfTheMode()
         {
 
+            // Sent by no node by itself: asked for, as after a reboot.
+            _ = controller.SendBootNotifications();
+
             var boot = await csms.SentRequest("BootNotification", _ => true, EventPatience);
 
             Assert.That(boot, Is.Not.Null, "the controller sent no BootNotification");
@@ -687,6 +690,10 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.That(controller.IsPrimary(controller.Connections.Connections.Single(connection => connection.Id == id)), Is.False,
                         "the second line is the primary, and not what this test is about");
+
+            // Sent by no node by itself: asked for, as after a reboot - over the
+            // second line as soon as it is up.
+            _ = controller.SendBootNotifications();
 
             var boot = await second.SentRequest("BootNotification", _ => true, EventPatience);
 

@@ -623,9 +623,9 @@ namespace cloud.charging.open.LocalController.Tests
         #region ItRegistersWithTheCSMSThatDials_AsAStationDoes()
 
         /// <summary>
-        /// A CSMS that dials is a back end like one the controller dials: once it is in, the controller
-        /// sends it its BootNotification - who it is, and that it powered up - and stands accepted, as a
-        /// charging station does: the same registration, read the same way.
+        /// A CSMS that dials is a back end like one the controller dials: once it is in, and the controller
+        /// is asked to, it sends it its BootNotification - who it is, and that it powered up - and stands
+        /// accepted, as a charging station does: the same registration, read the same way.
         /// </summary>
         [Test]
         public async Task ItRegistersWithTheCSMSThatDials_AsAStationDoes()
@@ -634,6 +634,9 @@ namespace cloud.charging.open.LocalController.Tests
             var (csms, _) = await TheCSMSIsIn();
 
             await using var theCSMS = csms;
+
+            // Sent by no node by itself: asked for, as after a reboot.
+            _ = Controller.SendBootNotifications();
 
             var boot = await csms.Asked("BootNotification");
 
