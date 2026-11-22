@@ -18,6 +18,7 @@
 #region Usings
 
 using System.Collections.Concurrent;
+using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Illias;
 using System.Diagnostics;
 using System.Net.WebSockets;
@@ -63,7 +64,7 @@ namespace cloud.charging.open.LocalController.Tests
         private String            downstreamDirectory  = default!;
         private LocalController?  upstream;
         private LocalController?  downstream;
-        private UInt16            csmsPort;
+        private IPPort            csmsPort;
 
         /// <summary>
         /// The Authorize requests that reached the CSMS: who asked, and about which card.
@@ -135,14 +136,14 @@ namespace cloud.charging.open.LocalController.Tests
                                    new JProperty("webSocketServer", new JObject(
                                        new JProperty("enabled",           true),
                                        new JProperty("address",           "127.0.0.1"),
-                                       new JProperty("port",              csmsPort = TestPorts.Free()),
+                                       new JProperty("port",              (csmsPort = TestPorts.Free()).ToUInt16()),
                                        new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS")),
                                        new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1"))
                                    ))
                                )
                            );
 
-                if (!csms.WebSocketLogins.TrySetPasswordAuthentication("lc002", UplinkPassword, null, I18NString.Create("The controller below"), out var error))
+                if (!csms.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("lc002"), UplinkPassword, null, I18NString.Create("The controller below"), out var error))
                     throw new InvalidOperationException($"The test's own upstream login was refused: {error}");
 
                 csms.Node.OCPP.IN.AnycastIds.Add(NetworkingNode_Id.CSMS);
@@ -189,7 +190,7 @@ namespace cloud.charging.open.LocalController.Tests
 
                                                    // What stands in for the CSMS here is a plain OCPP
                                                    // node, which knows nothing of the overlay network
-                                                   // a controller dials by default.
+                                                   // a controller connects in by default.
                                                    new JProperty("networkingMode",   "standard")
                                                )
                                              : new JObject(
@@ -198,17 +199,17 @@ namespace cloud.charging.open.LocalController.Tests
                                          new JProperty("webSocketServer", new JObject(
                                              new JProperty("enabled",           true),
                                              new JProperty("address",           "127.0.0.1"),
-                                             new JProperty("port",              TestPorts.Free()),
+                                             new JProperty("port",              TestPorts.Free().ToUInt16()),
                                              new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS")),
                                              new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1"))
                                          ))
                                      )
                                  );
 
-                if (WithACSMS && !controller.TrySetUplinkPassword("lc002", UplinkPassword, out var loginError))
+                if (WithACSMS && !controller.TrySetUplinkPassword(User_Id.Parse("lc002"), UplinkPassword, out var loginError))
                     throw new InvalidOperationException($"The test's own credentials were refused: {loginError}");
 
-                if (!controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, I18NString.Create("A station"), out var error))
+                if (!controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), ThePassword, null, I18NString.Create("A station"), out var error))
                     throw new InvalidOperationException($"The test's own station login was refused: {error}");
 
                 return controller;

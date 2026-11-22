@@ -44,7 +44,7 @@ namespace cloud.charging.open.LocalController.Tests
 
     /// <summary>
     /// The line up to the CSMS in either networking mode ("csms.networkingMode"): standard, the plain
-    /// OCPP frame, as every controller dialled before there was a choice - or overlay, the frame of the
+    /// OCPP frame, as every controller connected before there was a choice - or overlay, the frame of the
     /// overlay network, which names where a message goes and where it comes from, and without which a
     /// CSMS cannot reach the stations behind the controller (white paper "Key Pins and TLS 1.3 Raw Public
     /// Keys for Local Controllers", work package K4, phase B3).
@@ -52,7 +52,7 @@ namespace cloud.charging.open.LocalController.Tests
     /// <remarks>
     /// <para>
     /// Each test runs in both modes: the controller says which in the header X-OCPP-NetworkingMode of its
-    /// dial, answers the requests addressed to itself - EVQICtrlr[TLSServer], read and switched as in
+    /// connection, answers the requests addressed to itself - EVQICtrlr[TLSServer], read and switched as in
     /// KeyPinsOverOCPPTests - forwards those for a station behind it by their destination, and sends a
     /// station's requests up, in either mode.
     /// </para>
@@ -83,14 +83,14 @@ namespace cloud.charging.open.LocalController.Tests
 
             public WebSocketServer  Server  { get; }
 
-            public CSMS(UInt16   Port,
+            public CSMS(IPPort   Port,
                         Boolean  Overlay)
             {
 
                 overlay = Overlay;
 
                 Server  = new WebSocketServer(
-                              HTTPPort:               IPPort.Parse(Port),
+                              HTTPPort:               Port,
                               RequireAuthentication:  false,
                               SecWebSocketProtocols:  [ "ocpp2.1" ],
                               DisableWebSocketPings:  true,
@@ -153,7 +153,7 @@ namespace cloud.charging.open.LocalController.Tests
                 => Server.WebSocketConnections.Count();
 
             /// <summary>
-            /// The networking mode the controller said in the header of its dial, or null where it said none.
+            /// The networking mode the controller said in the header of its connection, or null where it said none.
             /// </summary>
             public String? NetworkingModeSaid
                 => Server.WebSocketConnections.Single().HTTPRequest?.TryGetHeaderField("X-OCPP-NetworkingMode", out var value) == true
@@ -275,6 +275,8 @@ namespace cloud.charging.open.LocalController.Tests
 
         private const           String    ControllerId     = "lc002";
 
+        private static readonly User_Id ControllerLogin = User_Id.Parse(ControllerId);
+
         private static readonly TimeSpan  Guard            = TimeSpan.FromSeconds(30);
         private static readonly TimeSpan  EventPatience    = TimeSpan.FromSeconds(10);
 
@@ -283,7 +285,7 @@ namespace cloud.charging.open.LocalController.Tests
         private String           directory   = default!;
         private CSMS             csms        = default!;
         private LocalController  controller  = default!;
-        private UInt16           port;
+        private IPPort           port;
 
         private KeyPin           currentPin  = default!;
         private KeyPin           nextPin     = default!;
@@ -346,7 +348,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                     new JProperty("webSocketServer", new JObject(
                                                         new JProperty("enabled",           true),
                                                         new JProperty("address",           "127.0.0.1"),
-                                                        new JProperty("port",              port),
+                                                        new JProperty("port",              port.ToUInt16()),
                                                         new JProperty("clientAuthentication",  new JArray("httpAuthOverTLS", "tlsClientCertificate"))
                                                     )),
 
@@ -364,10 +366,10 @@ namespace cloud.charging.open.LocalController.Tests
 
                                 lc.Log.OnLogged += entry => said.Enqueue(entry.Message);
 
-                                Assert.That(lc.TrySetUplinkPassword(ControllerId, ThePassword, out var loginError), Is.True, loginError);
+                                Assert.That(lc.TrySetUplinkPassword(User_Id.Parse(ControllerId), ThePassword, out var loginError), Is.True, loginError);
 
-                                Assert.That(lc.WebSocketLogins.TryAddKeyPin("cs001", KeyPin.FromKey(cs001Key).ToHex(), "bay 1", null, null, null, out _, out var error1), Is.True, error1);
-                                Assert.That(lc.WebSocketLogins.TryAddKeyPin("cs002", KeyPin.FromKey(cs002Key).ToHex(), "bay 2", null, null, null, out _, out var error2), Is.True, error2);
+                                Assert.That(lc.WebSocketLogins.TryAddKeyPin(User_Id.Parse("cs001"), KeyPin.FromKey(cs001Key).ToHex(), "bay 1", null, null, null, out _, out var error1), Is.True, error1);
+                                Assert.That(lc.WebSocketLogins.TryAddKeyPin(User_Id.Parse("cs002"), KeyPin.FromKey(cs002Key).ToHex(), "bay 2", null, null, null, out _, out var error2), Is.True, error2);
 
                                 return lc;
 
@@ -572,15 +574,15 @@ namespace cloud.charging.open.LocalController.Tests
         #endregion
 
 
-        #region TheDial_SaysTheModeInItsHeader_OnlyForTheOverlayNetwork()
+        #region TheConnection_SaysTheModeInItsHeader_OnlyForTheOverlayNetwork()
 
         /// <summary>
-        /// A controller in the overlay network says so in the header X-OCPP-NetworkingMode of its dial,
+        /// A controller in the overlay network says so in the header X-OCPP-NetworkingMode of its connection,
         /// which is how the CSMS knows to address the stations behind it; a standard one says nothing, as
         /// every controller before the choice did.
         /// </summary>
         [Test]
-        public void TheDial_SaysTheModeInItsHeader_OnlyForTheOverlayNetwork()
+        public void TheConnection_SaysTheModeInItsHeader_OnlyForTheOverlayNetwork()
         {
 
             Assert.Multiple(() => {
@@ -676,7 +678,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             await using var second = new CSMS(TestPorts.Free(), Overlay);
 
-            Assert.That(controller.Connections.TryAddPasswordAuthentication(ControllerId, ThePassword, I18NString.Create("The second CSMS"), out var credentials, out var error), Is.True, error);
+            Assert.That(controller.Connections.TryAddPasswordAuthentication(ControllerLogin, ThePassword, I18NString.Create("The second CSMS"), out var credentials, out var error), Is.True, error);
 
             Assert.That(controller.Connections.TryAddConnection(I18NString.Create("The second CSMS"),
                                                                 URL.Parse($"ws://127.0.0.1:{second.Server.IPPort}"),

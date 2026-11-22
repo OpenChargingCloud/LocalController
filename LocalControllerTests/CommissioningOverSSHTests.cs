@@ -24,6 +24,7 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Illias;
 using org.GraphDefined.Vanaheimr.Hermod.SSH;
 using org.GraphDefined.Vanaheimr.Hermod.SSH.Client;
@@ -64,7 +65,7 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// A controller whose station server and SSH server are switched on,
-        /// OCPP over SSH with them, and commissioning over SSH.
+        /// OCPP-over-SSH with them, and commissioning over SSH.
         /// </summary>
         protected override JObject Configuration
         {
@@ -76,7 +77,7 @@ namespace cloud.charging.open.LocalController.Tests
                 configuration["webSocketServer"] = new JObject(
                                                        new JProperty("enabled",               true),
                                                        new JProperty("address",               "127.0.0.1"),
-                                                       new JProperty("port",                  TestPorts.Free()),
+                                                       new JProperty("port",                  TestPorts.Free().ToUInt16()),
                                                        new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS")),
                                                        new JProperty("subprotocols",          new JArray("ocpp2.1", "ocpp2.0.1")),
                                                        new JProperty("ssh",                   new JObject(
@@ -86,7 +87,7 @@ namespace cloud.charging.open.LocalController.Tests
 
                 configuration["ssh"]            = new JObject(
                                                        new JProperty("enabled",               true),
-                                                       new JProperty("port",                  TestPorts.Free())
+                                                       new JProperty("port",                  TestPorts.Free().ToUInt16())
                                                    );
 
                 configuration["commissioning"]  = new JObject(
@@ -102,10 +103,10 @@ namespace cloud.charging.open.LocalController.Tests
 
         #region (private) helpers
 
-        private SshClientOptions SSHAs(String Id, ISshHostKey Key)
+        private SSHClientOptions SSHAs(String Id, ISshHostKey Key)
 
             => new () {
-                   Username       = Id,
+                   Username       = User_Id.Parse(Id),
                    VerifyHostKey  = blob => Controller.SSHHostKey == $"ssh-ed25519 {SshFingerprint.Sha256(blob)}",
                    Credentials    = [ Key ]
                };
@@ -123,7 +124,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var client   = new SshMessageClient(new SshMessageClientOptions {
                                                     Host          = "127.0.0.1",
-                                                    Port          = Controller.SSHPort!.Value.ToUInt16(),
+                                                    Port          = Controller.SSHPort!.Value,
                                                     Ssh           = SSHAs(Id, Key),
                                                     Subsystem     = Subsystem,
                                                     Subprotocols  = [ "ocpp2.1" ]
@@ -207,7 +208,7 @@ namespace cloud.charging.open.LocalController.Tests
         private void GiveTheStationAKey()
         {
 
-            Assert.That(Controller.TryAddStationSSHKey("cs001", SshPublicKey.FromHostKey(cs001Key).ToAuthorizedKeyLine(), "test", null, null, "tests", out _, out var error, out _),
+            Assert.That(Controller.TryAddStationSSHKey(User_Id.Parse("cs001"), SshPublicKey.FromHostKey(cs001Key).ToAuthorizedKeyLine(), "test", null, null, "tests", out _, out var error, out _),
                         Is.True, error);
 
         }
@@ -258,7 +259,7 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.That(Controller.CommissioningServed, Is.True, "Switched on in the file, and not served.");
 
             var (station, _,        stationWhy) = await Connect("cs001",                          cs001Key);
-            var (tool,    received, toolWhy)    = await Connect(LocalController.DefaultAdminUser,  adminKey);
+            var (tool,    received, toolWhy)    = await Connect(LocalController.DefaultAdminUser.ToString(),  adminKey);
 
             Assert.That(station, Is.Not.Null, stationWhy);
             Assert.That(tool,    Is.Not.Null, toolWhy);
@@ -284,7 +285,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
 
-                Assert.That(Controller.CommissioningTools.Select(id => id.ToString()), Is.EqualTo(new[] { LocalController.DefaultAdminUser }),
+                Assert.That(Controller.CommissioningTools.Select(id => id.ToString()), Is.EqualTo(new[] { LocalController.DefaultAdminUser.ToString() }),
                             "The tool is not known by its account's name.");
 
                 Assert.That(Controller.StationSSHServer!.ConnectedNetworkingNodeIds.Select(id => id.ToString()), Is.EqualTo(new[] { "cs001" }),
@@ -317,7 +318,7 @@ namespace cloud.charging.open.LocalController.Tests
             GiveTheStationAKey();
 
             var (station, _, stationWhy) = await Connect("cs001",                         cs001Key);
-            var (tool,    _, toolWhy)    = await Connect(LocalController.DefaultAdminUser, adminKey);
+            var (tool,    _, toolWhy)    = await Connect(LocalController.DefaultAdminUser.ToString(), adminKey);
 
             Assert.That(station, Is.Not.Null, stationWhy);
             Assert.That(tool,    Is.Not.Null, toolWhy);
@@ -332,13 +333,13 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(Controller.OCPPOverSSHServed,    Is.True);
             });
 
-            var (again, _, why) = await Connect(LocalController.DefaultAdminUser, adminKey);
+            var (again, _, why) = await Connect(LocalController.DefaultAdminUser.ToString(), adminKey);
 
             Assert.That(again, Is.Null, "A tool was let in with commissioning switched off.");
 
             Assert.That(Controller.TryUpdateCommissioningConfiguration(new JObject(new JProperty("enabled", true)), out error), Is.True, error);
 
-            var (back, _, backWhy) = await Connect(LocalController.DefaultAdminUser, adminKey);
+            var (back, _, backWhy) = await Connect(LocalController.DefaultAdminUser.ToString(), adminKey);
 
             Assert.That(back, Is.Not.Null, backWhy);
 

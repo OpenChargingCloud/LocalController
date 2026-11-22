@@ -25,6 +25,7 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Illias;
 using org.GraphDefined.Vanaheimr.Hermod.SSH;
 using org.GraphDefined.Vanaheimr.Hermod.SSH.Client;
@@ -74,7 +75,7 @@ namespace cloud.charging.open.LocalController.Tests
         #region (override) Configuration
 
         /// <summary>
-        /// A controller whose station server is switched on, with passwords, and OCPP over SSH with it.
+        /// A controller whose station server is switched on, with passwords, and OCPP-over-SSH with it.
         /// </summary>
         protected override JObject Configuration
         {
@@ -86,7 +87,7 @@ namespace cloud.charging.open.LocalController.Tests
                 configuration["webSocketServer"] = new JObject(
                                                   new JProperty("enabled",           true),
                                                   new JProperty("address",           "127.0.0.1"),
-                                                  new JProperty("port",              TestPorts.Free()),
+                                                  new JProperty("port",              TestPorts.Free().ToUInt16()),
                                                   new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS")),
                                                   new JProperty("subprotocols",      new JArray("ocpp2.1")),
                                                   new JProperty("ssh",               new JObject(
@@ -96,7 +97,7 @@ namespace cloud.charging.open.LocalController.Tests
 
                 configuration["ssh"]        = new JObject(
                                                   new JProperty("enabled",           true),
-                                                  new JProperty("port",              TestPorts.Free())
+                                                  new JProperty("port",              TestPorts.Free().ToUInt16())
                                               );
 
                 return configuration;
@@ -114,7 +115,7 @@ namespace cloud.charging.open.LocalController.Tests
         private static String FingerprintOf(ISshHostKey Key)
             => SshFingerprint.Sha256(Key.PublicKeyBlob);
 
-        private void GiveAKey(String Id, ISshHostKey Key)
+        private void GiveAKey(User_Id Id, ISshHostKey Key)
         {
             Assert.That(Controller.TryAddStationSSHKey(Id, LineOf(Key), "test", null, null, "tests", out _, out var error, out _),
                         Is.True, error);
@@ -123,10 +124,10 @@ namespace cloud.charging.open.LocalController.Tests
         /// <summary>
         /// The fingerprints of the SSH keys the given station signs in with.
         /// </summary>
-        private String[] KeysOf(String Id)
+        private String[] KeysOf(User_Id Id)
 
             => [.. Controller.WebSocketLogins.Logins.
-                       Where     (login => login.Id == Id).
+                       Where     (login => login.Login == Id).
                        SelectMany(login => login.Keys.Select(key => key.Fingerprint))];
 
         /// <summary>
@@ -171,7 +172,7 @@ namespace cloud.charging.open.LocalController.Tests
         /// <summary>
         /// A station on the station port over ws://, signed in with its password.
         /// </summary>
-        private async Task<ClientWebSocket> ConnectOverWebSocket(String Id)
+        private async Task<ClientWebSocket> ConnectOverWebSocket(User_Id Id)
         {
 
             Assert.That(Controller.WebSocketLogins.TrySetPasswordAuthentication(Id, ThePassword, null, null, out var error), Is.True, error);
@@ -258,13 +259,13 @@ namespace cloud.charging.open.LocalController.Tests
         private async Task<(SshMessageConnection Connection, Func<(String Id, String Text), Task<JArray?>> Ask)> ConnectOverSSH(String Id, ISshHostKey Key)
         {
 
-            GiveAKey(Id, Key);
+            GiveAKey(User_Id.Parse(Id), Key);
 
             var client = new SshMessageClient(new SshMessageClientOptions {
                                                   Host          = "127.0.0.1",
-                                                  Port          = Controller.SSHPort!.Value.ToUInt16(),
-                                                  Ssh           = new SshClientOptions {
-                                                                      Username       = Id,
+                                                  Port          = Controller.SSHPort!.Value,
+                                                  Ssh           = new SSHClientOptions {
+                                                                      Username       = User_Id.Parse(Id),
                                                                       VerifyHostKey  = blob => Controller.SSHHostKey == $"ssh-ed25519 {SshFingerprint.Sha256(blob)}",
                                                                       Credentials    = [ Key ]
                                                                   },
@@ -322,7 +323,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStation_CannotInstallAKeyForAnother_OverAWebSocket()
         {
 
-            using var cs001  = await ConnectOverWebSocket("cs001");
+            using var cs001  = await ConnectOverWebSocket(User_Id.Parse("cs001"));
 
             await Tell(cs001, Frame("CSMS",  "InstallSSHKey", InstallFor("cs002", strangerKey)));
 
@@ -332,7 +333,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 IsRefused(asItself, "InstallSSHKey as itself");
-                Assert.That(KeysOf("cs002"), Is.Empty, "a station installed an SSH key for another one");
+                Assert.That(KeysOf(User_Id.Parse("cs002")), Is.Empty, "a station installed an SSH key for another one");
             });
 
         }
@@ -361,7 +362,7 @@ namespace cloud.charging.open.LocalController.Tests
 
                 Assert.Multiple(() => {
                     IsRefused(asItself, "InstallSSHKey as itself");
-                    Assert.That(KeysOf("cs002"), Is.Empty, "a station installed an SSH key for another one");
+                    Assert.That(KeysOf(User_Id.Parse("cs002")), Is.Empty, "a station installed an SSH key for another one");
                 });
 
             }
@@ -384,9 +385,9 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStation_CannotDeleteOrListTheKeysOfAnother()
         {
 
-            GiveAKey("cs002", cs002Key);
+            GiveAKey(User_Id.Parse("cs002"), cs002Key);
 
-            using var cs001  = await ConnectOverWebSocket("cs001");
+            using var cs001  = await ConnectOverWebSocket(User_Id.Parse("cs001"));
 
             await Tell(cs001, Frame("CSMS", "DeleteSSHKey", DeleteOf("cs002", cs002Key)));
 
@@ -396,7 +397,7 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(() => {
                 IsRefused(deleted, "DeleteSSHKey");
                 IsRefused(listed,  "GetInstalledSSHKeys");
-                Assert.That(KeysOf("cs002"), Is.EqualTo(new[] { FingerprintOf(cs002Key) }), "a station took another station's SSH key away");
+                Assert.That(KeysOf(User_Id.Parse("cs002")), Is.EqualTo(new[] { FingerprintOf(cs002Key) }), "a station took another station's SSH key away");
             });
 
         }
@@ -419,7 +420,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                                             String  Payload)
         {
 
-            using var cs001 = await ConnectOverWebSocket("cs001");
+            using var cs001 = await ConnectOverWebSocket(User_Id.Parse("cs001"));
 
             IsRefused(await Ask(cs001, Frame("cs001", Action, JObject.Parse(Payload))), Action);
 
@@ -437,7 +438,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStation_CannotSendAnotherStationARequest_OverSSH()
         {
 
-            using var cs002        = await ConnectOverWebSocket("cs002");
+            using var cs002        = await ConnectOverWebSocket(User_Id.Parse("cs002"));
             var (connection, ask)  = await ConnectOverSSH("cs001", cs001Key);
 
             try
@@ -533,7 +534,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStation_StillAsksTheControllerWhatAStationMayAsk()
         {
 
-            using var cs001  = await ConnectOverWebSocket("cs001");
+            using var cs001  = await ConnectOverWebSocket(User_Id.Parse("cs001"));
 
             var answer       = await Ask(cs001, Frame("cs001", "DataTransfer", new JObject(new JProperty("vendorId", "GraphDefined"))));
 
@@ -592,7 +593,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                  new JProperty("webSocketServer", new JObject(
                                                      new JProperty("enabled",           true),
                                                      new JProperty("address",           "127.0.0.1"),
-                                                     new JProperty("port",              TestPorts.Free()),
+                                                     new JProperty("port",              TestPorts.Free().ToUInt16()),
                                                      new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS"))
                                                  )),
 
@@ -609,7 +610,7 @@ namespace cloud.charging.open.LocalController.Tests
                                              )
                                          );
 
-                                Assert.That(lc.TrySetUplinkPassword("lc002", ThePassword, out var loginError), Is.True, loginError);
+                                Assert.That(lc.TrySetUplinkPassword(User_Id.Parse("lc002"), ThePassword, out var loginError), Is.True, loginError);
 
                                 return lc;
 
@@ -645,7 +646,7 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// InstallSSHKey, GetInstalledSSHKeys and DeleteSSHKey of the CSMS, over the connection the controller
-        /// dialled: each answered, and done.
+        /// opened: each answered, and done.
         /// </summary>
         [Test]
         public async Task TheCSMS_InstallsListsAndDeletesAKey_OverTheUplink()

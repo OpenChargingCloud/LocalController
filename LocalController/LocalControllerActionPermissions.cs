@@ -91,7 +91,7 @@ namespace cloud.charging.open.LocalController
                    ActionPermission.Needs  ("PublishFirmware",       Edit(NodeResources.Firmware)),
 
                    // The SSH keys of the charging stations, kept with their logins
-                   // (white paper "OCPP over SSH", section 9.3, decision 7): what the
+                   // (white paper "OCPP-over-SSH", section 9.3, decision 7): what the
                    // page and the command line change with "stations:edit".
                    ActionPermission.Needs  ("InstallSSHKey",         Edit(LocalControllerAccess.Stations)),
                    ActionPermission.Needs  ("DeleteSSHKey",          Edit(LocalControllerAccess.Stations)),

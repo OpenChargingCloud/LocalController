@@ -82,7 +82,7 @@ namespace cloud.charging.open.LocalController
         /// Answers with the whole thing as it now stands - including
         /// <c>state.waitingForARestart</c>, which is how the page finds out that
         /// the address it just changed is not the address that is connected. A
-        /// WebSocket client cannot be re-aimed while it is dialled.
+        /// WebSocket client cannot be re-aimed while it is connected.
         /// </remarks>
         private Task<HTTPResponse> PutCSMS(HTTPRequest Request)
         {

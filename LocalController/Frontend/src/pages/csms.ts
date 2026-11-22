@@ -17,7 +17,7 @@ const saidByAConnection: readonly string[] = [ 'url', 'securityProfile', 'httpVe
 /**
  * The charging station management system above this local controller: whether
  * it reports to one at all, and how every line up to it is kept - its pings,
- * how soon it is dialled again, and the TLS identity it holds up where a line
+ * how soon it is connected again, and the TLS identity it holds up where a line
  * names none of its own.
  *
  * The lines themselves are connections, as a charging station's are: where
@@ -76,7 +76,7 @@ export const csmsPage: Page = {
                     <div class="notice warn" id="waiting-for-a-restart">
                         <strong>Saved, but not in effect.</strong> ${waiting.join(', ')}
                         ${waiting.length === 1 ? 'was' : 'were'} changed, and a connection that is already
-                        dialled cannot be re-aimed. It takes effect when this local controller is restarted.
+                        open cannot be re-aimed. It takes effect when this local controller is restarted.
                     </div>
                 `}
 
@@ -161,7 +161,7 @@ export const csmsPage: Page = {
                             <span class="hint">Seconds. How a CSMS that quietly went away is noticed.</span>
                         </label>
 
-                        <label>Dial again after
+                        <label>Connect again after
                             <input type="number" name="reconnectInitialDelay" min="1" max="600"
                                    value="${settings.reconnectInitialDelay}" ?disabled=${!mayChange} />
                             <span class="hint">
@@ -216,7 +216,7 @@ export const csmsPage: Page = {
          * The TLS identity a line over TLS holds up where its connection
          * names no client key of its own: chosen from the store's identities,
          * and what the controller says about the one that is chosen - that
-         * it is missing, or switched off, before a dialling finds out.
+         * it is missing, or switched off, before a connection attempt finds out.
          *
          * Offered only to somebody who may read the store; to anybody else the
          * one chosen is named, and the choice is left alone when they save.

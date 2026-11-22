@@ -23,6 +23,7 @@ using NUnit.Framework;
 
 using Newtonsoft.Json.Linq;
 
+using org.GraphDefined.Vanaheimr.Illias;
 using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.WebSocket;
 
@@ -119,7 +120,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task TheLineOfBefore_IsAConnection_ThatSignsInWithItsPassword()
         {
 
-            Assert.That(new CSMSCredentials(CredentialsFile).TrySetPassword("lc002", ThePassword, out var error), Is.True, error);
+            Assert.That(new CSMSCredentials(CredentialsFile).TrySetPassword(User_Id.Parse("lc002"), ThePassword, out var error), Is.True, error);
 
             await using var controller = AControllerOfBefore("ws://127.0.0.1:9/lc002", HTTPVersion: "1.1");
 
@@ -135,7 +136,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(line.AuthenticationId,          Is.EqualTo(credentials.Id));
 
                 Assert.That(credentials.Kind,               Is.EqualTo(AuthenticationKind.Basic));
-                Assert.That(credentials.Login,              Is.EqualTo("lc002"));
+                Assert.That(credentials.Login.ToString(),   Is.EqualTo("lc002"));
                 Assert.That(credentials.Password,           Is.EqualTo(ThePassword));
 
                 Assert.That(controller.CSMSEnabled,         Is.True, "whether it reports to a CSMS at all is the section's still");
@@ -158,8 +159,8 @@ namespace cloud.charging.open.LocalController.Tests
 
             var before = new CSMSCredentials(CredentialsFile);
 
-            Assert.That(before.TrySetPassword("lc002", ThePassword, out var passwordError), Is.True, passwordError);
-            Assert.That(before.TrySetTOTP    ("lc002", TheSharedSecret, TimeSpan.FromSeconds(60), 10, null, null, out var tokenError, out _, TLSChannelBinding: true),
+            Assert.That(before.TrySetPassword(User_Id.Parse("lc002"), ThePassword, out var passwordError), Is.True, passwordError);
+            Assert.That(before.TrySetTOTP    (User_Id.Parse("lc002"), TheSharedSecret, TimeSpan.FromSeconds(60), 10, null, null, out var tokenError, out _, TLSChannelBinding: true),
                         Is.True, tokenError);
 
             await using var controller = AControllerOfBefore("wss://csms.example/lc002", HTTPVersion: "3");
@@ -173,7 +174,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(line.AuthenticationId,     Is.EqualTo(password.Id), "a connection names one set of credentials: the password");
                 Assert.That(line.HTTPVersion,          Is.EqualTo(WebSocketHTTPVersion.HTTP3));
 
-                Assert.That(token.Login,               Is.EqualTo("lc002"));
+                Assert.That(token.Login,               Is.EqualTo(User_Id.Parse("lc002")));
                 Assert.That(token.SharedSecret,        Is.EqualTo(TheSharedSecret));
                 Assert.That(token.Validity,            Is.EqualTo(TimeSpan.FromSeconds(60)));
                 Assert.That(token.Length,              Is.EqualTo(10));
@@ -194,7 +195,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task OneThatHadATokenAlone_SignsInWithIt()
         {
 
-            Assert.That(new CSMSCredentials(CredentialsFile).TrySetTOTP("lc002", TheSharedSecret, null, null, null, null, out var error), Is.True, error);
+            Assert.That(new CSMSCredentials(CredentialsFile).TrySetTOTP(User_Id.Parse("lc002"), TheSharedSecret, null, null, null, null, out var error), Is.True, error);
 
             await using var controller = AControllerOfBefore("ws://127.0.0.1:9/lc002");
 
@@ -230,7 +231,7 @@ namespace cloud.charging.open.LocalController.Tests
             var point   = signs.ExportParameters(false).Q;
             var signer  = Convert.ToBase64String([ 4, .. point.X!, .. point.Y! ]);
 
-            var before  = new CSMSKeyPins(KeyPinsFile, () => url, DialAgain: () => { });
+            var before  = new CSMSKeyPins(KeyPinsFile, () => url, ConnectAgain: () => { });
 
             Assert.That(before.TrySetTrust(new ServerKeyPinSettings("Prefer", "Key", 120), out var trustError),  Is.True, trustError);
             Assert.That(before.TrySetPins(pin.ToHex(), out var pinsError),                                        Is.True, pinsError);
@@ -292,7 +293,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task StartedAgain_NothingIsTakenOverTwice()
         {
 
-            Assert.That(new CSMSCredentials(CredentialsFile).TrySetPassword("lc002", ThePassword, out var error), Is.True, error);
+            Assert.That(new CSMSCredentials(CredentialsFile).TrySetPassword(User_Id.Parse("lc002"), ThePassword, out var error), Is.True, error);
 
             String id;
 
@@ -302,7 +303,7 @@ namespace cloud.charging.open.LocalController.Tests
             // The section still says the address, as nobody took it out of
             // the file - and credentials of before appear again, as from a
             // backup put back.
-            Assert.That(new CSMSCredentials(CredentialsFile).TrySetPassword("lc002", "another-password-of-before", out error), Is.True, error);
+            Assert.That(new CSMSCredentials(CredentialsFile).TrySetPassword(User_Id.Parse("lc002"), "another-password-of-before", out error), Is.True, error);
 
             await using var again = AControllerOfBefore("ws://127.0.0.1:9/lc002");
 
@@ -321,14 +322,14 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task CredentialsWithoutALine_AreKept_ForTheConnectionToCome()
         {
 
-            Assert.That(new CSMSCredentials(CredentialsFile).TrySetPassword("lc002", ThePassword, out var error), Is.True, error);
+            Assert.That(new CSMSCredentials(CredentialsFile).TrySetPassword(User_Id.Parse("lc002"), ThePassword, out var error), Is.True, error);
 
             await using var controller = AControllerOfBefore(null);
 
             Assert.Multiple(() => {
-                Assert.That(controller.Connections.Connections,                    Is.Empty);
-                Assert.That(controller.Connections.Authentications.Single().Login,  Is.EqualTo("lc002"));
-                Assert.That(File.Exists(CredentialsFile),                          Is.False);
+                Assert.That(controller.Connections.Connections,                                Is.Empty);
+                Assert.That(controller.Connections.Authentications.Single().Login.ToString(),  Is.EqualTo("lc002"));
+                Assert.That(File.Exists(CredentialsFile),                                      Is.False);
             });
 
         }

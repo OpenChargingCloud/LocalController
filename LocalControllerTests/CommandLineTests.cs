@@ -127,7 +127,7 @@ namespace cloud.charging.open.LocalController.Tests
         /// it over SSH: made for the purpose and put in the group of the given
         /// role.
         /// </summary>
-        private async Task<NodeCLI> OverSSHAs(String  Name,
+        private async Task<NodeCLI> OverSSHAs(User_Id Name,
                                               String  Role)
         {
 
@@ -135,8 +135,8 @@ namespace cloud.charging.open.LocalController.Tests
                         organization is Organization, Is.True, "the controller's organization is not there");
 
             var account = await controller.ExtAPI.CreateUser(
-                                    User_Id.Parse(Name),
-                                    I18NString.Create(Languages.en, Name),
+                                    Name,
+                                    I18NString.Create(Languages.en, Name.ToString()),
                                     SimpleEMailAddress.Parse($"{Name}@localhost"),
                                     User2OrganizationEdgeLabel.IsMember,
                                     (Organization) organization!,
@@ -148,7 +148,7 @@ namespace cloud.charging.open.LocalController.Tests
                                 );
 
             Assert.That(account,                                                             Is.Not.Null, $"the account '{Name}' was not made");
-            Assert.That(controller.ExtAPI.TryGetUser(User_Id.Parse(Name), out var stored),     Is.True);
+            Assert.That(controller.ExtAPI.TryGetUser(Name, out var stored),     Is.True);
             Assert.That(controller.ExtAPI.TryGetUserGroup(UserGroup_Id.Parse(Role), out var group), Is.True, $"the controller has no group '{Role}'");
             Assert.That((await controller.ExtAPI.AddUserToUserGroup((User) stored!, User2UserGroupEdgeLabel.IsMember, (UserGroup) group!)).IsSuccess,
                         Is.True, $"'{Name}' could not be put in '{Role}'");
@@ -242,7 +242,7 @@ namespace cloud.charging.open.LocalController.Tests
 
                 Assert.That(added.First(),   Is.EqualTo($"'cs001' is a charging station of this local controller now, in the group 'default', and signs in over SSH with the key {FingerprintOf(first)}."));
                 Assert.That(again.First(),   Is.EqualTo($"'cs001' signs in over SSH with the key {FingerprintOf(second)} now."));
-                Assert.That(added,           Has.Some.EqualTo("OCPP over SSH is switched off: no charging station signs in over SSH."));
+                Assert.That(added,           Has.Some.EqualTo("OCPP-over-SSH is switched off: no charging station signs in over SSH."));
 
                 Assert.That(listed,          Has.Some.StartsWith(FingerprintOf(first)). And.Some.Contains(" by the console"));
                 Assert.That(listed,          Has.Some.StartsWith(FingerprintOf(second)));
@@ -258,7 +258,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(removed,                                                Is.EqualTo(new[] { $"The key {FingerprintOf(first)} lets 'cs001' in no more." }));
-                Assert.That(lc.WebSocketLogins.TryGet("cs001", out var login),         Is.True);
+                Assert.That(lc.WebSocketLogins.TryGet(User_Id.Parse("cs001"), out var login),         Is.True);
                 Assert.That(login!.Keys.Select(key => key.Fingerprint),             Is.EqualTo(new[] { FingerprintOf(second) }));
             });
 
@@ -298,7 +298,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(noVerb.Single(),        Does.StartWith("Usage: stationKeys "));
             });
 
-            Assert.That(lc.WebSocketLogins.TryGet("cs001", out var login) && login.Keys.Count() == 1, Is.True, "a key changed");
+            Assert.That(lc.WebSocketLogins.TryGet(User_Id.Parse("cs001"), out var login) && login.Keys.Count() == 1, Is.True, "a key changed");
 
         }
 
@@ -318,8 +318,8 @@ namespace cloud.charging.open.LocalController.Tests
 
             var key        = SshHostKey.GenerateEd25519();
 
-            using var viewer = await OverSSHAs("vera", "viewer");
-            using var cpo    = await OverSSHAs("cleo", "cpo");
+            using var viewer = await OverSSHAs(User_Id.Parse("vera"), "viewer");
+            using var cpo    = await OverSSHAs(User_Id.Parse("cleo"), "cpo");
 
             var looked     = await viewer.Execute("stationKeys");
             var refused    = await viewer.Execute($"stationKeys cs001 add {LineOf(key)}");
@@ -330,7 +330,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(looked,          Has.Some.EqualTo("No charging station of this local controller has an SSH key."));
                 Assert.That(refused.Single(), Does.StartWith("'vera' may not do that here: it needs the ").And.Contain("cpo"));
                 Assert.That(given.First(),    Does.StartWith("'cs001' is a charging station of this local controller now"));
-                Assert.That(controller!.WebSocketLogins.TryGet("cs001", out var login) && login.Keys.Single().CreatedBy == "cleo", Is.True);
+                Assert.That(controller!.WebSocketLogins.TryGet(User_Id.Parse("cs001"), out var login) && login.Keys.Single().CreatedBy == "cleo", Is.True);
 
                 lock (said)
                     Assert.That(said,         Has.Some.EqualTo($"'cleo' at the command line over SSH gave the charging station 'cs001' the SSH key {FingerprintOf(key)}."));
@@ -424,7 +424,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(notAPin.Single(),  Does.StartWith("The key pin was not given: "));
                 Assert.That(removed,           Is.EqualTo(new[] { $"The key pin {pin} lets 'cs001' in no more." }));
                 Assert.That(gone,              Is.EqualTo(new[] { $"'cs001' has no key pin {pin}." }));
-                Assert.That(lc.WebSocketLogins.TryGet("cs002", out _), Is.False);
+                Assert.That(lc.WebSocketLogins.TryGet(User_Id.Parse("cs002"), out _), Is.False);
 
                 lock (said)
                     Assert.That(said,          Has.Some.EqualTo($"Somebody at the command line gave the charging station 'cs001' the key pin {pin}."));
@@ -448,7 +448,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             await AStartedController();
 
-            using var cpo = await OverSSHAs("cleo", "cpo");
+            using var cpo = await OverSSHAs(User_Id.Parse("cleo"), "cpo");
 
             var looked    = await cpo.Execute("serverKeys");
             var refused   = await cpo.Execute("serverKeys create");
@@ -459,7 +459,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(refused.Single(),  Does.StartWith("'cleo' may not do that here: it needs the "));
                 Assert.That(controller!.Certificates.ServerKeys(StationPortCertificates.Listener), Is.Empty);
                 Assert.That(given.First(),     Does.StartWith("'cs001' is a charging station of this local controller now"));
-                Assert.That(controller.WebSocketLogins.TryGet("cs001", out var login) && login.Pins.Single().AddedBy == "cleo", Is.True);
+                Assert.That(controller.WebSocketLogins.TryGet(User_Id.Parse("cs001"), out var login) && login.Pins.Single().AddedBy == "cleo", Is.True);
             });
 
         }
@@ -542,8 +542,8 @@ namespace cloud.charging.open.LocalController.Tests
 
             await AStartedController();
 
-            using var cpo    = await OverSSHAs("cleo", "cpo");
-            using var viewer = await OverSSHAs("vera", "viewer");
+            using var cpo    = await OverSSHAs(User_Id.Parse("cleo"), "cpo");
+            using var viewer = await OverSSHAs(User_Id.Parse("vera"), "viewer");
 
             var file         = Path.Combine(directory, "there-is-no-such-file.txt");
 

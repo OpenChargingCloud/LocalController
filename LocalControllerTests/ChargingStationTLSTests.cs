@@ -17,6 +17,8 @@
 
 #region Usings
 
+using org.GraphDefined.Vanaheimr.Illias;
+using org.GraphDefined.Vanaheimr.Hermod;
 using System.Net.Security;
 using System.Net.WebSockets;
 using System.Security.Cryptography.X509Certificates;
@@ -63,7 +65,7 @@ namespace cloud.charging.open.LocalController.Tests
         private String           directory   = default!;
         private TestCA           ca          = default!;
         private LocalController  controller  = default!;
-        private UInt16           port;
+        private IPPort           port;
 
         #endregion
 
@@ -109,7 +111,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                  new JProperty("webSocketServer", new JObject(
                                                      new JProperty("enabled",           true),
                                                      new JProperty("address",           "127.0.0.1"),
-                                                     new JProperty("port",              port),
+                                                     new JProperty("port",              port.ToUInt16()),
                                                      new JProperty("clientAuthentication",  new JArray("httpAuthOverTLS")),
                                                      new JProperty("reachableAs",       new JArray("127.0.0.1"))
                                                  ))
@@ -117,7 +119,7 @@ namespace cloud.charging.open.LocalController.Tests
                                              )
                                          );
 
-                             made.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
+                             made.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), ThePassword, null, null, out _);
 
                              return made;
 

@@ -17,6 +17,7 @@
 
 #region Usings
 
+using org.GraphDefined.Vanaheimr.Illias;
 using System.Net.WebSockets;
 using System.Text;
 
@@ -65,7 +66,7 @@ namespace cloud.charging.open.LocalController.Tests
                    new JProperty("webSocketServer", new JObject(
                        new JProperty("enabled",               true),
                        new JProperty("address",               "127.0.0.1"),
-                       new JProperty("port",                  TestPorts.Free()),
+                       new JProperty("port",                  TestPorts.Free().ToUInt16()),
                        new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS")),
                        new JProperty("subprotocols",          new JArray("ocpp2.1", "ocpp1.6"))
                    ))
@@ -137,8 +138,8 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task OCPP16OnOfferWithoutANodeOfIt_IsTurnedAwayAndSaidSo()
         {
 
-            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs016", ThePassword, null, null, out _);
-            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs021", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs016"), ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs021"), ThePassword, null, null, out _);
 
             var (connected16, _)             = await Connect("cs016", ThePassword, "ocpp1.6");
             var (connected21, subprotocol21) = await Connect("cs021", ThePassword, "ocpp2.1");

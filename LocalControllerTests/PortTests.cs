@@ -88,7 +88,7 @@ namespace cloud.charging.open.LocalController.Tests
             try
             {
 
-                var taken = (UInt16) ((System.Net.IPEndPoint) squatter.LocalEndpoint).Port;
+                var taken = IPPort.Parse(((System.Net.IPEndPoint) squatter.LocalEndpoint).Port);
 
                 await using var controller = TestControllers.New(
                                                  directory,
@@ -97,7 +97,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                      new JProperty("webSocketServer",  new JObject(
                                                          new JProperty("enabled",  true),
                                                          new JProperty("address",  "127.0.0.1"),
-                                                         new JProperty("port",     taken)
+                                                         new JProperty("port",     taken.ToUInt16())
                                                      ))
                                                  )
                                              );
@@ -107,7 +107,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.Multiple(() => {
 
                     Assert.That(problem!.Whose,              Is.EqualTo(LocalController.StationServerPort));
-                    Assert.That(problem.Port,                Is.EqualTo(IPPort.Parse(taken)));
+                    Assert.That(problem.Port,                Is.EqualTo(taken));
                     Assert.That(problem.Message,             Does.StartWith($"The charging station server could not be given port {taken}"));
 
                     Assert.That(CanBeHad(controller.HTTPPort),  Is.True,

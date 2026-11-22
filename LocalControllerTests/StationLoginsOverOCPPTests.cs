@@ -47,7 +47,7 @@ namespace cloud.charging.open.LocalController.Tests
     /// </summary>
     /// <remarks>
     /// The controller 'lc004' listens for stations on 127.0.0.1 with security profile 1, lets
-    /// cs001 in by a password, and dials a CSMS of the least kind - see KeyPinsOverOCPPTests.CSMS.
+    /// cs001 in by a password, and connects to a CSMS of the least kind - see KeyPinsOverOCPPTests.CSMS.
     /// </remarks>
     public class StationLoginsOverOCPPTests
     {
@@ -64,7 +64,7 @@ namespace cloud.charging.open.LocalController.Tests
         private String                          directory   = default!;
         private KeyPinsOverOCPPTests.CSMS       csms        = default!;
         private LocalController                 controller  = default!;
-        private UInt16                          port;
+        private IPPort                          port;
 
         private readonly ConcurrentQueue<String> said = [];
 
@@ -99,7 +99,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                     new JProperty("webSocketServer", new JObject(
                                                         new JProperty("enabled",           true),
                                                         new JProperty("address",           "127.0.0.1"),
-                                                        new JProperty("port",              port),
+                                                        new JProperty("port",              port.ToUInt16()),
                                                         new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS"))
                                                     )),
 
@@ -117,8 +117,8 @@ namespace cloud.charging.open.LocalController.Tests
 
                                 lc.Log.OnLogged += entry => said.Enqueue(entry.Message);
 
-                                Assert.That(lc.TrySetUplinkPassword("lc004", ThePassword, out var loginError), Is.True, loginError);
-                                Assert.That(lc.WebSocketLogins.TrySetPasswordAuthentication("cs001", cs001Password, null, I18NString.Create("bay 1"), out var error), Is.True, error);
+                                Assert.That(lc.TrySetUplinkPassword(User_Id.Parse("lc004"), ThePassword, out var loginError), Is.True, loginError);
+                                Assert.That(lc.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), cs001Password, null, I18NString.Create("bay 1"), out var error), Is.True, error);
 
                                 return lc;
 
@@ -342,7 +342,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(set[$"{Station}[cs003].Enabled"].Status,  Is.EqualTo("UnknownComponent"));
-                Assert.That(controller.WebSocketLogins.TryGet("cs003", out _), Is.False);
+                Assert.That(controller.WebSocketLogins.TryGet(User_Id.Parse("cs003"), out _), Is.False);
             });
 
         }
@@ -569,7 +569,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStationListedOnThePage_IsInTheDeviceModel()
         {
 
-            Assert.That(controller.WebSocketLogins.TrySetPasswordAuthentication("cs009", "cs009-password-long-enough", null, null, out var error), Is.True, error);
+            Assert.That(controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs009"), "cs009-password-long-enough", null, null, out var error), Is.True, error);
 
             var read = await Get((Station, "cs009", "HasPassword"));
 

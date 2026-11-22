@@ -17,6 +17,7 @@
 
 #region Usings
 
+using org.GraphDefined.Vanaheimr.Illias;
 using System.Net;
 using System.Security.Cryptography;
 
@@ -463,7 +464,7 @@ namespace cloud.charging.open.LocalController.Tests
             var none  = await http.PostAsync(
                                   $"{Root}/logins",
                                   JSONBody(
-                                      new JProperty("id",    "cs001"),
+                                      new JProperty("login", "cs001"),
                                       new JProperty("description",  new JObject(new JProperty("en", "Ladepunkt 1")))
                                   )
                               );
@@ -473,7 +474,7 @@ namespace cloud.charging.open.LocalController.Tests
             var added = await http.PostAsync(
                                   $"{Root}/logins",
                                   JSONBody(
-                                      new JProperty("id",        "cs001"),
+                                      new JProperty("login",     "cs001"),
                                       new JProperty("password",  password),
                                       new JProperty("description",      new JObject(new JProperty("en", "Ladepunkt 1")))
                                   )
@@ -485,7 +486,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             await Assert.MultipleAsync(async () => {
 
-                Assert.That(Controller.WebSocketLogins.Verify("cs001", password), Is.True);
+                Assert.That(Controller.WebSocketLogins.Verify(User_Id.Parse("cs001"), password), Is.True);
                 Assert.That(answer,                                             Does.Not.Contain(password));
 
                 var listed = await GetJSON(http, $"{Root}/logins");
@@ -510,11 +511,11 @@ namespace cloud.charging.open.LocalController.Tests
 
             const String password = "a-password-long-enough-for-ocpp";
 
-            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("id", "cs001"), new JProperty("password", password)));
+            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("login", "cs001"), new JProperty("password", password)));
 
             await http.PutAsync($"{Root}/logins/cs001", JSONBody(new JProperty("enabled", false)));
 
-            Assert.That(Controller.WebSocketLogins.Verify("cs001", password), Is.False);
+            Assert.That(Controller.WebSocketLogins.Verify(User_Id.Parse("cs001"), password), Is.False);
 
             var gone = await http.DeleteAsync($"{Root}/logins/cs001");
 
@@ -571,7 +572,7 @@ namespace cloud.charging.open.LocalController.Tests
             // What makes each change a fine one: a station with a password and
             // a token, in the default group, and a group of its own, empty.
             foreach (var made in new[] {
-                                     await http.PostAsync($"{Root}/logins",           JSONBody(new JProperty("id", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp"))),
+                                     await http.PostAsync($"{Root}/logins",           JSONBody(new JProperty("login", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp"))),
                                      await http.PutAsync ($"{Root}/logins/cs001/totp", JSONBody()),
                                      await http.PostAsync($"{Root}/groups",             JSONBody(new JProperty("id", "field-test")))
                                  })
@@ -584,7 +585,7 @@ namespace cloud.charging.open.LocalController.Tests
                 "POST groups"                    => await http.PostAsync  ($"{Root}/groups",                 JSONBody(new JProperty("id",      "another"))),
                 "PUT groups/{id}"                => await http.PutAsync   ($"{Root}/groups/field-test",      JSONBody(new JProperty("enabled", false))),
                 "DELETE groups/{id}"             => await http.DeleteAsync($"{Root}/groups/field-test"),
-                "POST stations"                  => await http.PostAsync  ($"{Root}/logins",               JSONBody(new JProperty("id",      "cs002"), new JProperty("password", "a-password-long-enough-for-ocpp"))),
+                "POST stations"                  => await http.PostAsync  ($"{Root}/logins",               JSONBody(new JProperty("login",   "cs002"), new JProperty("password", "a-password-long-enough-for-ocpp"))),
                 "PUT stations/{id}, enabled"     => await http.PutAsync   ($"{Root}/logins/cs001",         JSONBody(new JProperty("enabled", false))),
                 "PUT stations/{id}, group"       => await http.PutAsync   ($"{Root}/logins/cs001",         JSONBody(new JProperty("group",   "field-test"))),
                 "PUT stations/{id}/totp"         => await http.PutAsync   ($"{Root}/logins/cs001/totp",    JSONBody()),
@@ -622,13 +623,13 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var http = await SignedIn();
 
-            var added = await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("id", "cs001"), new JProperty("group", "default"), new JProperty("password", "a-password-long-enough-for-ocpp")));
+            var added = await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("login", "cs001"), new JProperty("group", "default"), new JProperty("password", "a-password-long-enough-for-ocpp")));
             Assert.That(added.IsSuccessStatusCode, Is.True, await added.Content.ReadAsStringAsync());
 
             System.IO.Directory.CreateDirectory(Controller.WebSocketLogins.Path + ".tmp");
 
             var unknown   = await http.DeleteAsync($"{Root}/logins/cs404");
-            var tooShort  = await http.PostAsync  ($"{Root}/logins",               JSONBody(new JProperty("id", "cs002"), new JProperty("password", "short")));
+            var tooShort  = await http.PostAsync  ($"{Root}/logins",               JSONBody(new JProperty("login", "cs002"), new JProperty("password", "short")));
             var notEmpty  = await http.DeleteAsync($"{Root}/groups/default");
             var noToken   = await http.DeleteAsync($"{Root}/logins/cs001/totp");
 
@@ -907,7 +908,7 @@ namespace cloud.charging.open.LocalController.Tests
                 ("POST groups",           http.PostAsync  ($"{Root}/groups",                   JSONBody(new JProperty("id", "sneaky")))),
                 ("PUT groups/{id}",       http.PutAsync   ($"{Root}/groups/default",           JSONBody(new JProperty("enabled", false)))),
                 ("DELETE groups/{id}",    http.DeleteAsync($"{Root}/groups/default")),
-                ("POST stations",         http.PostAsync  ($"{Root}/logins",                 JSONBody(new JProperty("id", "cs666")))),
+                ("POST stations",         http.PostAsync  ($"{Root}/logins",                 JSONBody(new JProperty("login", "cs666")))),
                 ("PUT stations/../totp",  http.PutAsync   ($"{Root}/logins/cs001/totp",      JSONBody())),
                 ("DELETE ../totp",        http.DeleteAsync($"{Root}/logins/cs001/totp")),
                 ("DELETE ../password",    http.DeleteAsync($"{Root}/logins/cs001/password"))
@@ -1002,7 +1003,7 @@ namespace cloud.charging.open.LocalController.Tests
                                           new JProperty("clientAuthentication", new JArray("httpAuthWithoutTLS"))));
 
             await http.PostAsync($"{Root}/logins",
-                                 JSONBody(new JProperty("id",        "cs001"),
+                                 JSONBody(new JProperty("login",     "cs001"),
                                           new JProperty("group",     "field-test"),
                                           new JProperty("password",  "a-password-long-enough-for-ocpp")));
 
@@ -1026,7 +1027,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var http = await SignedIn();
 
-            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("id", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp")));
+            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("login", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp")));
 
             var given = await http.PutAsync($"{Root}/logins/cs001/totp", JSONBody());
 
@@ -1040,7 +1041,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(secret, Is.Not.Null.And.Not.Empty,
                             "No shared secret came back, so nobody can configure the charging station.");
 
-                Assert.That(Controller.WebSocketLogins.TryGet("cs001", out var login) && login.HasTOTP, Is.True);
+                Assert.That(Controller.WebSocketLogins.TryGet(User_Id.Parse("cs001"), out var login) && login.HasTOTP, Is.True);
 
                 // The list the page reads must never carry it, however often it
                 // is asked - this is the one credential that works as it stands.
@@ -1067,23 +1068,23 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var http = await SignedIn();
 
-            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("id", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp")));
+            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("login", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp")));
 
             var nothingYet  = await http.PutAsync($"{Root}/logins/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", true)));
 
             await http.PutAsync ($"{Root}/logins/cs001/totp", JSONBody());
 
-            Controller.WebSocketLogins.TryGet("cs001", out var before);
+            Controller.WebSocketLogins.TryGet(User_Id.Parse("cs001"), out var before);
 
             var mistyped    = await http.PutAsync($"{Root}/logins/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", "yes")));
             var bound       = await http.PutAsync($"{Root}/logins/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", true)));
             var answer      = JObject.Parse(await bound.Content.ReadAsStringAsync());
 
-            Controller.WebSocketLogins.TryGet("cs001", out var after);
+            Controller.WebSocketLogins.TryGet(User_Id.Parse("cs001"), out var after);
 
             var unbound     = await http.PutAsync($"{Root}/logins/cs001/totp/binding", JSONBody(new JProperty("tlsChannelBinding", false)));
 
-            Controller.WebSocketLogins.TryGet("cs001", out var atLast);
+            Controller.WebSocketLogins.TryGet(User_Id.Parse("cs001"), out var atLast);
 
             Assert.Multiple(() => {
                 Assert.That((Int32) nothingYet.StatusCode,           Is.EqualTo(404),  "a token that is not there was bound");
@@ -1105,15 +1106,15 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var http = await SignedIn();
 
-            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("id", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp")));
+            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("login", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp")));
             await http.PutAsync ($"{Root}/logins/cs001/totp", JSONBody());
 
             var gone = await http.DeleteAsync($"{Root}/logins/cs001/totp");
 
             Assert.Multiple(() => {
                 Assert.That(gone.IsSuccessStatusCode, Is.True);
-                Assert.That(Controller.WebSocketLogins.TryGet("cs001", out var login) && login.HasTOTP, Is.False);
-                Assert.That(Controller.WebSocketLogins.TryGet("cs001", out var still) && still.HasPassword, Is.True,
+                Assert.That(Controller.WebSocketLogins.TryGet(User_Id.Parse("cs001"), out var login) && login.HasTOTP, Is.False);
+                Assert.That(Controller.WebSocketLogins.TryGet(User_Id.Parse("cs001"), out var still) && still.HasPassword, Is.True,
                             "Taking the token away took the password with it.");
             });
 
@@ -1129,7 +1130,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var http = await SignedIn();
 
-            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("id", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp")));
+            await http.PostAsync($"{Root}/logins", JSONBody(new JProperty("login", "cs001"), new JProperty("password", "a-password-long-enough-for-ocpp")));
 
             var refused = await http.PutAsync(
                                     $"{Root}/logins/cs001/totp",
@@ -1138,7 +1139,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
                 Assert.That(refused.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
-                Assert.That(Controller.WebSocketLogins.TryGet("cs001", out var login) && login.HasTOTP, Is.False);
+                Assert.That(Controller.WebSocketLogins.TryGet(User_Id.Parse("cs001"), out var login) && login.HasTOTP, Is.False);
             });
 
         }

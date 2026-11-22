@@ -81,7 +81,7 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// How the server of the line is believed by its key pins, once it
-        /// was dialled.
+        /// was connected.
         /// </summary>
         public static ServerKeyPinTrust? UplinkTrust(this LocalController Controller)
             => Controller.Uplink() is ConnectionEntry line
@@ -148,7 +148,7 @@ namespace cloud.charging.open.LocalController.Tests
             rest.Remove("securityProfile");
 
             // The section first: whether this controller reports to a CSMS
-            // at all decides whether a change of the line is dialled.
+            // at all decides whether a change of the line is connected.
             if (rest.Count > 0 && !Controller.TryUpdateCSMSConfiguration(rest, out Error))
                 return false;
 
@@ -172,7 +172,7 @@ namespace cloud.charging.open.LocalController.Tests
         /// The line signs in with a password.
         /// </summary>
         public static Boolean TrySetUplinkPassword(this LocalController  Controller,
-                                                   String?               Login,
+                                                   User_Id?              Login,
                                                    String?               Password,
                                                    out String?           Error)
 
@@ -195,10 +195,10 @@ namespace cloud.charging.open.LocalController.Tests
                                                TOTPHashAlgorithm?    HashAlgorithm,
                                                out String?           Error)
 
-            => Controller.TrySetUplinkTOTP(Login, SharedSecret, Validity, Length, Alphabet, HashAlgorithm, out Error, out _);
+            => Controller.TrySetUplinkTOTP(User_Id.Parse(Login), SharedSecret, Validity, Length, Alphabet, HashAlgorithm, out Error, out _);
 
         public static Boolean TrySetUplinkTOTP(this LocalController  Controller,
-                                               String?               Login,
+                                               User_Id?              Login,
                                                String?               SharedSecret,
                                                TimeSpan?             Validity,
                                                UInt32?               Length,

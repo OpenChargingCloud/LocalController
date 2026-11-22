@@ -75,7 +75,7 @@ namespace cloud.charging.open.LocalController
 
             // The connections of this controller - its line up to the CSMS -
             // are read, changed and tested by whoever has that right to the
-            // CSMS: the routes are those of every node that dials one.
+            // CSMS: the routes are those of every node that connects to one.
             : base(HTTPServer,
                    Controller,
                    ExtAPI,

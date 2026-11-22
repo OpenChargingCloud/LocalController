@@ -69,12 +69,12 @@ namespace cloud.charging.open.LocalController
         /// The CSMS connection, where it signs in with the certificate of this
         /// handle as the kind it would be deleted as - as the sentence a
         /// refusal to delete it says - or the connections that show it when
-        /// they are dialled, which the dialling below knows.
+        /// they are connected, which the connecting below knows.
         /// </summary>
         /// <remarks>
         /// Deleting it anyway would leave a controller configured to sign in
         /// with something that is not there, which is discovered at the next
-        /// dialling rather than here - and switching it off is what somebody
+        /// connection attempt rather than here - and switching it off is what somebody
         /// taking a certificate out of service usually meant.
         /// </remarks>
         public override String? WhatUses(String            Handle,
@@ -91,7 +91,7 @@ namespace cloud.charging.open.LocalController
 
         /// <summary>
         /// The directory beside the configuration file a controller of before
-        /// kept the keys it dials its CSMS with in.
+        /// kept the keys it connects to its CSMS with in.
         /// </summary>
         public const String FormerClientKeysDirectoryName = "ocpp-client-keys";
 
@@ -215,7 +215,7 @@ namespace cloud.charging.open.LocalController
             }
 
             if (moved + stayed > 0)
-                Log.Notice($"The keys this local controller dials its CSMS with are kept in its certificate store from now on: {moved} moved over from '{Directory}'" +
+                Log.Notice($"The keys this local controller connects to its CSMS with are kept in its certificate store from now on: {moved} moved over from '{Directory}'" +
                            (stayed > 0 ? $", {stayed} could not be and stayed" : "") + ".",
                            "certificates", "security");
 

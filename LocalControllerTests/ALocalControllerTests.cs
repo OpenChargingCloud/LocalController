@@ -167,7 +167,7 @@ namespace cloud.charging.open.LocalController.Tests
         /// </remarks>
         protected async Task<HttpClient> SignedIn()
 
-            => await SignedInAs(LocalController.DefaultAdminUser, Password);
+            => await SignedInAs(LocalController.DefaultAdminUser.ToString(), Password);
 
         #endregion
 

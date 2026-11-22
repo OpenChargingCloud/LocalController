@@ -135,7 +135,7 @@ namespace cloud.charging.open.LocalController
         /// "store" } }, or --https - is a TLS server identity: kept whether
         /// or not HTTPS is served yet, as a charging station keeps it, so
         /// that its key can be made here before anything is switched over.
-        /// The issuing CAs because a CSMS that dials this controller may sign
+        /// The issuing CAs because a CSMS that connects to this controller may sign
         /// in with a certificate of a CA below a root and show it alone: the
         /// CAs between are kept here to build its chain with, and are believed
         /// nothing by themselves - see WWCPNode.Accepting.
@@ -242,7 +242,7 @@ namespace cloud.charging.open.LocalController
                                HTTPPath?              BasePath           = null,
                                HTTPPath?              HTTPRootPath       = null,
                                HTTPExtAPI?            ExtAPI             = null,
-                               IIPAddress?            HTTPHostname       = null,
+                               IPAddress?            HTTPHostname       = null,
                                IPPort?                HTTPPort           = null,
                                String?                AccountsPath       = null,
                                WWCPConfigFile?        ConfigFile         = null,
@@ -276,7 +276,7 @@ namespace cloud.charging.open.LocalController
                    CertificatesPath:   CertificatesPath,
                    CertificateKinds:   CertificateKinds,
 
-                   // Who the controller is to a CSMS it dials may be made
+                   // Who the controller is to a CSMS it connects to may be made
                    // here: a key, a signing request, and the certificate
                    // that comes back for it. The key never leaves. And
                    // who its own web interface is, as a charging station
@@ -348,7 +348,7 @@ namespace cloud.charging.open.LocalController
 
             // What OCPP shows of the name servers and the time servers follows
             // this node from now on, whichever OCPP node is given it below.
-            // What this controller dials, what it proves itself with there
+            // What this controller connects to, what it proves itself with there
             // and whom it believes: the stores a charging station has, beside
             // the configuration file as everything else it was given. Before
             // anything that asks for them - the device model asks which name
@@ -404,7 +404,7 @@ namespace cloud.charging.open.LocalController
             // the page lists them - "stations" as well.
             AttachStationLoginControllers(lc01);
 
-            // And the line upwards. Nothing is dialled yet either, for the
+            // And the line upwards. Nothing is connected yet either, for the
             // same reason: Start() does.
             BuildCSMSConnection(configuration.CSMS);
 
@@ -476,7 +476,7 @@ namespace cloud.charging.open.LocalController
             // After the port below and the web interface, so that a controller
             // whose backend is unreachable is still a controller its charging
             // stations can reach - and one whoever is watching the Logs page
-            // sees dialling out. A CSMS that does not answer is logged, not
+            // sees connecting. A CSMS that does not answer is logged, not
             // fatal.
             await ConnectCSMS();
 
@@ -565,7 +565,7 @@ namespace cloud.charging.open.LocalController
         /// appearing on a port nobody chose would be a door into the same
         /// process that the sign-in in front of this one does not guard.
         ///
-        /// Nothing is connected here. Building the node and dialling a CSMS are
+        /// Nothing is connected here. Building the node and connecting to a CSMS are
         /// two different things, and the second one is not something a
         /// constructor should do on the way past.
         /// </remarks>

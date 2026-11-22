@@ -50,7 +50,7 @@ namespace cloud.charging.open.LocalController.OCPP
     /// <para>
     /// The line is key-pinned where it has key pins or trusts on first use; otherwise its CSMS is judged
     /// by its certificate, as it always was. Where it goes is the configuration's (csms.url); a key pin is
-    /// learned only for the address it was dialled at.
+    /// learned only for the address it was connected to.
     /// </para>
     /// </remarks>
     public sealed class CSMSKeyPins : IPinnedTLSEndpoints
@@ -75,7 +75,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
         private readonly Object                 updateLock     = new ();
         private readonly Func<String?>          url;
-        private readonly Action                 dialAgain;
+        private readonly Action                 connectAgain;
         private readonly TimeProvider           clock;
 
         private List<KeyPin>                    pins           = [];
@@ -106,16 +106,16 @@ namespace cloud.charging.open.LocalController.OCPP
         /// </summary>
         /// <param name="Path">The file.</param>
         /// <param name="URL">Where the line goes now: the configuration's.</param>
-        /// <param name="DialAgain">Hang the line up and dial it again.</param>
+        /// <param name="ConnectAgain">Hang the line up and connect it again.</param>
         /// <param name="Clock">The clock that says when a key pin was learned.</param>
         public CSMSKeyPins(String         Path,
                            Func<String?>  URL,
-                           Action         DialAgain,
+                           Action         ConnectAgain,
                            TimeProvider?  Clock   = null)
         {
             this.Path       = Path;
             this.url        = URL;
-            this.dialAgain  = DialAgain;
+            this.connectAgain  = ConnectAgain;
             this.clock      = Clock ?? TimeProvider.System;
         }
 
@@ -366,10 +366,10 @@ namespace cloud.charging.open.LocalController.OCPP
 
         }
 
-        public void DialAgain(String Id)
+        public void ConnectAgain(String Id)
         {
             if (Id == LineId)
-                dialAgain();
+                connectAgain();
         }
 
         #endregion

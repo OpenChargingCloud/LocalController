@@ -17,6 +17,7 @@
 
 #region Usings
 
+using org.GraphDefined.Vanaheimr.Illias;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 
@@ -26,6 +27,7 @@ using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 using cloud.charging.open.protocols.WWCP.Node.TestKit;
+using IPPort = org.GraphDefined.Vanaheimr.Hermod.IPPort;
 
 #endregion
 
@@ -40,7 +42,7 @@ namespace cloud.charging.open.LocalController.Tests
     /// <remarks>
     /// <para>
     /// The controller 'lc003' listens for stations on 127.0.0.1 with security profile 1 alone and
-    /// has no server certificate, and dials a CSMS of the least kind - see KeyPinsOverOCPPTests.CSMS.
+    /// has no server certificate, and connects to a CSMS of the least kind - see KeyPinsOverOCPPTests.CSMS.
     /// </para>
     /// <para>
     /// What a CSMS may set is everything the page may set (Achim, 2026-11-17): it may switch off
@@ -59,7 +61,7 @@ namespace cloud.charging.open.LocalController.Tests
         private String                          directory   = default!;
         private KeyPinsOverOCPPTests.CSMS       csms        = default!;
         private LocalController                 controller  = default!;
-        private UInt16                          port;
+        private IPPort                          port;
 
         private readonly ConcurrentQueue<String> said = [];
 
@@ -94,7 +96,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                     new JProperty("webSocketServer", new JObject(
                                                         new JProperty("enabled",           true),
                                                         new JProperty("address",           "127.0.0.1"),
-                                                        new JProperty("port",              port),
+                                                        new JProperty("port",              port.ToUInt16()),
                                                         new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS"))
                                                     )),
 
@@ -112,7 +114,7 @@ namespace cloud.charging.open.LocalController.Tests
 
                                 lc.Log.OnLogged += entry => said.Enqueue(entry.Message);
 
-                                Assert.That(lc.TrySetUplinkPassword("lc003", ThePassword, out var loginError), Is.True, loginError);
+                                Assert.That(lc.TrySetUplinkPassword(User_Id.Parse("lc003"), ThePassword, out var loginError), Is.True, loginError);
 
                                 return lc;
 
@@ -236,14 +238,14 @@ namespace cloud.charging.open.LocalController.Tests
         /// <summary>
         /// Whether something listens on the given TCP port of 127.0.0.1.
         /// </summary>
-        private static async Task<Boolean> Listens(UInt16 Port)
+        private static async Task<Boolean> Listens(IPPort Port)
         {
 
             using var client = new TcpClient();
 
             try
             {
-                await client.ConnectAsync("127.0.0.1", Port).WaitAsync(TimeSpan.FromSeconds(5));
+                await client.ConnectAsync("127.0.0.1", Port.ToInt32()).WaitAsync(TimeSpan.FromSeconds(5));
                 return true;
             }
             catch
@@ -350,7 +352,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(read["MaxConnections"].Value,  Is.EqualTo("100"));
                 Assert.That(read["WaitingForARestart"].Value?.Split(','), Is.EquivalentTo(new[] { "Port", "MaxConnections" }));
 
-                Assert.That(InTheFile["port"]?.Value<Int32>(),            Is.EqualTo(newPort));
+                Assert.That(InTheFile["port"]?.Value<Int32>(),            Is.EqualTo(newPort.ToInt32()));
                 Assert.That(InTheFile["maxConnections"]?.Value<Int32>(),  Is.EqualTo(100));
 
                 Assert.That(listens,                       Is.True, "the port stopped listening before a restart");
@@ -459,7 +461,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(set["SecurityProfiles"].Status,  Is.EqualTo("Rejected"));
                 Assert.That(set["Running"].Status,           Is.EqualTo("Rejected"));
                 Assert.That(set["Address"].Status,           Is.EqualTo("Rejected"));
-                Assert.That(InTheFile["port"]?.Value<Int32>(), Is.EqualTo(port));
+                Assert.That(InTheFile["port"]?.Value<Int32>(), Is.EqualTo(port.ToInt32()));
                 Assert.That(controller.OCPPServerRunning,    Is.True);
             });
 

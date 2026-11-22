@@ -22,7 +22,7 @@ namespace cloud.charging.open.LocalController
     /// Registering with the CSMS, as every node that serves OCPP registers -
     /// see OCPPServingNode.Registration.cs: the BootNotification of the OCPP
     /// node of this local controller once a connection to its back end is up, whoever
-    /// dialled, and its heartbeats once it was accepted.
+    /// connected, and its heartbeats once it was accepted.
     /// </summary>
     public partial class LocalController
     {

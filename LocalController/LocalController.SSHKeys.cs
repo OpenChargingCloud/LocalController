@@ -17,6 +17,7 @@
 
 #region Usings
 
+using org.GraphDefined.Vanaheimr.Illias;
 using org.GraphDefined.Vanaheimr.Hermod;
 using cloud.charging.open.protocols.WWCP.Node.Logins;
 
@@ -30,7 +31,7 @@ namespace cloud.charging.open.LocalController
 
     /// <summary>
     /// The SSH keys of the charging stations, as the CSMS installs, lists and deletes them over OCPP
-    /// (white paper "OCPP over SSH", section 9.3, decision 7): InstallSSHKey, DeleteSSHKey and
+    /// (white paper "OCPP-over-SSH", section 9.3, decision 7): InstallSSHKey, DeleteSSHKey and
     /// GetInstalledSSHKeys, kept with the stations' logins, as the page and the command line keep them.
     /// </summary>
     public partial class LocalController
@@ -67,7 +68,7 @@ namespace cloud.charging.open.LocalController
                                                                                  new OCPPv2_1.StatusInfo("NotSupported", "This local controller lets its stations in over SSH for OCPP only."),
                                                                                  HostKeys: HostKeyFingerprints));
 
-                if (!WebSocketLogins.TryAddSSHKey(request.NetworkingNodeId.ToString(),
+                if (!WebSocketLogins.TryAddSSHKey(User_Id.Parse(request.NetworkingNodeId.ToString()),
                                                 request.PublicKey,
                                                 "Installed by the CSMS",
                                                 null,
@@ -101,7 +102,7 @@ namespace cloud.charging.open.LocalController
 
             Node.OCPP.IN.OnDeleteSSHKey += (timestamp, sender, connection, request, cancellationToken) => {
 
-                var deleted = WebSocketLogins.TryRemoveSSHKey(request.NetworkingNodeId.ToString(), request.KeyFingerprint, out var error);
+                var deleted = WebSocketLogins.TryRemoveSSHKey(User_Id.Parse(request.NetworkingNodeId.ToString()), request.KeyFingerprint, out var error);
 
                 return Task.FromResult(deleted
                                            ? new OCPPv2_1.CS.DeleteSSHKeyResponse(request, OCPPv2_1.GenericStatus.Accepted)
@@ -114,8 +115,8 @@ namespace cloud.charging.open.LocalController
                 var keys = request.Purpose is OCPPv2_1.SSHKeyPurpose purpose && purpose != OCPPv2_1.SSHKeyPurpose.Station
                                ? []
                                : WebSocketLogins.Logins.
-                                     Where     (login => request.NetworkingNodeId is null || login.Id == request.NetworkingNodeId.Value.ToString()).
-                                     SelectMany(login => login.Keys.Select(key => new OCPPv2_1.InstalledSSHKey(protocols.WWCP.NetworkingNode.NetworkingNode_Id.Parse(login.Id),
+                                     Where     (login => request.NetworkingNodeId is null || login.Login == User_Id.Parse(request.NetworkingNodeId.Value.ToString())).
+                                     SelectMany(login => login.Keys.Select(key => new OCPPv2_1.InstalledSSHKey(protocols.WWCP.NetworkingNode.NetworkingNode_Id.Parse(login.Login.ToString()),
                                                                                                                OCPPv2_1.SSHKeyPurpose.Station,
                                                                                                                key.Line,
                                                                                                                key.Fingerprint))).

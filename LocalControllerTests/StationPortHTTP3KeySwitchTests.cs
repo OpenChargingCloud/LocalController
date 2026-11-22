@@ -51,7 +51,7 @@ namespace cloud.charging.open.LocalController.Tests
 
         private String           directory   = default!;
         private LocalController  controller  = default!;
-        private UInt16           port;
+        private IPPort           port;
         private KeyPin           currentPin  = default!;
         private KeyPin           nextPin     = default!;
 
@@ -95,7 +95,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                    new JProperty("webSocketServer", new JObject(
                                                        new JProperty("enabled",           true),
                                                        new JProperty("address",           "127.0.0.1"),
-                                                       new JProperty("port",              port),
+                                                       new JProperty("port",              port.ToUInt16()),
                                                        new JProperty("clientAuthentication",  new JArray("httpAuthOverTLS", "tlsClientCertificate")),
                                                        new JProperty("subprotocols",      new JArray("ocpp2.1")),
                                                        new JProperty("http3",             true)
@@ -130,7 +130,7 @@ namespace cloud.charging.open.LocalController.Tests
         /// A port free for UDP as for TCP: HTTP/3 is taken on the UDP port of
         /// the number of the TCP one - see CSMSOneTimePasswordOverHTTPVersionsTests.
         /// </summary>
-        private static UInt16 APortFreeForBoth()
+        private static IPPort APortFreeForBoth()
         {
 
             for (var attempt = 0; attempt < 200; attempt++)
@@ -148,7 +148,7 @@ namespace cloud.charging.open.LocalController.Tests
                     tcp4.Start();
                     tcp4.Stop();
 
-                    return (UInt16) port;
+                    return IPPort.Parse((UInt16) port);
 
                 }
                 catch (System.Net.Sockets.SocketException)
@@ -246,7 +246,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var server = controller.StationServer!;
 
-            Assert.That(await Until(() => server.HTTP3Port?.ToUInt16() == port), Is.True,
+            Assert.That(await Until(() => server.HTTP3Port == port), Is.True,
                         "The station port takes no WebSockets over HTTP/3: " + server.WhyNoHTTP3);
 
             Assert.That(await ShownOverHTTP3(), Is.EqualTo(currentPin), "what HTTP/3 shows before the switch");
@@ -259,7 +259,7 @@ namespace cloud.charging.open.LocalController.Tests
             var shown = await ShownOverHTTP3();
 
             Assert.Multiple(() => {
-                Assert.That(server.HTTP3Port?.ToUInt16(),  Is.EqualTo(port), "HTTP/3 is not taken on its port after the switch: " + server.WhyNoHTTP3);
+                Assert.That(server.HTTP3Port,  Is.EqualTo(port), "HTTP/3 is not taken on its port after the switch: " + server.WhyNoHTTP3);
                 Assert.That(shown,                         Is.EqualTo(nextPin), "what HTTP/3 shows after the switch");
             });
 

@@ -40,7 +40,7 @@ namespace cloud.charging.open.LocalController
     /// </para>
     /// <para>
     /// One thing in the store is no such decision, and is its "run": making a
-    /// key the controller dials its CSMS with, bringing the certificate that
+    /// key the controller connects to its CSMS with, bringing the certificate that
     /// came back for it, and taking a key back that still waits for one.
     /// Whoever runs the site keeps its lines up, and does that as well.
     /// </para>
@@ -57,7 +57,7 @@ namespace cloud.charging.open.LocalController
 
         /// <summary>
         /// The line up to the charging station management system: where it
-        /// goes, how it is dialled, and what this controller signs in with.
+        /// goes, how it is connected, and what this controller signs in with.
         /// </summary>
         public const String  CSMS      = "csms";
 
@@ -141,7 +141,7 @@ namespace cloud.charging.open.LocalController
                                                      Permission.Run (NodeResources.ResetImmediate),
                                                      Permission.Run (NodeResources.State),
                                                      Permission.Edit(NodeResources.Firmware) ],
-                                                   "runs the site: its name and time servers, the line up to the CSMS and the keys it dials with, the grid operator's VTN and the charging stations - and restarts the controller and installs its firmware");
+                                                   "runs the site: its name and time servers, the line up to the CSMS and the keys it connects with, the grid operator's VTN and the charging stations - and restarts the controller and installs its firmware");
 
         /// <summary>
         /// The one role a local controller adds to the node's.

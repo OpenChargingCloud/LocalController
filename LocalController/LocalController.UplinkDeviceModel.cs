@@ -39,7 +39,7 @@ namespace cloud.charging.open.LocalController
     /// </summary>
     /// <remarks>
     /// The device model, the pin sets and the probation are those of every
-    /// node that dials a CSMS (OCPPDialling.TLSClient.cs and
+    /// node that connects to a CSMS (OCPPConnecting.TLSClient.cs and
     /// WWCPNode.KeyPins.cs). What is a local controller's own is
     /// that it forwards: a CSMS it believes by a key pin it only learned
     /// reaches no station through it until a signed pin set confirms the
@@ -57,7 +57,7 @@ namespace cloud.charging.open.LocalController
         private void AttachUplinkDeviceModel(OCPPv2_1_LC.TestLocalControllerNode Node)
         {
 
-            OCPPDialling.AttachTLSClient(Node);
+            OCPPConnecting.AttachTLSClient(Node);
 
             // A pin set is held to the signers of pin sets by this controller
             // itself, where its TLSClientController takes it: the signature

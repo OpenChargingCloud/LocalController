@@ -105,7 +105,7 @@ namespace cloud.charging.open.LocalController.Tests
         /// none - made the way the controller makes its first one, so that it
         /// may sign in.
         /// </summary>
-        private async Task<HttpClient> SignedInAs(String   Name,
+        private async Task<HttpClient> SignedInAs(User_Id  Name,
                                                   String?  Role)
         {
 
@@ -115,8 +115,8 @@ namespace cloud.charging.open.LocalController.Tests
                         organization is Organization, Is.True, "the controller's organization is not there");
 
             var account = await controller.ExtAPI.CreateUser(
-                                    User_Id.Parse(Name),
-                                    I18NString.Create(Languages.en, Name),
+                                    Name,
+                                    I18NString.Create(Languages.en, Name.ToString()),
                                     SimpleEMailAddress.Parse($"{Name}@localhost"),
                                     User2OrganizationEdgeLabel.IsMember,
                                     (Organization) organization!,
@@ -129,7 +129,7 @@ namespace cloud.charging.open.LocalController.Tests
                                 );
 
             Assert.That(account,                                                          Is.Not.Null, $"the account '{Name}' was not made");
-            Assert.That(controller.ExtAPI.TryGetUser(User_Id.Parse(Name), out var stored),  Is.True);
+            Assert.That(controller.ExtAPI.TryGetUser(Name, out var stored),  Is.True);
 
             if (Role is not null)
             {
@@ -153,7 +153,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var signedIn = await client.PostAsync($"{LocalController.ExtAPIPath.ToString().TrimEnd('/')}/login",
                                                   new FormUrlEncodedContent([
-                                                      new KeyValuePair<String, String>("login",     Name),
+                                                      new KeyValuePair<String, String>("login",     Name.ToString()),
                                                       new KeyValuePair<String, String>("password",  password)
                                                   ]));
 
@@ -209,7 +209,7 @@ namespace cloud.charging.open.LocalController.Tests
             var lc = AController();
 
             Assert.Multiple(() => {
-                Assert.That(lc.Roles,             Is.EqualTo(new[] { "viewer", "support", "cpo", WWCPNode.AdminRole }));
+                Assert.That(lc.Roles,             Is.EqualTo(new[] { "viewer", "support", "cpo", WWCPNode.AdminRole.ToString() }));
                 Assert.That(lc.Access.Resources,  Is.EqualTo(new[] { "configuration", "dns", "nts", "certificates", "ssh", "log",
                                                                      "node", "reset", "reset-immediate", "state", "firmware", "signatures",
                                                                      "csms", "stations", "openadr", "commissioning" }));
@@ -226,7 +226,7 @@ namespace cloud.charging.open.LocalController.Tests
         /// permission: the viewer looks, the CPO runs the site - its name and
         /// time servers, the line up to the CSMS and the charging stations -
         /// and only the administrators touch the certificates, but for the
-        /// keys the lines up are dialled with, which the CPO makes.
+        /// keys the lines up are connected with, which the CPO makes.
         /// </summary>
         [TestCase("viewer",       "configuration:read",  true)]
         [TestCase("viewer",       "dns:read",            true)]
@@ -303,7 +303,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             await TestPorts.StartedOnFreshPorts(() => AController());
 
-            using var cpo    = await SignedInAs("cpo1", "cpo");
+            using var cpo    = await SignedInAs(User_Id.Parse("cpo1"), "cpo");
 
             var looked       = await cpo.GetAsync("api/v1/certificates/serverKeys/ocpp");
             var requested    = await Post(cpo, "api/v1/certificates/serverKeys/ocpp", "{}");
@@ -346,7 +346,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                                       ))
                                                                   )));
 
-            using var helpdesk = await SignedInAs("helper", "helpdesk");
+            using var helpdesk = await SignedInAs(User_Id.Parse("helper"), "helpdesk");
 
             var dns            = await helpdesk.GetAsync("api/v1/configuration/dns");
             var stations       = await helpdesk.GetAsync("api/v1/configuration/ocpp-server/logins");
@@ -354,7 +354,7 @@ namespace cloud.charging.open.LocalController.Tests
             var refusal        = await csms.Content.ReadAsStringAsync();
 
             Assert.Multiple(() => {
-                Assert.That(controller!.Roles,   Is.EqualTo(new[] { "viewer", "support", "cpo", "helpdesk", WWCPNode.AdminRole }));
+                Assert.That(controller!.Roles,   Is.EqualTo(new[] { "viewer", "support", "cpo", "helpdesk", WWCPNode.AdminRole.ToString() }));
                 Assert.That(dns.StatusCode,      Is.EqualTo(HttpStatusCode.OK));
                 Assert.That(stations.StatusCode, Is.EqualTo(HttpStatusCode.OK));
                 Assert.That(csms.StatusCode,     Is.EqualTo(HttpStatusCode.Forbidden));
@@ -474,7 +474,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                                       new JProperty("roles",  roles)
                                                                   )));
 
-            using var nobody  = await SignedInAs("nobody1", null);
+            using var nobody  = await SignedInAs(User_Id.Parse("nobody1"), null);
 
             var response      = await nobody.SendAsync(new HttpRequestMessage(new HttpMethod(Method), Path) {
                                                            Content = Method == "GET"
@@ -514,7 +514,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             await TestPorts.StartedOnFreshPorts(() => AController());
 
-            using var nobody   = await SignedInAs("nobody1", null);
+            using var nobody   = await SignedInAs(User_Id.Parse("nobody1"), null);
 
             var clock          = await nobody.GetAsync("api/v1/clock");
             var configuration  = await nobody.GetAsync("api/v1/configuration");
@@ -544,9 +544,9 @@ namespace cloud.charging.open.LocalController.Tests
 
             await TestPorts.StartedOnFreshPorts(() => AController());
 
-            using var nobody   = await SignedInAs("nobody2",  null);
-            using var support  = await SignedInAs("support1", "support");
-            using var viewer   = await SignedInAs("viewer1",  "viewer");
+            using var nobody   = await SignedInAs(User_Id.Parse("nobody2"),  null);
+            using var support  = await SignedInAs(User_Id.Parse("support1"), "support");
+            using var viewer   = await SignedInAs(User_Id.Parse("viewer1"),  "viewer");
 
             var ofNobody       = await nobody. GetAsync("api/v1/logs");
             var ofSupport      = await support.GetAsync("api/v1/logs");
@@ -593,15 +593,15 @@ namespace cloud.charging.open.LocalController.Tests
                                                                       new JProperty("webSocketServer",  new JObject(
                                                                           new JProperty("enabled",           true),
                                                                           new JProperty("address",           "127.0.0.1"),
-                                                                          new JProperty("port",              TestPorts.Free()),
+                                                                          new JProperty("port",              TestPorts.Free().ToUInt16()),
                                                                           new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS")),
                                                                           new JProperty("subprotocols",      new JArray("ocpp2.1"))
                                                                       ))
                                                                   )));
 
-            Assert.That(controller!.WebSocketLogins.TrySetPasswordAuthentication("cs001", stationPassword, null, I18NString.Create("Ladepunkt 1"), out var error), Is.True, error);
+            Assert.That(controller!.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), stationPassword, null, I18NString.Create("Ladepunkt 1"), out var error), Is.True, error);
 
-            using var support  = await SignedInAs("support2", "support");
+            using var support  = await SignedInAs(User_Id.Parse("support2"), "support");
             using var station  = new System.Net.WebSockets.ClientWebSocket();
             using var timeout  = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 

@@ -122,7 +122,7 @@ namespace cloud.charging.open.LocalController.Tests
                 File.WriteAllText(configFile, TestControllers.Offline.ToString());
 
                 return new FailingToStop(
-                           HTTPPort:      IPPort.Parse(TestPorts.Free()),
+                           HTTPPort:      TestPorts.Free(),
                            AccountsPath:  Path.Combine(here, "accounts"),
                            ConfigFile:    new WWCPConfigFile(configFile),
                            LogPath:       Path.Combine(here, "logs")

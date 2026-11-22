@@ -22,6 +22,7 @@ using System.Diagnostics.CodeAnalysis;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
+using org.GraphDefined.Vanaheimr.Illias;
 using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 
@@ -36,7 +37,7 @@ namespace cloud.charging.open.LocalController.OCPP
 {
 
     /// <summary>
-    /// What this local controller says to prove who it is when it dials the
+    /// What this local controller says to prove who it is when it connects to the
     /// charging station management system above it.
     /// </summary>
     /// <remarks>
@@ -64,7 +65,7 @@ namespace cloud.charging.open.LocalController.OCPP
         /// <summary>
         /// The longest identification this controller may sign in under.
         /// </summary>
-        public const Int32   MaxUsernameLength  = 48;
+        public const Int32   MaxLoginLength  = 48;
 
         /// <summary>
         /// The shortest password that may be set. The same floor OCPP asks of a
@@ -79,7 +80,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
         private readonly Object  updateLock  = new ();
 
-        private String?        username;
+        private User_Id?       login;
         private String?        password;
         private TOTPSettings?  totp;
 
@@ -107,9 +108,9 @@ namespace cloud.charging.open.LocalController.OCPP
         /// What this controller calls itself upwards, or null when nothing has
         /// been set.
         /// </summary>
-        public String? Username
+        public User_Id? Login
         {
-            get { lock (updateLock) return username; }
+            get { lock (updateLock) return login; }
         }
 
         /// <summary>
@@ -137,7 +138,7 @@ namespace cloud.charging.open.LocalController.OCPP
         /// </summary>
         /// <summary>
         /// The password of before, for what takes the line of before over
-        /// into the store of connections - see LocalController.Dialling.cs.
+        /// into the store of connections - see LocalController.Connecting.cs.
         /// </summary>
         internal String? PasswordOfBefore
         {
@@ -187,7 +188,7 @@ namespace cloud.charging.open.LocalController.OCPP
             lock (updateLock)
             {
 
-                username  = null;
+                login     = null;
                 password  = null;
                 totp      = null;
 
@@ -213,7 +214,7 @@ namespace cloud.charging.open.LocalController.OCPP
                     return false;
                 }
 
-                username = document.Value<String>("username")?.Trim() is { Length: > 0 } name ? name : null;
+                login = User_Id.TryParse(document.Value<String>("login"));
                 password = document.Value<String>("password") is { Length: > 0 } secret ? secret : null;
 
                 if (document["totp"] is JObject totpJSON)
@@ -235,7 +236,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region TrySetPassword(Username, Password, out Error [, out NotSaved])
+        #region TrySetPassword(Login, Password, out Error [, out NotSaved])
 
         /// <summary>
         /// What this controller signs in with under security profiles 1 and 2.
@@ -244,18 +245,18 @@ namespace cloud.charging.open.LocalController.OCPP
         /// Unlike the passwords of the charging stations below, this one is not
         /// made up here: it is issued by whoever runs the CSMS, and typed in.
         /// </remarks>
-        public Boolean TrySetPassword(String?                           Username,
+        public Boolean TrySetPassword(User_Id?                          Login,
                                       String?                           Password,
                                       [NotNullWhen(false)] out String?  Error)
 
-            => TrySetPassword(Username, Password, out Error, out _);
+            => TrySetPassword(Login, Password, out Error, out _);
 
         /// <summary>
         /// What this controller signs in with under security profiles 1 and 2 -
         /// and say whether a refusal was the file's rather than the password's.
         /// </summary>
         /// <param name="NotSaved">True where the file could not be written: the credentials are what they were.</param>
-        public Boolean TrySetPassword(String?                           Username,
+        public Boolean TrySetPassword(User_Id?                          Login,
                                       String?                           Password,
                                       [NotNullWhen(false)] out String?  Error,
                                       out Boolean                       NotSaved)
@@ -264,7 +265,7 @@ namespace cloud.charging.open.LocalController.OCPP
             Error     = null;
             NotSaved  = false;
 
-            var name = Username?.Trim() ?? "";
+            var name = Login?.ToString() ?? "";
 
             if (name.Length == 0)
             {
@@ -272,9 +273,9 @@ namespace cloud.charging.open.LocalController.OCPP
                 return false;
             }
 
-            if (name.Length > MaxUsernameLength)
+            if (name.Length > MaxLoginLength)
             {
-                Error = $"The identification may be at most {MaxUsernameLength} characters long.";
+                Error = $"The identification may be at most {MaxLoginLength} characters long.";
                 return false;
             }
 
@@ -295,14 +296,14 @@ namespace cloud.charging.open.LocalController.OCPP
             lock (updateLock)
             {
 
-                var (wasName, wasSecret) = (username, password);
+                var (wasName, wasSecret) = (login, password);
 
-                username  = name;
+                login     = User_Id.Parse(name);
                 password  = secret;
 
                 if (!TrySave(out Error))
                 {
-                    (username, password) = (wasName, wasSecret);
+                    (login, password) = (wasName, wasSecret);
                     NotSaved             = true;
                     return false;
                 }
@@ -317,13 +318,13 @@ namespace cloud.charging.open.LocalController.OCPP
 
         #endregion
 
-        #region TrySetTOTP(Username, SharedSecret, ValidityTime, Length, Alphabet, HashAlgorithm, out Error [, out NotSaved])
+        #region TrySetTOTP(Login, SharedSecret, ValidityTime, Length, Alphabet, HashAlgorithm, out Error [, out NotSaved])
 
         /// <summary>
         /// What this controller signs in with when the CSMS expects a one-time
         /// token instead of, or beside, a password.
         /// </summary>
-        public Boolean TrySetTOTP(String?                           Username,
+        public Boolean TrySetTOTP(User_Id?                          Login,
                                   String?                           SharedSecret,
                                   TimeSpan?                         ValidityTime,
                                   UInt32?                           Length,
@@ -331,7 +332,7 @@ namespace cloud.charging.open.LocalController.OCPP
                                   TOTPHashAlgorithm?                HashAlgorithm,
                                   [NotNullWhen(false)] out String?  Error)
 
-            => TrySetTOTP(Username, SharedSecret, ValidityTime, Length, Alphabet, HashAlgorithm, out Error, out _);
+            => TrySetTOTP(Login, SharedSecret, ValidityTime, Length, Alphabet, HashAlgorithm, out Error, out _);
 
         /// <summary>
         /// What this controller signs in with when the CSMS expects a one-time
@@ -340,7 +341,7 @@ namespace cloud.charging.open.LocalController.OCPP
         /// </summary>
         /// <param name="NotSaved">True where the file could not be written: the credentials are what they were.</param>
         /// <param name="TLSChannelBinding">Whether the token is to be bound to the TLS session of the line; null leaves it as it was.</param>
-        public Boolean TrySetTOTP(String?                           Username,
+        public Boolean TrySetTOTP(User_Id?                          Login,
                                   String?                           SharedSecret,
                                   TimeSpan?                         ValidityTime,
                                   UInt32?                           Length,
@@ -354,7 +355,7 @@ namespace cloud.charging.open.LocalController.OCPP
             Error     = null;
             NotSaved  = false;
 
-            var name = Username?.Trim() ?? "";
+            var name = Login?.ToString() ?? "";
 
             if (name.Length == 0)
             {
@@ -362,9 +363,9 @@ namespace cloud.charging.open.LocalController.OCPP
                 return false;
             }
 
-            if (name.Length > MaxUsernameLength)
+            if (name.Length > MaxLoginLength)
             {
-                Error = $"The identification may be at most {MaxUsernameLength} characters long.";
+                Error = $"The identification may be at most {MaxLoginLength} characters long.";
                 return false;
             }
 
@@ -391,9 +392,9 @@ namespace cloud.charging.open.LocalController.OCPP
             lock (updateLock)
             {
 
-                var (wasName, wasTOTP) = (username, totp);
+                var (wasName, wasTOTP) = (login, totp);
 
-                username  = name;
+                login     = User_Id.Parse(name);
 
                 // A new secret does not undo the binding that was asked for:
                 // that would be less than configured, quietly.
@@ -401,7 +402,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 if (!TrySave(out Error))
                 {
-                    (username, totp) = (wasName, wasTOTP);
+                    (login, totp) = (wasName, wasTOTP);
                     NotSaved         = true;
                     return false;
                 }
@@ -498,15 +499,15 @@ namespace cloud.charging.open.LocalController.OCPP
             lock (updateLock)
             {
 
-                var was = (username, password, totp);
+                var was = (login, password, totp);
 
-                username  = null;
+                login     = null;
                 password  = null;
                 totp      = null;
 
                 if (!TrySave(out Error))
                 {
-                    (username, password, totp) = was;
+                    (login, password, totp) = was;
                     NotSaved                   = true;
                     return false;
                 }
@@ -536,8 +537,8 @@ namespace cloud.charging.open.LocalController.OCPP
         public IHTTPAuthentication? HTTPAuthentication()
         {
             lock (updateLock)
-                return username is not null && password is not null
-                           ? HTTPBasicAuthentication.Create(username, password)
+                return login is User_Id known && password is not null
+                           ? HTTPBasicAuthentication.Create(known.ToString(), password)
                            : null;
         }
 
@@ -572,7 +573,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 var json = new JObject(
                                new JProperty("file",         Path),
-                               new JProperty("username",     username),
+                               new JProperty("login",        login?.ToString()),
                                new JProperty("hasPassword",  password is not null),
                                new JProperty("hasTOTP",      totp is not null),
                                new JProperty("minPasswordLength", MinPasswordLength)
@@ -610,7 +611,7 @@ namespace cloud.charging.open.LocalController.OCPP
 
                 var json = new JObject();
 
-                if (username is not null)  json.Add("username", username);
+                if (login is User_Id known)  json.Add("login",    known.ToString());
                 if (password is not null)  json.Add("password", password);
                 if (totp     is not null)  json.Add("totp",     totp.ToJSON(WithSecret: true));
 
@@ -638,9 +639,9 @@ namespace cloud.charging.open.LocalController.OCPP
         public override String ToString()
         {
             lock (updateLock)
-                return username is null
+                return login is null
                            ? "no CSMS credentials"
-                           : $"'{username}'{(password is not null ? " with a password" : "")}{(totp is not null ? " with a one-time token" : "")}";
+                           : $"'{login}'{(password is not null ? " with a password" : "")}{(totp is not null ? " with a one-time token" : "")}";
         }
 
         #endregion

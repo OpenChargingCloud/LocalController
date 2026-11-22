@@ -43,7 +43,7 @@ namespace cloud.charging.open.LocalController
 
     /// <summary>
     /// The charging station management system above this local controller: how
-    /// it is dialled, what this controller says to prove who it is, and what
+    /// it is connected to, what this controller says to prove who it is, and what
     /// happens when the line goes down.
     /// </summary>
     /// <remarks>
@@ -54,10 +54,10 @@ namespace cloud.charging.open.LocalController
     /// to forward messages both ways, so what is built here is the line, not
     /// the routing.
     ///
-    /// <b>Dialled once, kept up by the client.</b> Hermod's WebSocket client
-    /// dials again on its own when a connection is lost or could not be made
+    /// <b>Connected once, kept up by the client.</b> Hermod's WebSocket client
+    /// connects again on its own when a connection is lost or could not be made
     /// in the first place, with an exponential backoff this controller
-    /// configures. So there is no loop here that dials again: there is one
+    /// configures. So there is no loop here that connects again: there is one
     /// that is told when the client is about to, and when it has got through.
     /// </remarks>
     public partial class LocalController
@@ -75,7 +75,7 @@ namespace cloud.charging.open.LocalController
         // controller reports to a CSMS at all, and how a line is kept.
         private CSMSConfiguration  csmsSettings       = new CSMSConfiguration().Effective();
 
-        // As it was when the lines were last dialled: what differs from
+        // As it was when the lines were last connected: what differs from
         // it waits for a restart.
         private CSMSConfiguration  csmsAsBuilt        = new CSMSConfiguration().Effective();
 
@@ -164,7 +164,7 @@ namespace cloud.charging.open.LocalController
 
         /// <summary>
         /// Whether the given connection leads to a node below this controller,
-        /// which it names: dialled whether the controller reports to a CSMS or
+        /// which it names: connected to whether the controller reports to a CSMS or
         /// not, and not in the frame the section "csms" says.
         /// </summary>
         private static Boolean IsBelow(ConnectionEntry Connection)
@@ -192,14 +192,14 @@ namespace cloud.charging.open.LocalController
 
             TakeOverTheLineOfBefore(Configuration, directory);
 
-            var dialled = Connections.Connections.Count(connection => connection.AutoConnect);
+            var autoConnecting = Connections.Connections.Count(connection => connection.AutoConnect);
 
             Log.Info(
                 csmsSettings.Enabled == true
-                    ? $"This local controller reports to a CSMS over {dialled} connection{(dialled == 1 ? "" : "s")} it dials by itself (" +
+                    ? $"This local controller reports to a CSMS over {autoConnecting} connection{(autoConnecting == 1 ? "" : "s")} it opens by itself (" +
                       (csmsSettings.InOverlayNetwork ? "in the overlay network" : "in the plain OCPP frame, which names no station behind it") +
-                      // A controller whose file says nothing dials in the overlay network since 2026-11-12, and
-                      // dialled in the plain frame before: said, for whoever wonders why its CSMS sees it otherwise.
+                      // A controller whose file says nothing connects in the overlay network since 2026-11-12, and
+                      // connected in the plain frame before: said, for whoever wonders why its CSMS sees it otherwise.
                       $"{(Configuration?.NetworkingMode is null ? $" - as nothing says otherwise; \"networkingMode\": \"{CSMSConfiguration.StandardMode}\" is for a CSMS that does not speak it" : "")})."
                     : "This local controller reports to no CSMS; it is switched off under Configuration.",
                 "ocpp", "csms"
@@ -212,9 +212,9 @@ namespace cloud.charging.open.LocalController
         #region (private) ConnectCSMS() / DisconnectCSMS()
 
         /// <summary>
-        /// Dial what the store says: every connection that dials by itself,
+        /// Connect what the store says: every connection that connects by itself,
         /// peer by peer, the next one of a peer where one cannot be reached -
-        /// as a charging station dials, see WWCPNode.Connections.cs. A node
+        /// as a charging station connects, see WWCPNode.Connections.cs. A node
         /// below whether this controller reports to a CSMS or not, a line up
         /// only where it does (see WhyItIsNotConnected).
         /// </summary>
@@ -226,7 +226,7 @@ namespace cloud.charging.open.LocalController
         private async Task ConnectCSMS()
         {
 
-            await DialConfiguredConnections();
+            await ConnectConfiguredConnections();
 
             csmsAsBuilt = csmsSettings;
 
@@ -249,7 +249,7 @@ namespace cloud.charging.open.LocalController
         /// is none to sign in with.
         /// </summary>
         /// <remarks>
-        /// Read from the certificate store at every dialling rather than kept:
+        /// Read from the certificate store at every connection attempt rather than kept:
         /// an identity switched off, renewed or deleted on the store's page is
         /// what the next attempt goes by.
         /// </remarks>
@@ -528,7 +528,7 @@ namespace cloud.charging.open.LocalController
             csmsSettings = wanted;
 
             // Over TLS or not any more: TLSClientController follows.
-            OCPPDialling.FollowTLSClientComponents(lc01);
+            OCPPConnecting.FollowTLSClientComponents(lc01);
 
             return true;
 

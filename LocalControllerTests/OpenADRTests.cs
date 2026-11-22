@@ -586,7 +586,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var response = await http.PostAsync($"{LocalController.ExtAPIPath.ToString().TrimEnd('/')}/login",
                                                 new FormUrlEncodedContent([
-                                                    new KeyValuePair<String, String>("login",     LocalController.DefaultAdminUser),
+                                                    new KeyValuePair<String, String>("login",     LocalController.DefaultAdminUser.ToString()),
                                                     new KeyValuePair<String, String>("password",  Controller.GeneratedPassword!)
                                                 ]));
 

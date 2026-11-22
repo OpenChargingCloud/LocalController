@@ -29,6 +29,7 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using org.GraphDefined.Vanaheimr.Illias;
 using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Hermod.HTTP;
 using org.GraphDefined.Vanaheimr.Hermod.WebSocket;
@@ -65,7 +66,7 @@ namespace cloud.charging.open.LocalController.Tests
 
         private String           directory   = default!;
         private LocalController  controller  = default!;
-        private UInt16           port;
+        private IPPort           port;
         private KeyPin           serverPin   = default!;
 
         private ECDsa            cs001Key    = default!;
@@ -113,7 +114,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                  new JProperty("webSocketServer", new JObject(
                                                      new JProperty("enabled",           true),
                                                      new JProperty("address",           "127.0.0.1"),
-                                                     new JProperty("port",              port),
+                                                     new JProperty("port",              port.ToUInt16()),
                                                      new JProperty("clientAuthentication",  new JArray("httpAuthOverTLS", "tlsClientCertificate"))
                                                  ))
 
@@ -122,8 +123,8 @@ namespace cloud.charging.open.LocalController.Tests
 
                              lc.Log.OnLogged += entry => said.Enqueue(entry.Message);
 
-                             Assert.That(lc.WebSocketLogins.TryAddKeyPin("cs001", KeyPin.FromKey(cs001Key).ToHex(), "bay 1", null, null, null, out _, out var error1), Is.True, error1);
-                             Assert.That(lc.WebSocketLogins.TryAddKeyPin("cs002", KeyPin.FromKey(cs002Key).ToHex(), "bay 2", null, null, null, out _, out var error2), Is.True, error2);
+                             Assert.That(lc.WebSocketLogins.TryAddKeyPin(User_Id.Parse("cs001"), KeyPin.FromKey(cs001Key).ToHex(), "bay 1", null, null, null, out _, out var error1), Is.True, error1);
+                             Assert.That(lc.WebSocketLogins.TryAddKeyPin(User_Id.Parse("cs002"), KeyPin.FromKey(cs002Key).ToHex(), "bay 2", null, null, null, out _, out var error2), Is.True, error2);
 
                              return lc;
 
@@ -401,7 +402,7 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.That(controller.WebSocketLogins.TryAddOrUpdateGroup("no-pins", "No key pins", true, [ AuthMethod.Certificate, AuthMethod.Basic ], [ WebSocketClientAuthentication.HTTPAuthWithoutTLS, WebSocketClientAuthentication.HTTPAuthOverTLS, WebSocketClientAuthentication.TLSClientCertificate ], null, out var error),
                         Is.True, error);
 
-            Assert.That(controller.WebSocketLogins.TrySetGroup("cs001", "no-pins", out var moveError), Is.True, moveError);
+            Assert.That(controller.WebSocketLogins.TrySetGroup(User_Id.Parse("cs001"), "no-pins", out var moveError), Is.True, moveError);
 
             var (client, status) = await Connect("cs001", Certificate(cs001Key, "station.invalid"));
 
@@ -427,7 +428,7 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.That(controller.WebSocketLogins.TryAddOrUpdateGroup("profile-2", "Profile 2 only", true, [ AuthMethod.KeyPin, AuthMethod.Basic ], [ WebSocketClientAuthentication.HTTPAuthOverTLS ], null, out var error),
                         Is.True, error);
 
-            Assert.That(controller.WebSocketLogins.TrySetGroup("cs001", "profile-2", out var moveError), Is.True, moveError);
+            Assert.That(controller.WebSocketLogins.TrySetGroup(User_Id.Parse("cs001"), "profile-2", out var moveError), Is.True, moveError);
 
             var (client, status) = await Connect("cs001", Certificate(cs001Key, "station.invalid"));
 
@@ -454,7 +455,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ASwitchedOffStationIsRefused()
         {
 
-            Assert.That(controller.WebSocketLogins.TrySetEnabled("cs001", false, out var error), Is.True, error);
+            Assert.That(controller.WebSocketLogins.TrySetEnabled(User_Id.Parse("cs001"), false, out var error), Is.True, error);
 
             var (client, status) = await Connect("cs001", Certificate(cs001Key, "station.invalid"));
 
@@ -481,7 +482,7 @@ namespace cloud.charging.open.LocalController.Tests
             var certificate = Certificate(cs001Key, "cs001");
 
             Assert.That(controller.ClientTrust.TryAdd(TestCA.ToPEM(certificate), "cs001 itself", out _, out _, out var trustError), Is.True, trustError);
-            Assert.That(controller.WebSocketLogins.TrySetEnabled("cs001", false, out var error), Is.True, error);
+            Assert.That(controller.WebSocketLogins.TrySetEnabled(User_Id.Parse("cs001"), false, out var error), Is.True, error);
 
             var (client, status) = await Connect("cs001", certificate);
 
@@ -572,7 +573,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             using var tcp = new TcpClient();
 
-            await tcp.ConnectAsync(System.Net.IPAddress.Loopback, port);
+            await tcp.ConnectAsync(System.Net.IPAddress.Loopback, port.ToInt32());
 
             await using var tls = new SslStream(tcp.GetStream(), false);
 
@@ -595,7 +596,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.That(said, Has.Some.Contains("was accepted by its key pin"), "the handshake did not get through by the pin");
 
-            Assert.That(controller.WebSocketLogins.TryRemoveKeyPin("cs001", KeyPin.FromKey(cs001Key).ToHex(), out var error), Is.True, error);
+            Assert.That(controller.WebSocketLogins.TryRemoveKeyPin(User_Id.Parse("cs001"), KeyPin.FromKey(cs001Key).ToHex(), out var error), Is.True, error);
 
             var request = "GET /cs003 HTTP/1.1\r\n" +
                           $"Host: 127.0.0.1:{port}\r\n" +

@@ -44,7 +44,7 @@ function controller({ method, path, body }: Asked): unknown {
             return refused(400, 'The address of a line up to the CSMS is a connection\'s: it is changed under Connections.');
 
         if (refuseSettings)
-            return refused(400, 'A line is dialled again after 600 seconds at the latest.');
+            return refused(400, 'A line is connected again after 600 seconds at the latest.');
 
         // A controller takes what it takes: a ping every half minute at the most often.
         held = { ...held, ...update, pingEvery: Math.max(update.pingEvery ?? held.pingEvery, 30) } as CSMSConfiguration & SaidBefore;
@@ -165,7 +165,7 @@ describe('the CSMS page', () => {
                     'the page did not ask what the controller has after the refusal');
         await settled();
 
-        assert.equal(root.querySelector('#connection-error')!.textContent, 'A line is dialled again after 600 seconds at the latest.');
+        assert.equal(root.querySelector('#connection-error')!.textContent, 'A line is connected again after 600 seconds at the latest.');
         assert.equal(field(root, '#connection-form', 'reconnectInitialDelay').value, '900', 'what was typed went');
 
     });

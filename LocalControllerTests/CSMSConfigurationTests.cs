@@ -126,17 +126,17 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region AnotherIdentityWaitsForTheLineToBeDialledAgain()
+        #region AnotherIdentityWaitsForTheLineToBeConnectedAgain()
 
         [Test]
-        public void AnotherIdentityWaitsForTheLineToBeDialledAgain()
+        public void AnotherIdentityWaitsForTheLineToBeConnectedAgain()
         {
 
-            var dialled  = Read("""{ "clientCertificate": "0e016b2245b3797c" }""").Effective();
-            var now      = dialled.Merge(Read("""{ "clientCertificate": "9bcb4a2c7c25f614" }"""));
+            var asBuilt  = Read("""{ "clientCertificate": "0e016b2245b3797c" }""").Effective();
+            var now      = asBuilt.Merge(Read("""{ "clientCertificate": "9bcb4a2c7c25f614" }"""));
 
-            Assert.That(now.NeedsARestartFor(dialled), Does.Contain("clientCertificate"),
-                        "a client dialled with one identity presents it until it is dialled again");
+            Assert.That(now.NeedsARestartFor(asBuilt), Does.Contain("clientCertificate"),
+                        "a client connected with one identity presents it until it is connected again");
 
         }
 
@@ -194,24 +194,24 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region AnotherNetworkingMode_WaitsForTheLineToBeDialledAgain()
+        #region AnotherNetworkingMode_WaitsForTheLineToBeConnectedAgain()
 
         /// <summary>
-        /// The mode is said once, in the header of the dial: a change waits for the next one, and saying
+        /// The mode is said once, in the header of the connection: a change waits for the next one, and saying
         /// nothing - a save of another field - leaves the mode as it was.
         /// </summary>
         [Test]
-        public void AnotherNetworkingMode_WaitsForTheLineToBeDialledAgain()
+        public void AnotherNetworkingMode_WaitsForTheLineToBeConnectedAgain()
         {
 
-            var dialled  = Read("""{ "networkingMode": "standard" }""").Effective();
-            var overlay  = dialled.Merge(Read("""{ "networkingMode": "overlay" }"""));
+            var asBuilt  = Read("""{ "networkingMode": "standard" }""").Effective();
+            var overlay  = asBuilt.Merge(Read("""{ "networkingMode": "overlay" }"""));
             var other    = overlay.Merge(Read("""{ "pingEvery": 60 }"""));
-            var stays    = dialled.Merge(Read("""{ "pingEvery": 60 }"""));
+            var stays    = asBuilt.Merge(Read("""{ "pingEvery": 60 }"""));
 
             Assert.Multiple(() => {
-                Assert.That(overlay.NeedsARestartFor(dialled),  Does.Contain("networkingMode"));
-                Assert.That(dialled.NeedsARestartFor(dialled),  Does.Not.Contain("networkingMode"));
+                Assert.That(overlay.NeedsARestartFor(asBuilt),  Does.Contain("networkingMode"));
+                Assert.That(asBuilt.NeedsARestartFor(asBuilt),  Does.Not.Contain("networkingMode"));
                 Assert.That(other.InOverlayNetwork,             Is.True,  "saying nothing of the mode changed it");
                 Assert.That(stays.InOverlayNetwork,             Is.False, "saying nothing of the mode made a standard line an overlay one");
             });

@@ -36,7 +36,7 @@ namespace cloud.charging.open.LocalController.Configuration
 
     /// <summary>
     /// The charging station management system this local controller reports to,
-    /// and how it dials it.
+    /// and how it connects to it.
     /// </summary>
     /// <remarks>
     /// <b>The mirror image of <see cref="WebSocketServerConfiguration"/>.</b> Down
@@ -46,7 +46,7 @@ namespace cloud.charging.open.LocalController.Configuration
     /// direction differs, and with it which end has to keep the secret readable.
     ///
     /// <b>Switched off unless somebody says otherwise.</b> A controller that
-    /// began dialling a backend merely because it was updated to a version that
+    /// began connecting to a backend merely because it was updated to a version that
     /// can would be making a connection nobody asked for, out of a network
     /// somebody else operates.
     ///
@@ -58,7 +58,7 @@ namespace cloud.charging.open.LocalController.Configuration
     /// charging stations below, these cannot be hashed: proving who you are to
     /// somebody else means being able to say the secret.
     /// </remarks>
-    /// <param name="Enabled">Whether this local controller dials a CSMS at all.</param>
+    /// <param name="Enabled">Whether this local controller connects to a CSMS at all.</param>
     /// <param name="URL">Where the CSMS is, as a WebSocket URL.</param>
     /// <param name="SecurityProfile">Which OCPP security profile is used to sign in.</param>
     /// <param name="NextHopNodeId">What the node on the other end calls itself; everything not meant for this controller is routed there.</param>
@@ -67,7 +67,7 @@ namespace cloud.charging.open.LocalController.Configuration
     /// <param name="CheckCertificateRevocation">Whether the CSMS certificate is checked against its issuer's revocation list.</param>
     /// <param name="PingEvery">How often a silent connection is pinged, which is how a CSMS that went away is noticed.</param>
     /// <param name="RequestTimeout">How long a request upwards may take before it is given up on.</param>
-    /// <param name="ReconnectInitialDelay">How long to wait before the first attempt to dial again.</param>
+    /// <param name="ReconnectInitialDelay">How long to wait before the first attempt to connect again.</param>
     /// <param name="ReconnectMaxDelay">The longest the waiting between attempts may grow to.</param>
     /// <param name="ClientCertificate">The TLS identity of this controller's certificate store it signs in with under security profile 3, by its handle; empty for none, and null where nothing was said.</param>
     /// <param name="NetworkingMode">How the messages on the line carry where they go and where they come from: in the plain OCPP frame (standard), or in the frame of the overlay network, which names both.</param>
@@ -185,7 +185,7 @@ namespace cloud.charging.open.LocalController.Configuration
         /// for this controller's: the CSMS sees one station where there are
         /// several. Standard is for a CSMS that knows nothing of the overlay
         /// network, and is said so by name in the file. The CSMS is told the
-        /// mode in the header X-OCPP-NetworkingMode of the dial.
+        /// mode in the header X-OCPP-NetworkingMode of the connection.
         /// </para>
         /// </remarks>
         public const WWCPNetworkingMode  DefaultNetworkingMode  = WWCPNetworkingMode.OverlayNetwork;
@@ -267,7 +267,7 @@ namespace cloud.charging.open.LocalController.Configuration
         /// the line to the CSMS: one opened over HTTP/3 and nothing else.
         /// </summary>
         /// <remarks>
-        /// Known before it is dialled, which is what is needed: left the
+        /// Known before it is connected, which is what is needed: left the
         /// choice of the version, the line may come to an SslStream, which
         /// exports nothing to bind a password with.
         /// </remarks>
@@ -310,9 +310,9 @@ namespace cloud.charging.open.LocalController.Configuration
         /// </summary>
         /// <remarks>
         /// Everything about the socket, which is all of it: a WebSocket client
-        /// is dialled once with an address, a profile and a set of credentials,
+        /// is connected once with an address, a profile and a set of credentials,
         /// and none of those can be exchanged while it is connected. So a change
-        /// here means hanging up and dialling again - which is offered as an
+        /// here means hanging up and connecting again - which is offered as an
         /// action rather than done silently, because it drops every charging
         /// station's messages that were in flight.
         /// </remarks>
@@ -326,11 +326,11 @@ namespace cloud.charging.open.LocalController.Configuration
             if (PingEvery          != AsBuilt.PingEvery)           yield return "pingEvery";
             if (RequestTimeout     != AsBuilt.RequestTimeout)      yield return "requestTimeout";
 
-            // Told the CSMS once, in the header of the dial: the frames of a
+            // Told the CSMS once, in the header of the connection: the frames of a
             // line cannot change their shape under it.
             if (InOverlayNetwork   != AsBuilt.InOverlayNetwork)    yield return "networkingMode";
 
-            // What the WebSocket is opened over is decided when it is dialled.
+            // What the WebSocket is opened over is decided when it is connected.
             if ((HTTPVersion ?? WebSocketHTTPVersion.Auto) != (AsBuilt.HTTPVersion ?? WebSocketHTTPVersion.Auto))
                 yield return "httpVersion";
 
@@ -507,7 +507,7 @@ namespace cloud.charging.open.LocalController.Configuration
 
                 var wantsTLS = (profile ?? DefaultSecurityProfile) >= 2;
 
-                // Said here rather than discovered at the moment of dialling.
+                // Said here rather than discovered at the moment of connecting.
                 // A profile 2 connection to a ws:// address is not a connection
                 // with a small problem, it is a password sent in the clear.
                 if (wantsTLS && parsed.Scheme == "ws")

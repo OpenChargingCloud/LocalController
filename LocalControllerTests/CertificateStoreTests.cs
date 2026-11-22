@@ -127,7 +127,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(store["trustAnchors"]!.Values<String>(),         Is.EqualTo(new[] { "tlsRoot" }),
                             "the roots a server it connects to may chain to");
                 Assert.That(store["credentials"]!.Values<String>(),          Is.EqualTo(new[] { "tlsIdentity", "tlsServerIdentity" }),
-                            "what it presents in TLS itself: to a server it dials, and as its own web interface");
+                            "what it presents in TLS itself: to a server it connects to, and as its own web interface");
                 Assert.That(store["recognised"]!.Values<String>(),           Is.EqualTo(new[] { "tlsServer", "tlsIntermediate" }),
                             "a server certificate and an issuing CA are recognised, neither believed nor presented");
 

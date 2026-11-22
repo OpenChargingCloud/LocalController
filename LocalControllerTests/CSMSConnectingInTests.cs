@@ -43,9 +43,9 @@ namespace cloud.charging.open.LocalController.Tests
 {
 
     /// <summary>
-    /// A CSMS this controller cannot dial dials the controller: on the port of the charging stations,
+    /// A CSMS this controller cannot connect to connects to the controller: on the port of the charging stations,
     /// under the name a connection the other end makes is written down with, by what that connection
-    /// names. From then on it is the line up of the controller as much as one the controller dialled -
+    /// names. From then on it is the line up of the controller as much as one the controller connected to -
     /// what the stations send goes up over it, what it asks of a station goes down, and what only the
     /// CSMS asks of the controller it may ask - and the stations beside it on the same port are
     /// stations still.
@@ -53,18 +53,18 @@ namespace cloud.charging.open.LocalController.Tests
     /// <remarks>
     /// Plain WebSocket clients at both ends rather than a CSMS and charging stations of the OCPP
     /// library: what is tested is who is let in as what, and what is passed on, frame by frame. The
-    /// CSMS in the overlay network, where it says so in the header of its dial, and in the plain frame
+    /// CSMS in the overlay network, where it says so in the header of its connection, and in the plain frame
     /// of OCPP.
     /// </remarks>
     [TestFixture(false)]
     [TestFixture(true)]
-    public class CSMSDiallingInTests(Boolean Overlay) : ALocalControllerTests
+    public class CSMSConnectingInTests(Boolean Overlay) : ALocalControllerTests
     {
 
         #region (class) Line
 
         /// <summary>
-        /// One end of a WebSocket to the station port: a CSMS that dialled, or a charging station.
+        /// One end of a WebSocket to the station port: a CSMS that connected, or a charging station.
         /// It keeps what it gets, and answers what it is asked.
         /// </summary>
         private sealed class Line : IAsyncDisposable
@@ -95,9 +95,9 @@ namespace cloud.charging.open.LocalController.Tests
                 => socket.State == WebSocketState.Open;
 
             /// <summary>
-            /// Dial, and say what the door answered: 101, or what it refused with.
+            /// Connect, and say what the door answered: 101, or what it refused with.
             /// </summary>
-            public async Task<HttpStatusCode> Dial(String   URL,
+            public async Task<HttpStatusCode> Connect(String   URL,
                                                    String   Login,
                                                    String   Password,
                                                    Boolean  InTheOverlayNetwork = false)
@@ -280,7 +280,7 @@ namespace cloud.charging.open.LocalController.Tests
         #region (override) Configuration
 
         /// <summary>
-        /// A controller that reports to a CSMS and dials none, with its station server switched on, for
+        /// A controller that reports to a CSMS and connects to none, with its station server switched on, for
         /// passwords.
         /// </summary>
         protected override JObject Configuration
@@ -297,7 +297,7 @@ namespace cloud.charging.open.LocalController.Tests
                 configuration["webSocketServer"] = new JObject(
                                                   new JProperty("enabled",           true),
                                                   new JProperty("address",           "127.0.0.1"),
-                                                  new JProperty("port",              TestPorts.Free()),
+                                                  new JProperty("port",              TestPorts.Free().ToUInt16()),
                                                   new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS")),
                                                   new JProperty("subprotocols",      new JArray("ocpp2.1"))
                                               );
@@ -332,16 +332,18 @@ namespace cloud.charging.open.LocalController.Tests
             => $"ws://127.0.0.1:{Controller.OCPPServerSettings.TCPPort}/{Name}";
 
         /// <summary>
-        /// Write down the CSMS that dials: its WebSocket login with what it signs in with, and the
+        /// Write down the CSMS that connects: its WebSocket login with what it signs in with, and the
         /// connection the other end makes.
         /// </summary>
-        private String WriteDownTheCSMS(String Name = CSMSName)
+        private String WriteDownTheCSMS(User_Id? Login = null)
         {
+
+            var Name = Login ?? User_Id.Parse(CSMSName);
 
             Assert.That(Controller.WebSocketLogins.TrySetPasswordAuthentication(Name, ItsPassword, null, I18NString.Create("What the CSMS signs in with"), out var error),
                         Is.True, error);
 
-            Assert.That(Controller.Connections.TryAddConnection(I18NString.Create("The CSMS, dialling in"), URL.Parse(Door(Name)), "CSMS", true, null, null,
+            Assert.That(Controller.Connections.TryAddConnection(I18NString.Create("The CSMS, connecting"), URL.Parse(Door(Name.ToString())), "CSMS", true, null, null,
                                                                 out var id, out error,
                                                                 Inbound: true),
                         Is.True, error);
@@ -371,7 +373,7 @@ namespace cloud.charging.open.LocalController.Tests
                    : "nothing yet";
 
         private String SaidOf(String Id)
-            => Controller.DialledConnections.TryGetValue(Id, out var itSaid) ? itSaid : "nothing yet";
+            => Controller.OutboundConnections.TryGetValue(Id, out var itSaid) ? itSaid : "nothing yet";
 
         private async Task Until(Func<Boolean> Condition, String What)
         {
@@ -391,7 +393,7 @@ namespace cloud.charging.open.LocalController.Tests
         }
 
         /// <summary>
-        /// The CSMS, dialled in and the line up of the controller.
+        /// The CSMS, connected and the line up of the controller.
         /// </summary>
         private async Task<(Line CSMS, String Id)> TheCSMSIsIn()
         {
@@ -399,7 +401,7 @@ namespace cloud.charging.open.LocalController.Tests
             var id    = WriteDownTheCSMS();
             var csms  = new Line("CSMS");
 
-            Assert.That(await csms.Dial(Door(CSMSName), CSMSName, ItsPassword, Overlay), Is.EqualTo(HttpStatusCode.SwitchingProtocols), Log);
+            Assert.That(await csms.Connect(Door(CSMSName), CSMSName, ItsPassword, Overlay), Is.EqualTo(HttpStatusCode.SwitchingProtocols), Log);
 
             await Until(() => StatusOf(id) == "connected", "The CSMS being connected");
 
@@ -410,14 +412,14 @@ namespace cloud.charging.open.LocalController.Tests
         /// <summary>
         /// A charging station on the station port, signed in with its password.
         /// </summary>
-        private async Task<Line> AStation(String Id)
+        private async Task<Line> AStation(User_Id Id)
         {
 
             Assert.That(Controller.WebSocketLogins.TrySetPasswordAuthentication(Id, ThePassword, null, null, out var error), Is.True, error);
 
-            var station = new Line(Id);
+            var station = new Line(Id.ToString());
 
-            Assert.That(await station.Dial(Door(Id), Id, ThePassword), Is.EqualTo(HttpStatusCode.SwitchingProtocols), Log);
+            Assert.That(await station.Connect(Door(Id.ToString()), Id.ToString(), ThePassword), Is.EqualTo(HttpStatusCode.SwitchingProtocols), Log);
 
             return station;
 
@@ -437,14 +439,14 @@ namespace cloud.charging.open.LocalController.Tests
         #endregion
 
 
-        #region TheCSMSThatDials_IsLetInByWhatItsConnectionNames()
+        #region TheCSMSThatConnects_IsLetInByWhatItsConnectionNames()
 
         /// <summary>
         /// Written down, it is waited for. It is let in under its name with its password and with nothing
         /// else - and is the line up of the controller then, not a charging station of it.
         /// </summary>
         [Test]
-        public async Task TheCSMSThatDials_IsLetInByWhatItsConnectionNames()
+        public async Task TheCSMSThatConnects_IsLetInByWhatItsConnectionNames()
         {
 
             var id = WriteDownTheCSMS();
@@ -452,7 +454,7 @@ namespace cloud.charging.open.LocalController.Tests
             await Until(() => StatusOf(id) == "waiting", "Waiting for the CSMS");
 
             Assert.Multiple(() => {
-                Assert.That(SaidOf(id),                Does.Contain($"Waiting for '{CSMSName}' to dial in"));
+                Assert.That(SaidOf(id),                Does.Contain($"Waiting for '{CSMSName}' to connect"));
                 Assert.That(Controller.CSMSConnected,  Is.False);
             });
 
@@ -462,14 +464,14 @@ namespace cloud.charging.open.LocalController.Tests
             await using var csms      = new Line("CSMS");
 
             Assert.Multiple(async () => {
-                Assert.That(await guessing. Dial(Door(CSMSName),  CSMSName,  ThePassword, Overlay), Is.EqualTo(HttpStatusCode.Unauthorized), "a password that is not its own");
-                Assert.That(await stranger. Dial(Door("csms-02"), "csms-02", ItsPassword, Overlay), Is.EqualTo(HttpStatusCode.Unauthorized), "a name that is not written down");
-                Assert.That(await asAnother.Dial(Door(CSMSName),  "csms-02", ItsPassword, Overlay), Is.EqualTo(HttpStatusCode.Unauthorized), "another login than its name");
+                Assert.That(await guessing. Connect(Door(CSMSName),  CSMSName,  ThePassword, Overlay), Is.EqualTo(HttpStatusCode.Unauthorized), "a password that is not its own");
+                Assert.That(await stranger. Connect(Door("csms-02"), "csms-02", ItsPassword, Overlay), Is.EqualTo(HttpStatusCode.Unauthorized), "a name that is not written down");
+                Assert.That(await asAnother.Connect(Door(CSMSName),  "csms-02", ItsPassword, Overlay), Is.EqualTo(HttpStatusCode.Unauthorized), "another login than its name");
             });
 
             Assert.That(StatusOf(id), Is.EqualTo("waiting"), "something that was turned away counted as the CSMS");
 
-            Assert.That(await csms.Dial(Door(CSMSName), CSMSName, ItsPassword, Overlay), Is.EqualTo(HttpStatusCode.SwitchingProtocols), Log);
+            Assert.That(await csms.Connect(Door(CSMSName), CSMSName, ItsPassword, Overlay), Is.EqualTo(HttpStatusCode.SwitchingProtocols), Log);
 
             await Until(() => StatusOf(id) == "connected", "The CSMS being connected");
 
@@ -480,7 +482,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(state["csms"]?["connected"]?.Value<Boolean>(),          Is.True);
                 Assert.That(state["stations"]?["connected"]?.Value<Int32>(),        Is.Zero, "the CSMS is counted among the charging stations");
                 Assert.That(state["stations"]?["seen"] as JArray,                   Is.Empty, "the CSMS is listed among the charging stations");
-                Assert.That(Log,                                                    Does.Contain($"The back end '{CSMSName}' dialled this local controller"));
+                Assert.That(Log,                                                    Does.Contain($"The back end '{CSMSName}' connected to this local controller"));
                 Assert.That(Log,                                                    Does.Not.Contain(ItsPassword), "what it signed in with is in the log");
             });
 
@@ -488,20 +490,20 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region WhatOnlyTheCSMSAsks_ItAsksOverTheLineItDialled()
+        #region WhatOnlyTheCSMSAsks_ItAsksOverTheLineItConnected()
 
         /// <summary>
-        /// What only the CSMS asks of the controller - GetVariables, here - the CSMS that dialled may ask,
+        /// What only the CSMS asks of the controller - GetVariables, here - the CSMS that connected may ask,
         /// and a charging station on the same port may not.
         /// </summary>
         [Test]
-        public async Task WhatOnlyTheCSMSAsks_ItAsksOverTheLineItDialled()
+        public async Task WhatOnlyTheCSMSAsks_ItAsksOverTheLineItConnected()
         {
 
             var (csms, _) = await TheCSMSIsIn();
 
             await using var theCSMS  = csms;
-            await using var cs001    = await AStation("cs001");
+            await using var cs001    = await AStation(User_Id.Parse("cs001"));
 
             await csms.Send(Overlay
                                 ? new JArray(2, ControllerId, "CSMS", "csms-1", "GetVariables", SomeVariable)
@@ -515,7 +517,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
 
-                Assert.That(toTheCSMS?[0].Value<Int32>(),     Is.EqualTo(3), $"the CSMS that dialled was not answered: {toTheCSMS?.ToString(Formatting.None)}{Environment.NewLine}{Log}");
+                Assert.That(toTheCSMS?[0].Value<Int32>(),     Is.EqualTo(3), $"the CSMS that connected was not answered: {toTheCSMS?.ToString(Formatting.None)}{Environment.NewLine}{Log}");
                 Assert.That(PayloadOf(toTheCSMS!)?["getVariableResult"], Is.Not.Null, toTheCSMS?.ToString(Formatting.None));
 
                 if (Overlay)
@@ -533,7 +535,7 @@ namespace cloud.charging.open.LocalController.Tests
         #region WhatAStationSends_GoesUpToIt_AndWhatItAsksOfAStationGoesDown()
 
         /// <summary>
-        /// The stations' requests go up to the CSMS that dialled, and its answers come back to them; what
+        /// The stations' requests go up to the CSMS that connected, and its answers come back to them; what
         /// it asks of a station behind the controller reaches that station, and the answer the CSMS.
         /// </summary>
         [Test]
@@ -543,8 +545,8 @@ namespace cloud.charging.open.LocalController.Tests
             var (csms, _) = await TheCSMSIsIn();
 
             await using var theCSMS  = csms;
-            await using var cs001    = await AStation("cs001");
-            await using var cs002    = await AStation("cs002");
+            await using var cs001    = await AStation(User_Id.Parse("cs001"));
+            await using var cs002    = await AStation(User_Id.Parse("cs002"));
 
             #region Up
 
@@ -563,7 +565,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.Multiple(() => {
 
-                Assert.That(up,                                       Is.Not.Null, $"the station's BootNotification did not reach the CSMS that dialled.{Environment.NewLine}{Log}");
+                Assert.That(up,                                       Is.Not.Null, $"the station's BootNotification did not reach the CSMS that connected.{Environment.NewLine}{Log}");
                 Assert.That(answer?[0].Value<Int32>(),                Is.EqualTo(3), $"the station got no answer: {answer?.ToString(Formatting.None)}");
                 Assert.That(answer?[2]?["status"]?.Value<String>(),   Is.EqualTo("Accepted"));
 
@@ -620,15 +622,15 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region ItRegistersWithTheCSMSThatDials_AsAStationDoes()
+        #region ItRegistersWithTheCSMSThatConnects_AsAStationDoes()
 
         /// <summary>
-        /// A CSMS that dials is a back end like one the controller dials: once it is in, and the controller
+        /// A CSMS that connects is a back end like one the controller connects to: once it is in, and the controller
         /// is asked to, it sends it its BootNotification - who it is, and that it powered up - and stands
         /// accepted, as a charging station does: the same registration, read the same way.
         /// </summary>
         [Test]
-        public async Task ItRegistersWithTheCSMSThatDials_AsAStationDoes()
+        public async Task ItRegistersWithTheCSMSThatConnects_AsAStationDoes()
         {
 
             var (csms, _) = await TheCSMSIsIn();
@@ -640,7 +642,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var boot = await csms.Asked("BootNotification");
 
-            Assert.That(boot, Is.Not.Null, $"no BootNotification reached the CSMS that dialled.{Environment.NewLine}{Log}");
+            Assert.That(boot, Is.Not.Null, $"no BootNotification reached the CSMS that connected.{Environment.NewLine}{Log}");
 
             await Until(() => Controller.RegistrationJSON()["2.1"]?["state"]?.Value<String>() == "Accepted", "The controller being accepted");
 
@@ -666,9 +668,9 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ItsName_IsNoStations_AndAStationIsNoCSMS()
         {
 
-            Assert.That(Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out var error), Is.True, error);
+            Assert.That(Controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), ThePassword, null, null, out var error), Is.True, error);
 
-            Assert.That(Controller.Connections.TryAddPasswordAuthentication("csms-02", ItsPassword, I18NString.Create("What the controller signs in with"),
+            Assert.That(Controller.Connections.TryAddPasswordAuthentication(User_Id.Parse("csms-02"), ItsPassword, I18NString.Create("What the controller signs in with"),
                                                                     out var login, out error),
                         Is.True, error);
 
@@ -690,8 +692,8 @@ namespace cloud.charging.open.LocalController.Tests
             await using var cs001         = new Line("cs001");
 
             Assert.Multiple(async () => {
-                Assert.That(await asTheCSMS.Dial(Door(CSMSName), "cs001", ThePassword), Is.Not.EqualTo(HttpStatusCode.SwitchingProtocols), "a station's password opened the name of the CSMS");
-                Assert.That(await cs001.    Dial(Door("cs001"),  "cs001", ThePassword), Is.EqualTo(HttpStatusCode.SwitchingProtocols),     "a station is not let in beside the CSMS");
+                Assert.That(await asTheCSMS.Connect(Door(CSMSName), "cs001", ThePassword), Is.Not.EqualTo(HttpStatusCode.SwitchingProtocols), "a station's password opened the name of the CSMS");
+                Assert.That(await cs001.    Connect(Door("cs001"),  "cs001", ThePassword), Is.EqualTo(HttpStatusCode.SwitchingProtocols),     "a station is not let in beside the CSMS");
             });
 
             await Until(() => Controller.StateJSON()["stations"]?["connected"]?.Value<Int32>() == 1, "The station being connected");
@@ -725,14 +727,14 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(async () => {
                 Assert.That(SaidOf(id),                                                               Does.Contain("is not let in"));
                 Assert.That(Controller.CSMSConnected,                                                 Is.False);
-                Assert.That(await turnedAway.Dial(Door(CSMSName), CSMSName, ItsPassword, Overlay),    Is.EqualTo(HttpStatusCode.Unauthorized));
+                Assert.That(await turnedAway.Connect(Door(CSMSName), CSMSName, ItsPassword, Overlay),    Is.EqualTo(HttpStatusCode.Unauthorized));
             });
 
             LetIn(id, true);
 
             await using var again = new Line("CSMS");
 
-            Assert.That(await again.Dial(Door(CSMSName), CSMSName, ItsPassword, Overlay), Is.EqualTo(HttpStatusCode.SwitchingProtocols), Log);
+            Assert.That(await again.Connect(Door(CSMSName), CSMSName, ItsPassword, Overlay), Is.EqualTo(HttpStatusCode.SwitchingProtocols), Log);
 
             await Until(() => StatusOf(id) == "connected", "The CSMS being connected again");
 
@@ -745,7 +747,7 @@ namespace cloud.charging.open.LocalController.Tests
         /// <summary>
         /// The CSMS writes its own identification into what it asks, not the name it came under: the
         /// answers of the controller and of a station behind it find it all the same, over the line it
-        /// dialled. Let go of, that identification leads nowhere any more.
+        /// connected. Let go of, that identification leads nowhere any more.
         /// </summary>
         [Test]
         public async Task ItsAnswers_FindItUnderTheIdentificationItAsksWith()
@@ -756,7 +758,7 @@ namespace cloud.charging.open.LocalController.Tests
             var (csms, id) = await TheCSMSIsIn();
 
             await using var theCSMS  = csms;
-            await using var cs002    = await AStation("cs002");
+            await using var cs002    = await AStation(User_Id.Parse("cs002"));
 
             // In the frame of the overlay network, which the controller reads in either mode.
             await csms.Send(new JArray(2, ControllerId, ItsIdentification, "csms-1", "GetVariables",        SomeVariable));

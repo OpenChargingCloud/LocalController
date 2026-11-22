@@ -71,7 +71,7 @@ namespace cloud.charging.open.LocalController.Tests
                    new JProperty("webSocketServer", new JObject(
                        new JProperty("enabled",           true),
                        new JProperty("address",           "127.0.0.1"),
-                       new JProperty("port",              TestPorts.Free()),
+                       new JProperty("port",              TestPorts.Free().ToUInt16()),
                        new JProperty("clientAuthentication",  new JArray("httpAuthWithoutTLS")),
                        new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1"))
                    ))
@@ -161,7 +161,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStationWithAPasswordGetsIn()
         {
 
-            Assert.That(Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, I18NString.Create("Ladepunkt 1"), out var error),
+            Assert.That(Controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), ThePassword, null, I18NString.Create("Ladepunkt 1"), out var error),
                         Is.True, error);
 
             var (connected, why, subprotocol) = await Connect("cs001", ThePassword);
@@ -196,7 +196,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AWrongPasswordIsTurnedAway()
         {
 
-            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), ThePassword, null, null, out _);
 
             var (connected, _, _) = await Connect("cs001", "not-the-password-at-all");
 
@@ -212,7 +212,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStationWithNoCredentialsAtAllIsTurnedAway()
         {
 
-            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), ThePassword, null, null, out _);
 
             using var client  = new ClientWebSocket();
 
@@ -247,13 +247,13 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStationThatWasSwitchedOffIsTurnedAwayAtOnce()
         {
 
-            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), ThePassword, null, null, out _);
 
             var (before, why, _) = await Connect("cs001", ThePassword);
 
             Assert.That(before, Is.True, why);
 
-            Assert.That(Controller.WebSocketLogins.TrySetEnabled("cs001", false, out var error), Is.True, error);
+            Assert.That(Controller.WebSocketLogins.TrySetEnabled(User_Id.Parse("cs001"), false, out var error), Is.True, error);
 
             var (after, _, _) = await Connect("cs001", ThePassword);
 
@@ -270,8 +270,8 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStationThatWasRemovedIsTurnedAwayAtOnce()
         {
 
-            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
-            Controller.WebSocketLogins.TryRemove     ("cs001", out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TryRemove     (User_Id.Parse("cs001"), out _);
 
             var (connected, _, _) = await Connect("cs001", ThePassword);
 
@@ -287,7 +287,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AStationSpeakingAnotherOCPPVersionIsTurnedAway()
         {
 
-            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), ThePassword, null, null, out _);
 
             var (connected, _, _) = await Connect("cs001", ThePassword, "ocpp1.6");
 
@@ -308,7 +308,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task WhatHappenedIsInTheLog()
         {
 
-            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), ThePassword, null, null, out _);
 
             await Connect("cs001", ThePassword);
             await Connect("cs404", ThePassword);
@@ -339,7 +339,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task SwitchingTheServerOffStopsLettingAnybodyIn()
         {
 
-            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), ThePassword, null, null, out _);
 
             Assert.That(Controller.TryUpdateOCPPServerConfiguration(
                             new JObject(new JProperty("enabled", false)),
@@ -368,7 +368,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task SwitchingTheServerBackOnLetsThemInAgain()
         {
 
-            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), ThePassword, null, null, out _);
 
             Controller.TryUpdateOCPPServerConfiguration(new JObject(new JProperty("enabled", false)), out _);
 
@@ -437,7 +437,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task StoppingTheControllerLetsGoOfThePort()
         {
 
-            Controller.WebSocketLogins.TrySetPasswordAuthentication("cs001", ThePassword, null, null, out _);
+            Controller.WebSocketLogins.TrySetPasswordAuthentication(User_Id.Parse("cs001"), ThePassword, null, null, out _);
 
             using var client  = new ClientWebSocket();
             client.Options.AddSubProtocol("ocpp2.1");

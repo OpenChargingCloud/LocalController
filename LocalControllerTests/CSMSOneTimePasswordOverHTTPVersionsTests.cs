@@ -18,6 +18,7 @@
 #region Usings
 
 using System.Text;
+using org.GraphDefined.Vanaheimr.Hermod;
 using org.GraphDefined.Vanaheimr.Illias;
 
 using Newtonsoft.Json.Linq;
@@ -39,14 +40,14 @@ namespace cloud.charging.open.LocalController.Tests
     /// <summary>
     /// The line up to the CSMS with a one-time token, over the versions of
     /// HTTP a connection of a charging station may name as well: a local
-    /// controller that dials a second one standing in for the CSMS, over TLS,
+    /// controller that connects to a second one standing in for the CSMS, over TLS,
     /// security profile 2.
     /// </summary>
     /// <remarks>
     /// What a charging station's connection can do, the controller's line to
     /// its CSMS can: name the version of HTTP its WebSocket is opened over,
     /// and bind its one-time token to the TLS session where that is HTTP/3 -
-    /// and where it is not, not dial rather than send less than was asked for.
+    /// and where it is not, not connect rather than send less than was asked for.
     /// </remarks>
     public class CSMSOneTimePasswordOverHTTPVersionsTests
     {
@@ -62,7 +63,7 @@ namespace cloud.charging.open.LocalController.Tests
         private String           downstreamDirectory  = default!;
         private LocalController  upstream             = default!;
         private LocalController? downstream;
-        private UInt16           csmsPort;
+        private IPPort           csmsPort;
 
         #endregion
 
@@ -99,7 +100,7 @@ namespace cloud.charging.open.LocalController.Tests
                                               new JProperty("webSocketServer", new JObject(
                                                   new JProperty("enabled",           true),
                                                   new JProperty("address",           "127.0.0.1"),
-                                                  new JProperty("port",              csmsPort),
+                                                  new JProperty("port",              csmsPort.ToUInt16()),
                                                   new JProperty("clientAuthentication",  new JArray("httpAuthOverTLS")),
                                                   new JProperty("reachableAs",       new JArray("127.0.0.1")),
                                                   new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1")),
@@ -108,7 +109,7 @@ namespace cloud.charging.open.LocalController.Tests
                                           )
                                       );
 
-                           if (!made.WebSocketLogins.TrySetTOTPAuthentication("lc002", TheSharedSecret, null, null, null, null, null, I18NString.Create("The controller below"), out var error))
+                           if (!made.WebSocketLogins.TrySetTOTPAuthentication(User_Id.Parse("lc002"), TheSharedSecret, null, null, null, null, null, I18NString.Create("The controller below"), out var error))
                                throw new InvalidOperationException($"The test's own upstream TOTP login was refused: {error}");
 
                            return made;
@@ -139,14 +140,14 @@ namespace cloud.charging.open.LocalController.Tests
         #endregion
 
 
-        #region (private) AControllerThatDials(HTTPVersion, Bound, SharedSecret)
+        #region (private) AControllerThatConnects(HTTPVersion, Bound, SharedSecret)
 
         /// <summary>
         /// The controller below, believing the CSMS by the site's authority,
-        /// with a one-time token and no password, dialling over the version
+        /// with a one-time token and no password, connecting over the version
         /// of HTTP it is told - or over none it was told.
         /// </summary>
-        private async Task<LocalController> AControllerThatDials(String?  HTTPVersion,
+        private async Task<LocalController> AControllerThatConnects(String?  HTTPVersion,
                                                                  Boolean  Bound         = false,
                                                                  String   SharedSecret  = TheSharedSecret)
         {
@@ -176,7 +177,7 @@ namespace cloud.charging.open.LocalController.Tests
                                                            out _, out var rootError),
                             Is.True, rootError);
 
-                Assert.That(controller.TrySetUplinkTOTP("lc002", SharedSecret, null, null, null, null, out var tokenError, out _, Bound),
+                Assert.That(controller.TrySetUplinkTOTP(User_Id.Parse("lc002"), SharedSecret, null, null, null, null, out var tokenError, out _, Bound),
                             Is.True, tokenError);
 
                 var csms = new JObject(
@@ -215,7 +216,7 @@ namespace cloud.charging.open.LocalController.Tests
         /// not be there to have - and a WebSocket over HTTP/3 comes to the
         /// UDP port of the number of the TCP one.
         /// </summary>
-        private static UInt16 APortFreeForBoth()
+        private static IPPort APortFreeForBoth()
         {
 
             for (var attempt = 0; attempt < 200; attempt++)
@@ -233,7 +234,7 @@ namespace cloud.charging.open.LocalController.Tests
                     tcp4.Start();
                     tcp4.Stop();
 
-                    return (UInt16) port;
+                    return IPPort.Parse((UInt16) port);
 
                 }
                 catch (System.Net.Sockets.SocketException)
@@ -309,7 +310,7 @@ namespace cloud.charging.open.LocalController.Tests
             if (Named == "3")
                 TheCSMSTakesHTTP3();
 
-            var controller = await AControllerThatDials(Named);
+            var controller = await AControllerThatConnects(Named);
 
             await UntilItIsThrough(controller);
 
@@ -338,11 +339,11 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ATokenBoundToTheLineSignsItInOverHTTP3()
         {
 
-            Assert.That(upstream.WebSocketLogins.TrySetTOTPBinding("lc002", true, out var bindingError), Is.True, bindingError);
+            Assert.That(upstream.WebSocketLogins.TrySetTOTPBinding(User_Id.Parse("lc002"), true, out var bindingError), Is.True, bindingError);
 
             TheCSMSTakesHTTP3();
 
-            var controller = await AControllerThatDials("3", Bound: true);
+            var controller = await AControllerThatConnects("3", Bound: true);
 
             await UntilItIsThrough(controller);
 
@@ -366,11 +367,11 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ARawTokenIsRefusedByACSMSThatAsksForTheBinding()
         {
 
-            Assert.That(upstream.WebSocketLogins.TrySetTOTPBinding("lc002", true, out var bindingError), Is.True, bindingError);
+            Assert.That(upstream.WebSocketLogins.TrySetTOTPBinding(User_Id.Parse("lc002"), true, out var bindingError), Is.True, bindingError);
 
             TheCSMSTakesHTTP3();
 
-            var controller = await AControllerThatDials("3");
+            var controller = await AControllerThatConnects("3");
 
             await UntilItSaysWhy(controller);
 
@@ -388,7 +389,7 @@ namespace cloud.charging.open.LocalController.Tests
         /// <summary>
         /// Left the choice of the version, or told HTTP/1.1 or HTTP/2, the
         /// line may be, or is, one whose TLS exports nothing: it is not
-        /// dialled, and says that naming HTTP/3 would do - rather than
+        /// connected, and says that naming HTTP/3 would do - rather than
         /// sending the token unbound.
         /// </summary>
         [TestCase(null)]
@@ -398,7 +399,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task ATokenToBeBoundIsNotConnectedWhereTheLineDoesNotNameHTTP3(String? Named)
         {
 
-            var controller = await AControllerThatDials(Named, Bound: true);
+            var controller = await AControllerThatConnects(Named, Bound: true);
 
             await UntilItSaysWhy(controller);
 
@@ -406,7 +407,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(controller.CSMSConnected,    Is.False);
                 Assert.That(controller.CSMSLastProblem,  Does.Contain("Not connected").And.Contain("Name HTTP/3"));
                 Assert.That(upstream.StationServer?.WebSocketConnections.Any(), Is.Not.True,
-                            "The CSMS was dialled all the same.");
+                            "The CSMS was connected to all the same.");
             });
 
         }
@@ -419,7 +420,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AVersionThatIsNoneIsRefused_AndHTTP3WithoutTLS()
         {
 
-            var controller = await AControllerThatDials(null);
+            var controller = await AControllerThatConnects(null);
 
             var noVersion  = controller.TryConfigureUplink(new JObject(new JProperty("httpVersion", "4")), out var noVersionError);
 

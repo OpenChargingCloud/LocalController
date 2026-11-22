@@ -22,11 +22,11 @@ import { setConnectionsResource, setNodeNoun, setNodeTraits } from '@ocpp/settin
 // The lines up to the CSMS are connections, drawn by the pages a charging
 // station draws its own with. Here whoever may read or change the CSMS
 // section may read or change them; the pages speak of a local controller,
-// which is one OCPP node whatever it speaks upwards, and is dialled itself,
+// which is one OCPP node whatever it speaks upwards, and is itself connected to,
 // by its charging stations.
 setConnectionsResource('csms');
 setNodeNoun('local controller');
-setNodeTraits({ oneNodePerOCPPVersion: false, isDialled: true });
+setNodeTraits({ oneNodePerOCPPVersion: false, isConnectedTo: true });
 
 // What a local controller has pages for beside what every node has: whether
 // it reports to a CSMS, the lines up to it with what they sign in with,
@@ -80,7 +80,7 @@ startNode({
             csmsClientCertificate:  { label: 'signs in to the CSMS', title: 'Chosen on the CSMS page; deleted only once another one is' }
         },
 
-        // And who it is where it dials over ssh://: the keys it signs in
+        // And who it is where it connects over ssh://: the keys it signs in
         // with, which are no certificates and stand among what it presents
         // all the same.
         sections: context => [ sshKeysSection(context) ],

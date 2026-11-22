@@ -78,16 +78,16 @@ namespace cloud.charging.open.LocalController
 
             => new (this,
                     CSMSNames,
-                    DialsOCPP2_1: () => csmsSettings.URL is { Length: > 0 },
-                    DialsOCPP1_6: () => false);
+                    ConnectsOCPP2_1: () => csmsSettings.URL is { Length: > 0 },
+                    ConnectsOCPP1_6: () => false);
 
         #endregion
 
         #region (private) CSMSNames()
 
         /// <summary>
-        /// The name the line up to the CSMS is dialled by - none where it is
-        /// dialled by an address, or where there is no CSMS: what a change of the
+        /// The name the line up to the CSMS is connected by - none where it is
+        /// connected by an address, or where there is no CSMS: what a change of the
         /// name servers through OCPP must keep resolving.
         /// </summary>
         private IEnumerable<String> CSMSNames()

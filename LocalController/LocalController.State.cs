@@ -24,6 +24,7 @@ using Newtonsoft.Json.Linq;
 using org.GraphDefined.Vanaheimr.Hermod.WebSocket;
 
 using cloud.charging.open.protocols.WWCP.NetworkingNode;
+using cloud.charging.open.protocols.WWCP.Node.Connections;
 using cloud.charging.open.protocols.OCPP.SSH;
 
 using OCPPWebSockets = cloud.charging.open.protocols.OCPP.WebSockets;
@@ -42,7 +43,7 @@ namespace cloud.charging.open.LocalController
     /// </summary>
     /// <remarks>
     /// Apart, because somebody who is to see that a station has gone quiet is
-    /// not thereby somebody who is to read where this controller dials, whom
+    /// not thereby somebody who is to read where this controller connects to, whom
     /// it lets in and what it signs in with: the support reads this and none
     /// of the configuration. Nothing here says an address, a login or a
     /// secret, and no sentence of a problem either, which may name them.
@@ -130,16 +131,29 @@ namespace cloud.charging.open.LocalController
         {
 
             Server.OnNetworkingNodeConnectionAccepted += (timestamp, transport, connection, networkingNodeId, networkingMode, eventTrackingId, cancellationToken) => {
-                Seen(networkingNodeId?.ToString(), OverSSH, Connecting: true);
+                if (!IsABackEndThatConnects(networkingNodeId?.ToString()))
+                    Seen(networkingNodeId?.ToString(), OverSSH, Connecting: true);
                 return Task.CompletedTask;
             };
 
             Server.OnJSONMessageReceived += (timestamp, transport, connection, messageTimestamp, eventTrackingId, sourceNodeId, message, cancellationToken) => {
-                Seen(connection.NetworkingNodeIdOf()?.ToString(), OverSSH, Connecting: false);
+                if (!IsABackEndThatConnects(connection.NetworkingNodeIdOf()?.ToString()))
+                    Seen(connection.NetworkingNodeIdOf()?.ToString(), OverSSH, Connecting: false);
                 return Task.CompletedTask;
             };
 
         }
+
+        /// <summary>
+        /// Whether the given name is the one a back end comes under that connects to
+        /// this controller - a CSMS over SSH, say -, and so no charging station:
+        /// over SSH that is told by nothing but the name.
+        /// </summary>
+        private Boolean IsABackEndThatConnects(String? Name)
+
+            => Name is not null &&
+               (InboundConnectionOf(OCPPVersion.OCPP2_1, Name) ??
+                InboundConnectionOf(OCPPVersion.OCPP1_6, Name)) is not null;
 
         /// <summary>
         /// The charging station a connection of the station port was let in as,
@@ -168,7 +182,8 @@ namespace cloud.charging.open.LocalController
                     connected[station] = OverWebSocket;
 
             foreach (var networkingNodeId in StationSSHServer?.ConnectedNetworkingNodeIds ?? [])
-                connected[networkingNodeId.ToString()] = OverSSH;
+                if (!IsABackEndThatConnects(networkingNodeId.ToString()))
+                    connected[networkingNodeId.ToString()] = OverSSH;
 
             var stations   = stationsSeen.
                                  OrderBy(seen => seen.Key, StringComparer.Ordinal).

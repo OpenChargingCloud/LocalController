@@ -83,7 +83,7 @@ namespace cloud.charging.open.LocalController.Tests
                 File.WriteAllText(configFile, Configuration.ToString());
 
             return new LocalController(
-                       HTTPPort:         IPPort.Parse(TestPorts.Free()),
+                       HTTPPort:         TestPorts.Free(),
                        AccountsPath:     Path.Combine(Directory, "accounts"),
                        ConfigFile:       new WWCPConfigFile(configFile),
                        LogToConsole:     LogToConsole,

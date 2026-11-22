@@ -17,7 +17,7 @@
 
     // "@node/..." is what every kind of node shares, in the WWCP_Node next to
     // this repository - where webpack.config.js's alias finds it too - and
-    // "@ocpp/..." what the nodes that dial a CSMS share, the pages of their
+    // "@ocpp/..." what the nodes that connect to a CSMS share, the pages of their
     // connections, in the WWCP_OCPP_Node of the WWCP_OCPP next to it. lit-html,
     // which the shared files draw with, is this directory's, as webpack's
     // resolve.modules finds it.

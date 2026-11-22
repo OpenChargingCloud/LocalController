@@ -182,7 +182,7 @@ namespace cloud.charging.open.LocalController.Tests
             var waiting  = AKeyOfBefore("lc002", _   => null);
 
             // The controller of today finds them: building it is what moves
-            // them, before anything dials.
+            // them, before anything connects.
             controller = TestControllers.New(directory, TestControllers.Offline);
 
             var moved = IdOf(certificate!);

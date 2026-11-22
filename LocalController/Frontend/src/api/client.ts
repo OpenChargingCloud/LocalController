@@ -20,7 +20,7 @@ import { stationServerAPI }  from '@ocpp/api/stationServer';
 // beyond every node's, the kinds its store keeps, and its own routes.
 export * from '@node/api/client';
 
-// What a node that dials its back ends keeps - the lines up to the CSMS as
+// What a node that connects to its back ends keeps - the lines up to the CSMS as
 // connections, and what they sign in with - and how it is
 // asked are the same on a charging station, and are WWCP_OCPP_Node's: named
 // here as well. What the charging station server keeps - its section, its
@@ -186,7 +186,7 @@ export const api = {
     },
 
     // The lines up to the CSMS and what they sign in with - api.connections
-    // and api.authentications - as every node that dials has them.
+    // and api.authentications - as every node that connects has them.
     ...connectionsAPI,
 
     // The charging station server, its certificates, the chains it accepts

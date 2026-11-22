@@ -66,7 +66,7 @@ namespace cloud.charging.open.LocalController.Tests
         public String   VENName           { get; }
         public String   Secret            { get; set; }
         public Int64    TokenLifetime     { get; set; } = 3600;
-        public UInt16   Port              { get; }
+        public IPPort   Port              { get; }
 
         public String   VTNURL
             => $"http://127.0.0.1:{Port}/openadr3/";
@@ -95,7 +95,7 @@ namespace cloud.charging.open.LocalController.Tests
 
         #region Constructor(s)
 
-        private FakeVTN(String VENName, String Secret, UInt16 Port)
+        private FakeVTN(String VENName, String Secret, IPPort Port)
         {
 
             this.VENName  = VENName;
@@ -103,7 +103,7 @@ namespace cloud.charging.open.LocalController.Tests
             this.Port     = Port;
 
             server        = new HTTPServer(IPAddress: IPv4Address.Localhost,
-                                           TCPPort:   IPPort.Parse(Port));
+                                           TCPPort:   Port);
 
             var api       = new HTTPAPI(server, RootPath: HTTPPath.Parse("/openadr3"));
             var root      = HTTPPath.Root;

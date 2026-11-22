@@ -17,6 +17,7 @@
 
 #region Usings
 
+using org.GraphDefined.Vanaheimr.Hermod;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -65,7 +66,7 @@ namespace cloud.charging.open.LocalController.Tests
         private String           downstreamDirectory  = default!;
         private LocalController  upstream             = default!;
         private LocalController? downstream;
-        private UInt16           csmsPort;
+        private IPPort           csmsPort;
 
         #endregion
 
@@ -106,7 +107,7 @@ namespace cloud.charging.open.LocalController.Tests
                                               new JProperty("webSocketServer", new JObject(
                                                   new JProperty("enabled",           true),
                                                   new JProperty("address",           "127.0.0.1"),
-                                                  new JProperty("port",              csmsPort),
+                                                  new JProperty("port",              csmsPort.ToUInt16()),
                                                   new JProperty("clientAuthentication",  new JArray("tlsClientCertificate")),
                                                   new JProperty("reachableAs",       new JArray("127.0.0.1")),
                                                   new JProperty("subprotocols",      new JArray("ocpp2.1", "ocpp2.0.1"))
@@ -175,16 +176,16 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
-        #region (private) AControllerThatDials(Identity, Root, Configure)
+        #region (private) AControllerThatConnects(Identity, Root, Configure)
 
         /// <summary>
-        /// The controller below, set to dial the one above with security profile
+        /// The controller below, set to connect to the one above with security profile
         /// 3: built, its store given what the test says, then started.
         /// </summary>
         /// <param name="Identity">Whether its store holds an identity the site's authority issued, chosen for the CSMS.</param>
         /// <param name="Root">Whether its store holds the site's authority as a TLS root for every use.</param>
         /// <param name="Chosen">What it names as its identity, where that is not the one it holds.</param>
-        private async Task<LocalController> AControllerThatDials(Boolean                     Identity   = true,
+        private async Task<LocalController> AControllerThatConnects(Boolean                     Identity   = true,
                                                                  Boolean                     Root       = true,
                                                                  String?                     Chosen     = null,
                                                                  Action<LocalController>?    Also       = null)
@@ -233,7 +234,7 @@ namespace cloud.charging.open.LocalController.Tests
                 Also?.Invoke(controller);
 
                 // The controller's node id as the last segment of the path, as
-                // OCPP has a charging station dial its CSMS. With a password it
+                // OCPP has a charging station connect to its CSMS. With a password it
                 // says who it is by its user name; with a certificate alone,
                 // Hermod does not hand the certificate on to the request the CSMS
                 // reads the node id from, and the path is what is left.
@@ -332,7 +333,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AControllerSignsInWithItsOwnIdentityAndBelievesTheCSMSByItsStore()
         {
 
-            var controller = await AControllerThatDials();
+            var controller = await AControllerThatConnects();
 
             await UntilItIsThrough(controller);
 
@@ -379,7 +380,7 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AControllerThatDoesNotBelieveTheCSMSSaysWhy()
         {
 
-            var controller = await AControllerThatDials(Root: false);
+            var controller = await AControllerThatConnects(Root: false);
             var noneStays  = await NoConnectionStays();
 
             Assert.Multiple(() => {
@@ -399,17 +400,17 @@ namespace cloud.charging.open.LocalController.Tests
         public async Task AnIdentityThatIsSwitchedOffIsSaidAndNotConnected()
         {
 
-            var controller = await AControllerThatDials(
-                                 Also: dialling => {
-                                     var identity = dialling.Certificates.ByKind(CertificateKind.TLSIdentity).Single();
-                                     Assert.That(dialling.Certificates.SetActive(identity.Id, false, out _, out var error), Is.True, error);
+            var controller = await AControllerThatConnects(
+                                 Also: connecting => {
+                                     var identity = connecting.Certificates.ByKind(CertificateKind.TLSIdentity).Single();
+                                     Assert.That(connecting.Certificates.SetActive(identity.Id, false, out _, out var error), Is.True, error);
                                  }
                              );
 
             Assert.Multiple(() => {
                 Assert.That(controller.CSMSConnected,      Is.False);
                 Assert.That(controller.CSMSLastProblem,    Does.Contain("'Towards the CSMS'").And.Contain("is switched off"));
-                Assert.That(controller.Node.OCPPWebSocketClients.Any(), Is.False, "It was dialled with an identity nobody may use.");
+                Assert.That(controller.Node.OCPPWebSocketClients.Any(), Is.False, "It was connected with an identity nobody may use.");
             });
 
         }
@@ -424,7 +425,7 @@ namespace cloud.charging.open.LocalController.Tests
 
             var root       = CertificateEntry.ThumbprintOf(ca.Certificate)[..16];
 
-            var controller = await AControllerThatDials(Identity: false, Chosen: root);
+            var controller = await AControllerThatConnects(Identity: false, Chosen: root);
 
             // What it is said to be instead is its kind with its article: it
             // was the whole of Describe() after an "a" - "but a TLS root -

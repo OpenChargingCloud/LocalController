@@ -166,8 +166,8 @@ namespace cloud.charging.open.LocalController.Tests
                        _                   => new JObject()
                    };
 
-            public UInt16 Port
-                => Server.IPPort.ToUInt16();
+            public IPPort Port
+                => Server.IPPort;
 
             public Int32 Connections
                 => Server.WebSocketConnections.Count();
@@ -294,7 +294,7 @@ namespace cloud.charging.open.LocalController.Tests
         #region (private) AControllerThatLearnsTheKeyOfItsCSMS(ProbationSeconds = null)
 
         /// <summary>
-        /// The CSMS, and the controller below it: set to dial it over wss:// with a password, to trust its
+        /// The CSMS, and the controller below it: set to connect to it over wss:// with a password, to trust its
         /// key on first use, and to believe the pin sets this test's signer signs - then started.
         /// </summary>
         /// <param name="ProbationSeconds">How long a learned key pin is on probation.</param>
@@ -319,7 +319,7 @@ namespace cloud.charging.open.LocalController.Tests
                                             )
                                         );
 
-                             Assert.That(made.TrySetUplinkPassword("lc002", "a-password-of-the-line-to-the-csms", out var loginError), Is.True, loginError);
+                             Assert.That(made.TrySetUplinkPassword(User_Id.Parse("lc002"), "a-password-of-the-line-to-the-csms", out var loginError), Is.True, loginError);
 
                              Assert.That(made.TrySetUplinkKeyPinTrust(new ServerKeyPinSettings(RawPublicKeys, "Key", ProbationSeconds), out var trustError), Is.True, trustError);
 
@@ -604,7 +604,7 @@ namespace cloud.charging.open.LocalController.Tests
         /// <summary>
         /// "Require" is a value of the variable RawPublicKeys as "Prefer" and "Off" are: a CSMS whose key
         /// was confirmed asks for it in a signed SetVariables, it is taken and written down - the line
-        /// offers raw public keys, so it is not one that could not be dialled any more.
+        /// offers raw public keys, so it is not one that could not be connected to any more.
         /// </summary>
         [Test]
         public async Task TheCSMSMayAskForRawPublicKeysAlone()
@@ -667,7 +667,7 @@ namespace cloud.charging.open.LocalController.Tests
         #region ALineThatRequiresRawPublicKeys_DoesNotBelieveACSMSThatShowsACertificate()
 
         /// <summary>
-        /// A line that requires raw public keys is dialled - and a CSMS that shows a certificate is turned
+        /// A line that requires raw public keys is connected - and a CSMS that shows a certificate is turned
         /// away, whatever key is in it: nothing is learned, and the controller says why it has no line.
         /// </summary>
         [Test]
@@ -677,7 +677,7 @@ namespace cloud.charging.open.LocalController.Tests
             await AControllerThatLearnsTheKeyOfItsCSMS(RawPublicKeys: "Require", GetsThrough: false);
 
             await Until(() => controller!.UplinkTrust()?.LastValidation is not null,
-                        "The controller dialled its CSMS",
+                        "The controller connected to its CSMS",
                         () => controller!.CSMSLastProblem ?? "");
 
             var trust = controller!.UplinkTrust();
@@ -702,7 +702,7 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// A signed pin set without the key pin learned refuses a CSMS whose key came raw as it refuses one
-        /// whose key came in a certificate: the line is closed, and dialled again the raw key is turned away
+        /// whose key came in a certificate: the line is closed, and connected again the raw key is turned away
         /// by the pins that were signed.
         /// </summary>
         [Test]
@@ -727,9 +727,9 @@ namespace cloud.charging.open.LocalController.Tests
             await Until(() => !controller!.CSMSConnected && csms.Connections == 0, "The line was closed",
                         () => $"heard: {csms.Heard()}; said: {controller!.CSMSLastProblem}");
 
-            // Dialled again, with its back-off: the key that was learned is none of those pinned now.
+            // Connected again, with its back-off: the key that was learned is none of those pinned now.
             await Until(() => controller!.UplinkTrust()?.LastValidation is { Outcome: KeyPinOutcome.Refused },
-                        "The CSMS was dialled again and turned away",
+                        "The CSMS was connected to again and turned away",
                         () => controller!.CSMSLastProblem ?? "");
 
             var refused = controller!.UplinkTrust()!.LastValidation!;
@@ -750,7 +750,7 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// A signed pin set without the key pin learned: that CSMS is not the one its operator knows. The
-        /// pin set is answered, the line is closed, and it is not believed when it is dialled again.
+        /// pin set is answered, the line is closed, and it is not believed when it is connected to again.
         /// </summary>
         [Test]
         public async Task APinSetWithAnotherKey_RefusesTheCSMS()

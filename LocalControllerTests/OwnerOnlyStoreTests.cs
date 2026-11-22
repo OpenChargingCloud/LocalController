@@ -25,6 +25,7 @@ using cloud.charging.open.LocalController.OCPP;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
 using cloud.charging.open.protocols.WWCP.Node.Certificates;
 using cloud.charging.open.protocols.WWCP.Node.Configuration;
+using cloud.charging.open.protocols.WWCP.Node.Logins;
 
 #endregion
 

@@ -33,7 +33,7 @@ namespace cloud.charging.open.LocalController.Tests
     /// be written.
     /// </summary>
     /// <remarks>
-    /// The controller under here dials no CSMS: nothing it is told here
+    /// The controller under here connects to no CSMS: nothing it is told here
     /// switches the connection on.
     /// </remarks>
     public class CSMSAPITests : ALocalControllerTests

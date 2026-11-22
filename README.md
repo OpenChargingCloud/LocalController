@@ -45,7 +45,7 @@ CSMS and the charging station port on top.
 | SSH server | whether the command line is served over SSH, on which port, and whether passwords open it - in effect at once; its host key, who is connected, the keys of the accounts and what it offers | `ssh:edit` |
 | Your account (the name at the foot of the menu) | your own name, e-mail address and how to reach you; your API keys and SSH keys - added, switched off and on, removed | your own account, whatever the role |
 | CSMS connection | whether the controller reports to a CSMS at all, and how its lines up are kept: pings, timeouts, the TLS identity a line holds up where it names none | `csms:edit` |
-| Connections | the lines up to the CSMS: where each dials - or, where **The other end dials** is ticked, where the CSMS dials the controller -, what it signs in with, how its server is believed, how it is doing - and a test of one; on its tab **Credentials**, the passwords and one-time tokens the connections sign in with | `csms:edit`, `csms:run` |
+| Connections | the lines up to the CSMS: where each connects to - or, where **The other end connects** is ticked, where the CSMS connects to the controller -, what it signs in with, how its server is believed, how it is doing - and a test of one; on its tab **Credentials**, the passwords and one-time tokens the connections sign in with | `csms:edit`, `csms:run` |
 | Certificate store | the TLS roots of the servers the controller connects to, and their certificates - certificates alone, no private key | `certificates:edit` |
 | Client identities | who the controller is as a client, each with its private key: the TLS identities its lines up to the CSMS hold up - brought with their key, or whose key is made here (tab **New key**) and waits for its certificate - and, under **SSH keys**, the keys an `ssh://` line signs in with beside the controller's own | `certificates:edit`; `certificates:run` to make a key and bring its certificate, and to make or remove an SSH key |
 | Charging stations | the server the charging stations connect to: its port, how a station may authenticate (`clientAuthentication`, OCPP's security profiles), the names it is reachable as, what it logs, and whether they may connect over SSH as well | `stations:edit` |
@@ -86,20 +86,20 @@ configuration file - and looked after on the Connections pages or with
 `/api/v1/configuration/connections`, `.../authentications` and
 `.../sshKeys`; `GET /api/v1/status/connections` says how each is doing,
 and `POST .../connections/test` tries one without writing anything. It is the
-code a charging station dials with (WWCP_Node's `WWCPNode`, over OCPP by WWCP_OCPP_Node's `OCPPDialling`), so
+code a charging station connects with (WWCP_Node's `WWCPNode`, over OCPP by WWCP_OCPP_Node's `OCPPConnecting`), so
 what a connection can do there it can do here. A controller may have several:
-each is dialled by itself, and the next endpoint of a peer where one cannot be
-reached. The oldest that dials by itself leads to the CSMS in charge, which is
+each is connected by itself, and the next endpoint of a peer where one cannot be
+reached. The oldest that connects by itself leads to the CSMS in charge, which is
 told what the controller says of its own accord.
 
 The station port is shared code as well: the `webSocketServer` section, the
 charging stations that may sign in and their login groups
 (`websocket-logins.json`), the chains a station's certificate may lead to
-(`ocpp-client-trust/`), OCPP over SSH, a CSMS that dials on the same port,
+(`ocpp-client-trust/`), OCPP over SSH, a CSMS that connects on the same port,
 the routes below `/api/v1/configuration/ocpp-server` and the three pages that
 look after them are WWCP_OCPP_Node's `OCPPServingNode`, which a gateway has
 too. What is the controller's own is what it does with them: whether a CSMS
-may dial it at all (only while it reports to one), the CSMS it tells of a
+may connect to it at all (only while it reports to one), the CSMS it tells of a
 switch of the port's key, and the stations it counts on its State page.
 
 What the `csms` section of the configuration file says is what a connection
@@ -121,9 +121,9 @@ a line is changed where the connections are. There is no security profile to
 say any more - a connection is profile 1 without TLS, 2 over `wss://`, and 3
 where it holds up a certificate.
 
-A connection is dialled when the controller starts, and kept up by the
-WebSocket client it was dialled with. A CSMS that is not there yet, or goes
-away later - restarted, deployed again - is dialled again by itself: after
+A connection is connected when the controller starts, and kept up by the
+WebSocket client it was connected with. A CSMS that is not there yet, or goes
+away later - restarted, deployed again - is connected again by itself: after
 `reconnectInitialDelay` seconds of the `csms` section at first, and twice as
 long after every attempt that fails, up to `reconnectMaxDelay`. So is one that
 answers "not yet" - 408, 429, or a 5xx from a proxy whose CSMS is still
@@ -142,15 +142,15 @@ on the CSMS page, which every line over `wss://` that names no certificate of
 its own holds up. One that is not in the store, switched off or out of its
 validity is said so, and the line not connected with it. Over TLS, the CSMS's
 certificate is judged by the node as a time server's is: issued for the name it
-is dialled at, and chaining to a root this machine trusts or to a TLS root of
+is connected to, and chaining to a root this machine trusts or to a TLS root of
 the store kept for every use. What it was believed with is
 remembered in `known-servers.json`, and another certificate than before is
-said. A CSMS reads who is dialling from the last segment of the address, as
+said. A CSMS reads who is connecting from the last segment of the address, as
 OCPP has every client say it: `wss://csms.example.org/ocpp/lc001`.
 
 The lines speak in the frame of the overlay network unless `networkingMode` in
 the `csms` section says `"standard"`: every frame names where it goes and
-where it comes from, and the dial tells the CSMS so in the header
+where it comes from, and the connection tells the CSMS so in the header
 `X-OCPP-NetworkingMode: OverlayNetwork`. That is what lets the CSMS see the
 stations behind the controller, each by its own name, and reach them - to
 hand them their key pins, say. `"standard"`, the plain OCPP frame, is for a
@@ -165,7 +165,7 @@ this project's CSMS the controller's login is marked as one -
 logins - and until it is, what the controller forwards of its stations is
 dropped there, and the CSMS's log says so. Either way the controller answers what is
 addressed to it and forwards what is addressed to a station; a change waits for
-the lines to be dialled again.
+the lines to be connected again.
 
 Over `wss://` the CSMS is believed either by its certificate, as a CA vouches
 for it, or - key-pinned, as the charging stations believe their local
@@ -186,7 +186,7 @@ security event of this controller's (`KeyPinLearned`, `KeyPinConfirmed`,
 `KeyPinRejected`, `KeyPinProbationExpired`, `InvalidCsmsCertificate`). What
 is learned and signed is written down with the connection; the decisions are
 WWCP_OCPP_Node's key-pin core, which the charging stations use as well. Every
-change needs `csms:edit` and applies from the next dial of the connection.
+change needs `csms:edit` and applies the next time the connection is made.
 
 What only a CSMS asks of a node it manages - `InstallSSHKey`, `DeleteSSHKey`,
 `SetVariables`, `GetVariables`, a `Reset`, its files and its signature
@@ -199,12 +199,12 @@ sender is dropped, and one addressed to another station of the controller is
 refused. An answer the controller passes on goes to whoever asked, whatever
 the answer names.
 
-Where the controller cannot dial its CSMS - behind a firewall that lets nothing
-out, on a network only the back end reaches - the CSMS dials the controller.
+Where the controller cannot connect to its CSMS - behind a firewall that lets nothing
+out, on a network only the back end reaches - the CSMS connects to the controller.
 OCPP stays as it is; only who opens the WebSocket is the other way round. There
 is no port of its own for it: the CSMS comes in over the port of the charging
 stations. On the Connections page a connection is written down with **The other
-end dials** ticked: its URL is the one the CSMS dials -
+end connects** ticked: its URL is the one the CSMS connects to -
 `wss://controller.example.org:9000/csms-01` - and the last part of it the name
 the CSMS comes under. That is the name of its **WebSocket login**, and it signs
 in as a charging station does - one way in for both, judged by the login and
@@ -223,30 +223,30 @@ its group:
 
 The connection names nothing it signs in with: credentials of the controller,
 key pins and roots on it are refused, with what to do instead - they are what
-the controller proves itself with, and holds a server to, where it dials.
+the controller proves itself with, and holds a server to, where it connects.
 
 A client certificate is security profile 3, as it is for a charging station;
 it opens no charging station's path, and a key a station has opens nothing
 under the name of the CSMS. "Connect by itself" is what lets it in: off,
 nothing comes in under its name, and one that is in is let go of. The page
-shows it as *waiting* until the CSMS dials and as *connected* from then on.
+shows it as *waiting* until the CSMS connects and as *connected* from then on.
 
 At the door the login is judged first, as for a station; then the name
 decides: whoever comes under the name of such a connection is let in as that
 or not at all - by its own login, on its own path - and a charging station's
 password opens nothing under it. A login whose name a connection the other end
 makes comes under is that back end's, and no charging station's. Once in, it is the line up of
-the controller as much as one the controller dialled: what the stations send on
+the controller as much as one the controller connected to: what the stations send on
 goes up over it, what it asks of a station goes down, what only a CSMS asks of
 the controller it may ask, and it is neither counted nor listed among the
 charging stations. A CSMS of the overlay network says so in the header of its
-dial, `X-OCPP-NetworkingMode: OverlayNetwork`, as the controller does where it
-dials; one that says nothing speaks the plain frame of OCPP, and what it sends
+connection, `X-OCPP-NetworkingMode: OverlayNetwork`, as the controller does where it
+connects; one that says nothing speaks the plain frame of OCPP, and what it sends
 is for the controller. All of it needs the station server switched on and the
 controller reporting to a CSMS at all (`"csms": { "enabled": true }`).
 
-**Registering.** Over every line up - one the controller dials, and one a CSMS
-dials - the controller registers as a charging station does, and with the same
+**Registering.** Over every line up - one the controller connects to, and one a CSMS
+connects - the controller registers as a charging station does, and with the same
 code (WWCP_OCPP_Node's `OCPPServingNode.Registration.cs`): once the line is up
 its OCPP node sends a BootNotification - its vendor, model and serial number,
 and that it powered up -, asks again after the interval a Pending or a Rejected
@@ -255,7 +255,7 @@ interval an Accepted gives, to every back end that accepted it. Where it
 stands, the primary's registration, is `RegistrationJSON()` - `{"2.1":
 {"state", "since", "interval", "nextTry", "problem"}}`, as a station says it
 for each of its two nodes. A CSMS of WWCP_OCPP knows a controller that
-registers by the mark of its login, or by the connection it dials it over, and
+registers by the mark of its login, or by the connection it connects over, and
 does not take it for a charging station: it installs no station roots on it and
 renews no certificate of it.
 
@@ -657,13 +657,13 @@ in with `--https` on the same command line; otherwise it goes in on the Server
 identities page - brought with its key, or its key made there before HTTPS is
 switched on - or by copying it in. And it keeps **issuing CAs**
 (`tlsIntermediate`): the CAs between a root and the certificate of a CSMS that
-dials the controller and shows its certificate alone, kept to build its chain
+connects to the controller and shows its certificate alone, kept to build its chain
 with and believed nothing by themselves. An identity the controller signs in to
 its CSMS with that was brought with the certificates of the CAs above it sends
 them beside its own at every handshake; one brought alone is shown alone. On
 Windows, the TLS of the operating system sends along only what it finds in a
 certificate store: those certificates are written into the intermediate store
-of the user the controller runs as (`CurrentUser\CA`) when it dials, and stay
+of the user the controller runs as (`CurrentUser\CA`) when it connects, and stay
 there - believed for nothing, as it is no store of roots. The store lives in `certificates/` beside
 `configuration.json`, one file per certificate and an `index.json` saying what
 each is called, whether it is switched on and what it is kept for; a file
@@ -779,7 +779,7 @@ the CSMS, `stations`, the charging stations and which of them may sign in, and
 |------|-----|
 | `viewer` | read everything: `*:read` |
 | `support` | see what is going on and have it reported again (`state:read`, `state:run`), and restart the controller once it is idle (`reset:run`) - nothing else: no configuration, no log |
-| `cpo` | read everything, and run the site: change the name and time servers and ask them (`dns` and `nts`, `edit` and `run`), change the line up to the CSMS and the charging stations (`csms:edit`, `stations:edit`), make the keys the lines up are dialled with and bring their certificates (`certificates:run`), and the grid operator's VTN and ask it (`openadr:edit`, `openadr:run`); restart the controller, once idle and at once, have it send a message and report its state again, and install its firmware (`reset:run`, `reset-immediate:run`, `node:run`, `state:run`, `firmware:edit`) |
+| `cpo` | read everything, and run the site: change the name and time servers and ask them (`dns` and `nts`, `edit` and `run`), change the line up to the CSMS and the charging stations (`csms:edit`, `stations:edit`), make the keys the lines up are connected with and bring their certificates (`certificates:run`), and the grid operator's VTN and ask it (`openadr:edit`, `openadr:run`); restart the controller, once idle and at once, have it send a message and report its state again, and install its firmware (`reset:run`, `reset-immediate:run`, `node:run`, `state:run`, `firmware:edit`) |
 | `systemadmin` | everything this controller can be told, the certificates and who may sign what (`signatures:edit`) included |
 
 The viewer, the support and the administrators are the node's, the CPO is the
@@ -787,7 +787,7 @@ local controller's. The certificates are the one resource only the administrator
 change: somebody who can add a certificate authority can let in a charging
 station that nobody issued a password to. One thing in the store is no such
 decision, and is `certificates:run`, which the CPO holds as well: making a key
-the controller dials its CSMS with (the **New key** tab of the identities),
+the controller connects to its CSMS with (the **New key** tab of the identities),
 bringing the certificate that came back for it - pasted beside the key, which
 is matched to it - and taking a key back that still waits for one. The upload,
 where a certificate comes with its key and a root comes at all, is the
