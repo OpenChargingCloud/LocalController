@@ -17,6 +17,7 @@
 
 #region Usings
 
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography.X509Certificates;
 
@@ -25,12 +26,15 @@ using Newtonsoft.Json.Linq;
 using org.GraphDefined.Vanaheimr.Hermod.DNS;
 
 using cloud.charging.open.protocols.OpenADRv3;
+using cloud.charging.open.protocols.OpenADRv3.Messaging;
 
 using cloud.charging.open.LocalController.Configuration;
 using cloud.charging.open.LocalController.OpenADR;
 using cloud.charging.open.protocols.OCPP.Node.Serving;
+using cloud.charging.open.protocols.WWCP.Node.Connections;
 
 using OpenADRValueType = cloud.charging.open.protocols.OpenADRv3.ValueType;
+using ConnectionType   = cloud.charging.open.protocols.WWCP.Node.Connections.ConnectionType;
 
 #endregion
 
@@ -49,6 +53,14 @@ namespace cloud.charging.open.LocalController
     /// but a local controller in a car park is seldom somewhere a grid operator
     /// can call: so it asks, every <see cref="OpenADRConfiguration.PollEvery"/>,
     /// for the events meant for it that are not over yet.
+    /// </para>
+    /// <para>
+    /// <b>Told as well, over a connection of messages.</b> Where it reaches the
+    /// VTN through a connection to its grid operator in the binding of the JSON
+    /// messages of OpenADR, it subscribes to the events over that connection,
+    /// and is told of every new, changed or removed one by Notify over it: it
+    /// asks at once then, rather than at the next poll - which it keeps, for
+    /// what it missed while the connection was down.
     /// </para>
     /// <para>
     /// <b>Shown, and reported on.</b> The limits are kept, logged as they come
@@ -79,7 +91,7 @@ namespace cloud.charging.open.LocalController
         private readonly SemaphoreSlim             openADRGate      = new (1, 1);
         private readonly Lock                      openADRLock      = new ();
 
-        private VENClient?                         venClient;
+        private IVTNClient?                        venClient;
         private CancellationTokenSource?           venStop;
         private Task?                              venLoop;
         private Boolean                            venMayRun;
@@ -90,6 +102,13 @@ namespace cloud.charging.open.LocalController
         private DateTimeOffset?                    lastReadAt;
         private String?                            openADRProblem;
         private Boolean                            venSignedIn;
+
+        // The ends of the JSON messages of OpenADR of the connections to grid
+        // operators in that binding that are up, by connection; and the poll
+        // asked for at once, by what one of them was told.
+        private readonly ConcurrentDictionary<String, OpenADRMessageEndpoint>  gridOperatorEndpoints  = new ();
+        private readonly SemaphoreSlim                                          pollNow                = new (0, 1);
+        private          Int64                                                  openADRNotifications;
 
         #endregion
 
@@ -137,6 +156,13 @@ namespace cloud.charging.open.LocalController
         /// </summary>
         public (Uri? TokenURL, DateTimeOffset? Expires)  OpenADRToken
             => (venClient?.TokenURL, venClient?.TokenExpires);
+
+        /// <summary>
+        /// How many notifications the VTN told this local controller over a
+        /// connection of messages.
+        /// </summary>
+        public Int64                 OpenADRNotificationsReceived
+            => Interlocked.Read(ref openADRNotifications);
 
         /// <summary>
         /// Every limit the grid operator sent that is not over, in the order
@@ -187,9 +213,19 @@ namespace cloud.charging.open.LocalController
             if (!OpenADRLogin.TryLoad(out var error))
                 Log.Critical($"The OpenADR client secret could not be read: {error}", "openadr", "auth");
 
+            // The JSON messages of OpenADR, over the connections to grid
+            // operators in that binding: whichever is up has its end of them.
+            OnGridOperatorMessage      = (connectionId, text) => gridOperatorEndpoints.TryGetValue(connectionId, out var endpoint)
+                                                                    ? endpoint.ReceiveAsync(text)
+                                                                    : Task.CompletedTask;
+
+            OnGridOperatorMessageLink += GridOperatorMessagesUpOrDown;
+
             Log.Info(
                 openADRSettings.Enabled == true
-                    ? $"This local controller asks the OpenADR VTN at {openADRSettings.VTNURL} for the limits of its grid operator, as '{openADRSettings.ClientID}'."
+                    ? openADRSettings.ThroughAConnection
+                          ? $"This local controller asks the OpenADR VTN of its grid operator for its limits through the connection {openADRSettings.VTNURL}."
+                          : $"This local controller asks the OpenADR VTN at {openADRSettings.VTNURL} for the limits of its grid operator, as '{openADRSettings.ClientID}'."
                     : "This local controller asks no OpenADR VTN for limits; it is switched off in the 'openADR' section of the configuration.",
                 "openadr"
             );
@@ -210,6 +246,12 @@ namespace cloud.charging.open.LocalController
 
             if (openADRSettings.Enabled != true)
                 return;
+
+            if (openADRSettings.ThroughAConnection)
+            {
+                StartOpenADRThroughAConnection();
+                return;
+            }
 
             if (openADRSettings.VTNURL is not String url || openADRSettings.ClientID is not String clientId)
                 return;
@@ -252,14 +294,142 @@ namespace cloud.charging.open.LocalController
                          "openadr", "auth");
             };
 
-            var stop    = new CancellationTokenSource();
+            RunTheVENClient(client);
+
+        }
+
+        /// <summary>
+        /// Begin asking the VTN through the connection to the grid operator of
+        /// the URL the settings say: the REST API of OpenADR in its tunnel, as
+        /// the VEN the connection signs in as - with no client ID and no secret.
+        /// </summary>
+        /// <remarks>
+        /// The connection is looked up at every request rather than now: one
+        /// written down after the VTN was switched on is the one asked through,
+        /// and until there is one, every poll says that there is none.
+        /// </remarks>
+        private void StartOpenADRThroughAConnection()
+        {
+
+            var url         = openADRSettings.VTNURL!;
+            var connection  = GridOperatorConnectionOf(url);
+
+            if (connection is null)
+            {
+                openADRProblem = $"There is no connection to a grid operator of the URL {url} to ask the OpenADR VTN through. " +
+                                  "Write one down among the connections, of the type 'GridOperator', with 'openADRBinding': 'messages' or 'rest'.";
+                Log.Warning(openADRProblem, "openadr", "connections");
+            }
+
+            var clientId  = openADRSettings.ClientID ?? Node.Id.ToString();
+            var timeout   = openADRSettings.RequestTimeout ?? OpenADRConfiguration.DefaultRequestTimeout;
+
+            // Either binding, as the connection of the URL is written down at
+            // the time of the request.
+            var client    = new ThroughAConnection(
+                                this,
+                                url,
+                                new VENClient(protocols.WWCP.Node.WWCPNode.GridOperatorTunnelURL,
+                                              clientId,
+                                              () => null,
+                                              new TunnelHandler(this, url),
+                                              timeout,
+                                              TimeProvider,
+                                              SignedInByTheConnection: true),
+                                new MessageVTNClient(this, url, clientId, timeout)
+                            );
+
+            RunTheVENClient(client);
+
+        }
+
+        /// <summary>
+        /// The connection of this controller to a grid operator whose URL is the
+        /// given one - in the given binding, where one is given -, or null.
+        /// </summary>
+        internal ConnectionEntry? GridOperatorConnectionOf(String           URL,
+                                                           OpenADRBinding?  Binding   = null)
+
+            => Connections?.Connections.FirstOrDefault(entry => !entry.Inbound &&
+                                                                entry.ConnectionType == ConnectionType.GridOperator &&
+                                                                (Binding is null || entry.OpenADRBinding == Binding) &&
+                                                                String.Equals(entry.URL.ToString().TrimEnd('/'), URL.TrimEnd('/'), StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>
+        /// The end of the JSON messages of OpenADR of the connection of this
+        /// controller to a grid operator of the given URL in that binding, while
+        /// it is up; else null.
+        /// </summary>
+        internal OpenADRMessageEndpoint? GridOperatorEndpointOf(String URL)
+
+            => GridOperatorConnectionOf(URL, OpenADRBinding.Messages) is ConnectionEntry connection &&
+               gridOperatorEndpoints.TryGetValue(connection.Id, out var endpoint)
+                   ? endpoint
+                   : null;
+
+        /// <summary>
+        /// Run the given client: ask the VTN now, and every so often after.
+        /// </summary>
+        private void RunTheVENClient(IVTNClient Client)
+        {
+
+            var stop = new CancellationTokenSource();
 
             lock (openADRLock)
             {
-                venClient       = client;
+                venClient       = Client;
                 venStop         = stop;
                 reportedEvents  = null;
                 venLoop         = Task.Run(() => PollLoop(stop.Token));
+            }
+
+        }
+
+        /// <summary>
+        /// The HTTP handler of the tunnel of the connection of the given URL:
+        /// that of the connection written down under it at the time of the
+        /// request - so that a connection written down, changed or written anew
+        /// after the VTN was switched on is the one asked through.
+        /// </summary>
+        private sealed class TunnelHandler(LocalController  Controller,
+                                           String           URL) : HttpMessageHandler
+        {
+
+            private readonly Lock                                       handlersLock  = new ();
+            private readonly Dictionary<String, HttpMessageInvoker>     handlers      = [];
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage  Request,
+                                                                   CancellationToken   CancellationToken)
+            {
+
+                if (Controller.GridOperatorConnectionOf(URL, OpenADRBinding.REST) is not ConnectionEntry connection)
+                    throw new HttpRequestException($"there is no connection to a grid operator of the URL {URL} in the binding 'rest' to ask the VTN through");
+
+                HttpMessageInvoker invoker;
+
+                lock (handlersLock)
+                {
+                    if (!handlers.TryGetValue(connection.Id, out invoker!))
+                        handlers[connection.Id] = invoker = new HttpMessageInvoker(Controller.GridOperatorHTTPHandler(connection.Id), disposeHandler: true);
+                }
+
+                return invoker.SendAsync(Request, CancellationToken);
+
+            }
+
+            protected override void Dispose(Boolean Disposing)
+            {
+
+                if (Disposing)
+                    lock (handlersLock)
+                    {
+                        foreach (var invoker in handlers.Values)
+                            invoker.Dispose();
+                        handlers.Clear();
+                    }
+
+                base.Dispose(Disposing);
+
             }
 
         }
@@ -274,7 +444,7 @@ namespace cloud.charging.open.LocalController
 
             Task?                     loop;
             CancellationTokenSource?  stop;
-            VENClient?                client;
+            IVTNClient?               client;
 
             lock (openADRLock)
             {
@@ -329,19 +499,116 @@ namespace cloud.charging.open.LocalController
 
                 await PollOpenADR(CancellationToken).ConfigureAwait(false);
 
-                try
+                // Until the next poll is due - or until the VTN told of a change
+                // over a connection of messages, which is asked at once.
+                using (var wait = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken))
                 {
-                    await Task.Delay(openADRSettings.PollEvery ?? OpenADRConfiguration.DefaultPollEvery,
-                                     TimeProvider,
-                                     CancellationToken).ConfigureAwait(false);
+
+                    var due   = Task.Delay(openADRSettings.PollEvery ?? OpenADRConfiguration.DefaultPollEvery,
+                                           TimeProvider,
+                                           wait.Token);
+
+                    var told  = pollNow.WaitAsync(wait.Token);
+
+                    await Task.WhenAny(due, told).ConfigureAwait(false);
+
+                    wait.Cancel();
+
                 }
-                catch (OperationCanceledException)
-                {
+
+                if (CancellationToken.IsCancellationRequested)
                     return;
-                }
 
             }
 
+        }
+
+        #endregion
+
+        #region (private) GridOperatorMessagesUpOrDown(ConnectionId, Up) / AnswerTheGridOperator(Action, Payload, CancellationToken) / PollSoon()
+
+        /// <summary>
+        /// A connection to a grid operator in the binding of messages came up:
+        /// its end of the JSON messages of OpenADR is made, and the VTN asked at
+        /// once - which subscribes anew over it. Or it went: its end goes, and
+        /// what waited for an answer over it fails.
+        /// </summary>
+        private void GridOperatorMessagesUpOrDown(String   ConnectionId,
+                                                  Boolean  Up)
+        {
+
+            if (Up)
+            {
+
+                var endpoint = new OpenADRMessageEndpoint(
+                                   $"This local controller, to its grid operator over '{ConnectionId}'",
+                                   (text, cancellationToken) => SendToGridOperator(ConnectionId, text, cancellationToken),
+                                   AnswerTheGridOperator,
+                                   openADRSettings.RequestTimeout ?? OpenADRConfiguration.DefaultRequestTimeout
+                               ) {
+                                   OnProblem = problem => Log.Warning(problem, "openadr", "messages")
+                               };
+
+                if (gridOperatorEndpoints.TryRemove(ConnectionId, out var before))
+                    before.End("the connection was made anew");
+
+                gridOperatorEndpoints[ConnectionId] = endpoint;
+
+                PollSoon();
+
+            }
+
+            else if (gridOperatorEndpoints.TryRemove(ConnectionId, out var gone))
+                gone.End("the connection to the grid operator ended");
+
+        }
+
+        /// <summary>
+        /// What the VTN asks of this local controller over a connection of
+        /// messages: to be told of a change - Notify -, and nothing else.
+        /// </summary>
+        private Task<OpenADRCallOutcome> AnswerTheGridOperator(String             Action,
+                                                               JObject            Payload,
+                                                               CancellationToken  CancellationToken)
+        {
+
+            if (Action != OpenADRActions.Notify)
+                return Task.FromResult(OpenADRCallOutcome.Fail(OpenADRMessageErrors.NotImplemented,
+                                                               $"'{Action}' is no action a local controller takes: it takes Notify."));
+
+            var objectType  = Payload["objectType"]?.Value<String>();
+            var operation   = Payload["operation"]?. Value<String>();
+
+            if (objectType is null || operation is null || Payload["object"] is not JObject)
+                return Task.FromResult(OpenADRCallOutcome.Fail(OpenADRMessageErrors.FormationViolation,
+                                                               "A notification has an 'objectType', an 'operation' and an 'object'.",
+                                                               new JObject(new JProperty("status", 400))));
+
+            Interlocked.Increment(ref openADRNotifications);
+
+            Log.Info($"The grid operator told this local controller of {operation} {objectType}" +
+                     (objectType is "EVENT" or "PROGRAM" ? "; the VTN is asked at once." : "."),
+                     "openadr", "messages");
+
+            if (objectType is "EVENT" or "PROGRAM")
+                PollSoon();
+
+            return Task.FromResult(OpenADRCallOutcome.Ok([]));
+
+        }
+
+        /// <summary>
+        /// Ask the VTN at once, rather than when the next poll is due.
+        /// </summary>
+        private void PollSoon()
+        {
+            try
+            {
+                if (pollNow.CurrentCount == 0)
+                    pollNow.Release();
+            }
+            catch (SemaphoreFullException)
+            { }
         }
 
         #endregion
@@ -364,10 +631,10 @@ namespace cloud.charging.open.LocalController
             try
             {
 
-                if (venClient is not VENClient client || !venMayRun)
+                if (venClient is not IVTNClient client || !venMayRun)
                     return "This local controller is not running, and asks no VTN.";
 
-                if (!OpenADRLogin.HasSecret)
+                if (!client.SignedInByTheConnection && !OpenADRLogin.HasSecret)
                     return openADRProblem;
 
                 lastPollAt = TimeProvider.GetUtcNow();
@@ -598,8 +865,9 @@ namespace cloud.charging.open.LocalController
 
             var kinds     = Limits.Select(limit => limit.Kind).Distinct().ToArray();
 
+            // No programID, since OpenADR 3.1 - the event says which program it
+            // is of - and no clientID: the VTN writes that one.
             return new Report(
-                       Program_Id.Parse(Event.ProgramId.ToString()),
                        Event.Id!.Value,
                        ClientName,
                        [ new ResourceReport(Node.Id.ToString(), intervals) ],
@@ -677,8 +945,9 @@ namespace cloud.charging.open.LocalController
 
             var wanted = openADRSettings.Merge(changes).Effective();
 
-            // Switched on, together with what it is switched on with.
-            if (wanted.Enabled == true && (wanted.VTNURL is null || wanted.ClientID is null))
+            // Switched on, together with what it is switched on with: a client
+            // ID, unless a connection says who this controller is.
+            if (wanted.Enabled == true && (wanted.VTNURL is null || (wanted.ClientID is null && !wanted.ThroughAConnection)))
                 return (false, $"'{OpenADRConfiguration.SectionName}' is switched on, but has no {(wanted.VTNURL is null ? "'vtnURL'" : "'clientID'")}.", false);
 
             if (ClientSecret is not null &&

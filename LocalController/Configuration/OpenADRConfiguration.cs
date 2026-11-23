@@ -45,8 +45,8 @@ namespace cloud.charging.open.LocalController.Configuration
     /// readable by its owner alone - see <see cref="OpenADR.VTNCredentials"/>.
     /// </remarks>
     /// <param name="Enabled">Whether this local controller asks a VTN for limits at all.</param>
-    /// <param name="VTNURL">Where the VTN is: the base URL its programs, events and reports are below, e.g. "https://grid.example/openadr3/".</param>
-    /// <param name="ClientID">What the grid operator knows this local controller by: its VEN name, the client ID of its client credentials.</param>
+    /// <param name="VTNURL">Where the VTN is: the base URL its programs, events and reports are below, e.g. "https://grid.example/openadr3/" - or the URL of a connection to the grid operator over a WebSocket or over SSH, "wss://grid.example:2363/lc-1" or "ssh://lc-1@grid.example:22", which the VTN is asked through.</param>
+    /// <param name="ClientID">What the grid operator knows this local controller by: its VEN name, the client ID of its client credentials. Not needed where the VTN is asked through a connection, which says who this controller is.</param>
     /// <param name="PollEvery">How often the VTN is asked for the limits meant for this controller.</param>
     /// <param name="RequestTimeout">How long one request to the VTN may take.</param>
     public sealed record OpenADRConfiguration(Boolean?   Enabled          = null,
@@ -102,6 +102,30 @@ namespace cloud.charging.open.LocalController.Configuration
                Uri.TryCreate(url, UriKind.Absolute, out var parsed) &&
                parsed.Scheme == Uri.UriSchemeHttp &&
                !parsed.IsLoopback;
+
+        /// <summary>
+        /// Whether the VTN is asked through a connection to the grid operator -
+        /// over ws://, wss:// or ssh:// -, the one of the connections of this
+        /// controller with the same URL, rather than over HTTP.
+        /// </summary>
+        public Boolean ThroughAConnection
+            => IsAConnectionURL(VTNURL);
+
+        #endregion
+
+
+        #region (static) IsAConnectionURL(URL)
+
+        /// <summary>
+        /// Whether the given VTN URL is the URL of a connection to the grid
+        /// operator - ws://, wss:// or ssh:// - rather than one of HTTP.
+        /// </summary>
+        public static Boolean IsAConnectionURL(String? URL)
+
+            => URL is not null &&
+               (URL.StartsWith("ws://",  StringComparison.OrdinalIgnoreCase) ||
+                URL.StartsWith("wss://", StringComparison.OrdinalIgnoreCase) ||
+                URL.StartsWith("ssh://", StringComparison.OrdinalIgnoreCase));
 
         #endregion
 
@@ -177,16 +201,31 @@ namespace cloud.charging.open.LocalController.Configuration
                 return false;
             }
 
-            #region The URL has to be one of HTTP
+            #region The URL has to be one of HTTP, or one of a connection
 
-            if (url is not null)
+            // A connection is spoken of by its URL, as it is written down among
+            // the connections: as it is, without a slash put at its end.
+            if (url is not null && IsAConnectionURL(url))
+            {
+
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed) ||
+                    parsed.Query.Length > 0 || parsed.Fragment.Length > 0)
+                {
+                    Error = $"'{SectionName}.vtnURL' is the URL of a connection to the grid operator, as it is written down among the connections, " +
+                             "e.g. 'wss://grid.example:2363/lc-1' or 'ssh://lc-1@grid.example:22', and has no query or fragment.";
+                    return false;
+                }
+
+            }
+
+            else if (url is not null)
             {
 
                 if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed) ||
                     (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps))
                 {
                     Error = $"'{SectionName}.vtnURL' must be an HTTP URL, i.e. begin with 'https://' or 'http://': where the VTN of the grid operator is, " +
-                             "e.g. 'https://grid.example/openadr3/'.";
+                             "e.g. 'https://grid.example/openadr3/' - or the URL of a connection to the grid operator over 'wss://', 'ws://' or 'ssh://'.";
                     return false;
                 }
 
@@ -220,7 +259,7 @@ namespace cloud.charging.open.LocalController.Configuration
                 return false;
             }
 
-            if (!AChange && enabled == true && clientId is null)
+            if (!AChange && enabled == true && clientId is null && !IsAConnectionURL(url))
             {
                 Error = $"'{SectionName}.enabled' is true, but there is no 'clientID' to sign in as.";
                 return false;
@@ -268,7 +307,9 @@ namespace cloud.charging.open.LocalController.Configuration
 
             => Enabled != true
                    ? "no OpenADR VTN"
-                   : $"OpenADR VTN {VTNURL ?? "nowhere"} as '{ClientID}'";
+                   : ThroughAConnection
+                         ? $"OpenADR VTN through the connection {VTNURL}"
+                         : $"OpenADR VTN {VTNURL ?? "nowhere"} as '{ClientID}'";
 
         #endregion
 

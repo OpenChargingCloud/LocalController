@@ -133,7 +133,8 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// A limit, as the grid operator sends one: an event with one interval,
-        /// targeted at a VEN name - this VTN's VEN unless another is given.
+        /// targeted, as OpenADR 3.1 has targets, at "ven:" and a VEN name -
+        /// this VTN's VEN unless another is given.
         /// </summary>
         public String Send(String          Kind,
                            Double          KW,
@@ -149,7 +150,7 @@ namespace cloud.charging.open.LocalController.Tests
                                   [ new Interval(Interval_Id.Parse(0),
                                                  [ new ValuesMap(OpenADRValueType.Parse(Kind), [ KW ]) ]) ],
                                   EventName:           Name,
-                                  Targets:             [ new ValuesMap(OpenADRValueType.Parse("VEN_NAME"), [ VENName ?? this.VENName ]) ],
+                                  Targets:             [ "ven:" + (VENName ?? this.VENName) ],
                                   PayloadDescriptors:  [ new EventPayloadDescriptor(PayloadType.Parse(Kind), UnitType.Parse("KW")) ],
                                   IntervalPeriod:      new IntervalPeriod(Start, Duration),
                                   Id:                  id,
@@ -240,6 +241,12 @@ namespace cloud.charging.open.LocalController.Tests
 
         }
 
+        /// <summary>
+        /// What the last request for the events said of "?active", OpenADR 3.1:
+        /// null where it said nothing.
+        /// </summary>
+        public String? ActiveAsked { get; private set; }
+
         private Task<HTTPResponse> GetEvents(HTTPRequest Request)
         {
 
@@ -247,6 +254,8 @@ namespace cloud.charging.open.LocalController.Tests
                 return Unauthorized(Request);
 
             EventRequests++;
+
+            ActiveAsked = Request.QueryString.GetString("active");
 
             JObject[] page;
 
@@ -297,12 +306,10 @@ namespace cloud.charging.open.LocalController.Tests
                 if (gridEvent is null)
                     return Problem(Request, HTTPStatusCode.NotFound, $"There is no event '{report.EventId}' for '{VENName}' to report on.");
 
-                if (gridEvent.Value<String>("programID") != report.ProgramId.ToString())
-                    return Problem(Request, HTTPStatusCode.BadRequest, $"The event '{report.EventId}' is of another program.");
-
+                // OpenADR 3.1: the VTN writes the clientID of who reports.
                 var kept = report.ToJSON();
                 kept["id"]          = Guid.NewGuid().ToString("N");
-                kept["clientName"]  = VENName;
+                kept["clientID"]    = VENName;
                 kept["objectType"]  = "REPORT";
 
                 reports.Add(kept);

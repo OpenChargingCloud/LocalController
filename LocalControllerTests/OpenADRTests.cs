@@ -162,8 +162,11 @@ namespace cloud.charging.open.LocalController.Tests
             var values = report["resources"]?[0]?["intervals"]?[0]?["payloads"]?[0];
 
             Assert.Multiple(() => {
-                Assert.That(report.Value<String>("programID"),   Is.EqualTo(FakeVTN.ProgramID));
+                // OpenADR 3.1: no programID - the event has it - and the
+                // clientID the VTN wrote.
+                Assert.That(report["programID"],                 Is.Null);
                 Assert.That(report.Value<String>("clientName"),  Is.EqualTo(VENName));
+                Assert.That(report.Value<String>("clientID"),    Is.EqualTo(VENName));
                 Assert.That(values?.Value<String>("type"),       Is.EqualTo("IMPORT_CAPACITY_LIMIT"));
                 Assert.That(values?["values"]?[0]?.Value<Double>(), Is.EqualTo(44));
             });
@@ -513,7 +516,7 @@ namespace cloud.charging.open.LocalController.Tests
                     "objectType":          "EVENT",
                     "id":                  "two-steps",
                     "programID":           "{{FakeVTN.ProgramID}}",
-                    "targets":             [ { "type": "VEN_NAME", "values": [ "{{VENName}}" ] } ],
+                    "targets":             [ "ven:{{VENName}}" ],
                     "payloadDescriptors":  [ { "objectType": "EVENT_PAYLOAD_DESCRIPTOR", "payloadType": "IMPORT_CAPACITY_LIMIT", "units": "W" } ],
                     "intervalPeriod":      { "start": "{{start:o}}", "duration": "PT15M" },
                     "intervals": [
@@ -535,6 +538,128 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(limits[1].End - limits[1].Start,          Is.EqualTo(TimeSpan.FromMinutes(15)));
                 Assert.That(lc.ImportLimitNow?.KW,                    Is.EqualTo(50));
                 Assert.That(vtn.Reports,                              Has.Count.EqualTo(1));
+            });
+
+        }
+
+        #endregion
+
+        #region OpenADR31_ReadsALimitAndReportsAs31Has()
+
+        /// <summary>
+        /// OpenADR 3.1, against the fake VTN: the events are asked for with
+        /// "?active=true"; a limit of an event with a string target, without
+        /// a start of its intervals but its own, and with a duration is read;
+        /// the report on it has no programID and no clientID - the VTN writes
+        /// that one - and payload descriptors that say what they are.
+        /// </summary>
+        [Test]
+        public async Task OpenADR31_ReadsALimitAndReportsAs31Has()
+        {
+
+            var start = DateTimeOffset.UtcNow.AddMinutes(-1);
+
+            vtn.Add(JObject.Parse($$"""
+                {
+                    "objectType":          "EVENT",
+                    "id":                  "of-3.1",
+                    "programID":           "{{FakeVTN.ProgramID}}",
+                    "targets":             [ "ven:{{VENName}}" ],
+                    "payloadDescriptors":  [ { "objectType": "EVENT_PAYLOAD_DESCRIPTOR", "payloadType": "IMPORT_CAPACITY_LIMIT", "units": "KW" } ],
+                    "intervalPeriod":      { "start": "{{start:o}}", "duration": "PT30M" },
+                    "duration":            "PT30M",
+                    "intervals":           [ { "id": 0, "payloads": [ { "type": "IMPORT_CAPACITY_LIMIT", "values": [ 17 ] } ] } ]
+                }
+                """));
+
+            var lc = await AController();
+
+            Assert.That(await lc.PollOpenADR(), Is.Null);
+
+            var report      = vtn.Reports.Single();
+            var descriptor  = report["payloadDescriptors"]?[0];
+
+            Assert.Multiple(() => {
+                Assert.That(vtn.ActiveAsked,                                  Is.EqualTo("true"), "the events were not asked for with ?active=true");
+                Assert.That(lc.ImportLimitNow?.KW,                            Is.EqualTo(17));
+                Assert.That(report.Value<String>("eventID"),                  Is.EqualTo("of-3.1"));
+                Assert.That(report["programID"],                              Is.Null, "a report of 3.1 has no programID");
+                Assert.That(report.Value<String>("clientID"),                 Is.EqualTo(VENName), "the fake VTN writes it, as a VTN of 3.1 does");
+                Assert.That(descriptor?["objectType"]?.Value<String>(),       Is.EqualTo("REPORT_PAYLOAD_DESCRIPTOR"));
+                Assert.That(descriptor?["payloadType"]?.Value<String>(),      Is.EqualTo("IMPORT_CAPACITY_LIMIT"));
+            });
+
+        }
+
+        #endregion
+
+        #region OpenADR31_AnEventOf301IsPassedOver()
+
+        /// <summary>
+        /// An event as OpenADR 3.0.1 wrote it - its targets valuesMaps - is no
+        /// event of 3.1: passed over, and not reported on; one of 3.1 beside it
+        /// is read.
+        /// </summary>
+        [Test]
+        public async Task OpenADR31_AnEventOf301IsPassedOver()
+        {
+
+            var start = DateTimeOffset.UtcNow.AddMinutes(-1);
+
+            vtn.Add(JObject.Parse($$"""
+                {
+                    "objectType":      "EVENT",
+                    "id":              "of-3.0.1",
+                    "programID":       "{{FakeVTN.ProgramID}}",
+                    "targets":         [ { "type": "VEN_NAME", "values": [ "{{VENName}}" ] } ],
+                    "intervalPeriod":  { "start": "{{start:o}}", "duration": "PT30M" },
+                    "intervals":       [ { "id": 0, "payloads": [ { "type": "IMPORT_CAPACITY_LIMIT", "values": [ 5 ] } ] } ]
+                }
+                """));
+
+            vtn.Send(GridLimit.ImportCapacityLimit, 23, start, TimeSpan.FromMinutes(30));
+
+            var lc = await AController();
+
+            Assert.That(await lc.PollOpenADR(), Is.Null);
+
+            Assert.Multiple(() => {
+                Assert.That(lc.ImportLimitNow?.KW,                                                  Is.EqualTo(23), "the event of 3.0.1 was read");
+                Assert.That(vtn.Reports.Select(report => report.Value<String>("eventID")),         Does.Not.Contain("of-3.0.1"));
+                Assert.That(vtn.Reports,                                                            Has.Count.EqualTo(1));
+            });
+
+        }
+
+        #endregion
+
+        #region OpenADR31_AnEventThatOnlyAsksForReportsIsNoLimit()
+
+        /// <summary>
+        /// An event of 3.1 without intervals - one that only asks for reports -
+        /// is read, and is no limit.
+        /// </summary>
+        [Test]
+        public async Task OpenADR31_AnEventThatOnlyAsksForReportsIsNoLimit()
+        {
+
+            vtn.Add(JObject.Parse($$"""
+                {
+                    "objectType":         "EVENT",
+                    "id":                 "reports-only",
+                    "programID":          "{{FakeVTN.ProgramID}}",
+                    "targets":            [ "ven:{{VENName}}" ],
+                    "reportDescriptors":  [ { "payloadType": "USAGE", "frequency": 0, "reportIntervals": "OPEN_INTERVALS" } ]
+                }
+                """));
+
+            var lc = await AController();
+
+            Assert.That(await lc.PollOpenADR(), Is.Null);
+
+            Assert.Multiple(() => {
+                Assert.That(lc.GridLimits,      Is.Empty);
+                Assert.That(lc.ImportLimitNow,  Is.Null);
             });
 
         }
@@ -568,6 +693,66 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(configuration.InTheClear,   Is.False);
                 Assert.That(new OpenADRConfiguration(VTNURL: "http://grid.example/openadr3/").InTheClear, Is.True);
                 Assert.That(new OpenADRConfiguration(VTNURL: "http://127.0.0.1:2352/openadr3/").InTheClear, Is.False);
+            });
+
+        }
+
+        #endregion
+
+        #region TheVTNURLOfAConnection_IsTakenAsItIs_WithoutAClientID(URL)
+
+        /// <summary>
+        /// A VTN asked through a connection to the grid operator is named by the
+        /// URL of that connection, as it is written down - no slash is put at its
+        /// end - and needs no client ID: the connection says who this controller is.
+        /// </summary>
+        [TestCase("ws://127.0.0.1:2363/lc-1")]
+        [TestCase("wss://grid.example:2363/lc-1")]
+        [TestCase("ssh://lc-1@grid.example:2222")]
+        public void TheVTNURLOfAConnection_IsTakenAsItIs_WithoutAClientID(String URL)
+        {
+
+            Assert.That(OpenADRConfiguration.TryParse(new JObject(new JProperty("enabled", true), new JProperty("vtnURL", URL)), out var configuration, out var error), Is.True, error);
+
+            Assert.Multiple(() => {
+                Assert.That(configuration!.VTNURL,              Is.EqualTo(URL));
+                Assert.That(configuration.ThroughAConnection,   Is.True);
+                Assert.That(configuration.ClientID,             Is.Null);
+                Assert.That(configuration.InTheClear,           Is.False);
+                Assert.That(configuration.ToString(),           Does.Contain("through the connection"));
+            });
+
+            Assert.That(OpenADRConfiguration.TryParse(new JObject(new JProperty("vtnURL", URL + "?x=1")), out _, out error), Is.False);
+            Assert.That(error, Does.Contain("no query"));
+
+        }
+
+        #endregion
+
+        #region ThroughAConnectionThatIsNotThere_ItSaysSo()
+
+        /// <summary>
+        /// A VTN to be asked through a connection that is not written down is
+        /// not asked: every poll says that there is no such connection, and no
+        /// secret is asked for.
+        /// </summary>
+        [Test]
+        public async Task ThroughAConnectionThatIsNotThere_ItSaysSo()
+        {
+
+            var lc = await AController(Secret: null);
+
+            var (changed, error, _) = await lc.TryUpdateOpenADRConfiguration(new JObject(new JProperty("vtnURL",          "ws://127.0.0.1:2363/lc-1"),
+                                                                                         new JProperty("requestTimeout",  2)));
+
+            Assert.That(changed, Is.True, error);
+
+            var said = await lc.PollOpenADR();
+
+            Assert.Multiple(() => {
+                Assert.That(said,               Does.Contain("no connection to a grid operator"));
+                Assert.That(vtn.TokenRequests,  Is.Zero);
+                Assert.That(lc.GridLimits,      Is.Empty);
             });
 
         }

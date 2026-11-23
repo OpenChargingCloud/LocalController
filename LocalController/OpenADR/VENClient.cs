@@ -69,8 +69,15 @@ namespace cloud.charging.open.LocalController.OpenADR
     /// The secret is asked for at every sign-in rather than kept here, so that
     /// a secret set anew is the one the next sign-in sends.
     /// </para>
+    /// <para>
+    /// <b>Through a tunnel</b> of the REST API - a connection to the grid
+    /// operator over a WebSocket or over SSH, whose stream the handler connects
+    /// to - it signs in at nothing: who it is, is said by how the connection
+    /// signed in, and it neither has nor shows a token (see
+    /// <see cref="SignedInByTheConnection"/>).
+    /// </para>
     /// </remarks>
-    public sealed class VENClient : IDisposable
+    public sealed class VENClient : IVTNClient
     {
 
         #region Data
@@ -137,6 +144,13 @@ namespace cloud.charging.open.LocalController.OpenADR
         /// </summary>
         public Int32         TokensReceived  { get; private set; }
 
+        /// <summary>
+        /// Whether who this VEN is, is said by the connection the requests go
+        /// over - a tunnel to the grid operator over a WebSocket or over SSH -
+        /// so that it signs in at nothing and shows no token.
+        /// </summary>
+        public Boolean       SignedInByTheConnection  { get; }
+
         #endregion
 
         #region Events
@@ -159,18 +173,21 @@ namespace cloud.charging.open.LocalController.OpenADR
         /// <param name="Handler">What carries the requests: one that resolves names and judges certificates as the controller does.</param>
         /// <param name="RequestTimeout">How long one request may take.</param>
         /// <param name="TimeProvider">The clock tokens expire by.</param>
+        /// <param name="SignedInByTheConnection">True where the handler connects to a tunnel to the grid operator, whose connection says who this VEN is: then it signs in at nothing.</param>
         public VENClient(Uri                 VTNURL,
                          String              ClientID,
                          Func<String?>       Secret,
                          HttpMessageHandler  Handler,
                          TimeSpan            RequestTimeout,
-                         TimeProvider?       TimeProvider   = null)
+                         TimeProvider?       TimeProvider              = null,
+                         Boolean             SignedInByTheConnection   = false)
         {
 
-            this.VTNURL        = new Uri(Configuration.OpenADRConfiguration.NormalizedURL(VTNURL.ToString()));
-            this.ClientID      = ClientID;
-            this.secret        = Secret;
-            this.TimeProvider  = TimeProvider ?? System.TimeProvider.System;
+            this.VTNURL                   = new Uri(Configuration.OpenADRConfiguration.NormalizedURL(VTNURL.ToString()));
+            this.ClientID                 = ClientID;
+            this.secret                   = Secret;
+            this.TimeProvider             = TimeProvider ?? System.TimeProvider.System;
+            this.SignedInByTheConnection  = SignedInByTheConnection;
 
             this.http          = new HttpClient(Handler, disposeHandler: true) {
                                      Timeout = RequestTimeout
@@ -288,11 +305,14 @@ namespace cloud.charging.open.LocalController.OpenADR
         #region GetEvents(CancellationToken)
 
         /// <summary>
-        /// Every event the VTN has for this VEN, page by page.
+        /// Every event the VTN has for this VEN that is not over, page by page:
+        /// "?active=true" of OpenADR 3.1, without which a VTN lists those that
+        /// are over, too. Which events these are, the VTN decides - by the
+        /// targets it granted this VEN - and not this VEN by targets it asks for.
         /// </summary>
         public async Task<IReadOnlyList<JObject>> GetEvents(CancellationToken CancellationToken = default)
 
-            => await GetAll("events", CancellationToken).ConfigureAwait(false);
+            => await GetAll("events", CancellationToken, "active=true").ConfigureAwait(false);
 
         #endregion
 
@@ -340,7 +360,8 @@ namespace cloud.charging.open.LocalController.OpenADR
         /// A list of the VTN, "?skip" and "?limit" until a page is not full.
         /// </summary>
         private async Task<IReadOnlyList<JObject>> GetAll(String             Path,
-                                                          CancellationToken  CancellationToken)
+                                                          CancellationToken  CancellationToken,
+                                                          String?            Query   = null)
         {
 
             var all = new List<JObject>();
@@ -348,7 +369,7 @@ namespace cloud.charging.open.LocalController.OpenADR
             for (var page = 0; page < MaxPages; page++)
             {
 
-                var (status, json) = await Authorized(() => new HttpRequestMessage(HttpMethod.Get, new Uri(VTNURL, $"{Path}?skip={page * PageSize}&limit={PageSize}")),
+                var (status, json) = await Authorized(() => new HttpRequestMessage(HttpMethod.Get, new Uri(VTNURL, $"{Path}?{(Query is not null ? Query + "&" : "")}skip={page * PageSize}&limit={PageSize}")),
                                                       CancellationToken).ConfigureAwait(false);
 
                 if (status != HttpStatusCode.OK)
@@ -380,6 +401,14 @@ namespace cloud.charging.open.LocalController.OpenADR
         private async Task<(HttpStatusCode Status, JToken? JSON)> Authorized(Func<HttpRequestMessage>  Request,
                                                                               CancellationToken         CancellationToken)
         {
+
+            // Through a tunnel, the connection is who this VEN is: nothing to
+            // sign in for, and nothing to show.
+            if (SignedInByTheConnection)
+            {
+                using var asItIs = Request();
+                return await Send(asItIs, CancellationToken).ConfigureAwait(false);
+            }
 
             var bearer = await SignIn(false, CancellationToken).ConfigureAwait(false);
 
