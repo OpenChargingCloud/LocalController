@@ -195,6 +195,23 @@ namespace cloud.charging.open.LocalController
                                                      new JProperty("lastSeen",        seen.Value.LastSeen.ToString("o"))
                                                  ));
 
+            // How the VTN is reached, where it is asked through a connection
+            // to the grid operator: the scheme of the URL - ws, wss or ssh -,
+            // the binding the connection of that URL is written down with now,
+            // and, in the binding of messages, whether the events are
+            // subscribed to over it. Neither the URL nor the VTN's name: the
+            // scheme alone says nothing of where it goes.
+            var through       = openADRSettings.ThroughAConnection;
+            var transport     = through && Uri.TryCreate(openADRSettings.VTNURL, UriKind.Absolute, out var vtnURL)
+                                    ? vtnURL.Scheme.ToLowerInvariant()
+                                    : null;
+            var binding       = through
+                                    ? GridOperatorConnectionOf(openADRSettings.VTNURL!)?.OpenADRBinding
+                                    : null;
+            Boolean? subscribed = binding == OpenADRBinding.Messages
+                                      ? venClient is OpenADR.ThroughAConnection client && client.Subscribed
+                                      : null;
+
             return new JObject(
 
                 new JProperty("csms",          new JObject(
@@ -213,6 +230,10 @@ namespace cloud.charging.open.LocalController
                     new JProperty("signedIn",         venSignedIn),
                     new JProperty("lastPoll",         lastPollAt?.ToString("o")),
                     new JProperty("lastRead",         lastReadAt?.ToString("o")),
+                    new JProperty("transport",        transport),
+                    new JProperty("binding",          binding is OpenADRBinding known ? ConnectionEntry.AsText(known) : null),
+                    new JProperty("subscribed",       subscribed),
+                    new JProperty("notificationsReceived", OpenADRNotificationsReceived),
                     new JProperty("importKW",         ImportLimitNow?.KW),
                     new JProperty("exportKW",         ExportLimitNow?.KW),
                     new JProperty("limits",           new JArray(GridLimits.Select(limit => limit.ToJSON(now))))

@@ -747,12 +747,20 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.That(changed, Is.True, error);
 
-            var said = await lc.PollOpenADR();
+            var said  = await lc.PollOpenADR();
+
+            // The state says the scheme it is asked over, and no binding and
+            // no subscription: there is no connection of the URL to have them.
+            var state = lc.StateJSON()["openADR"];
 
             Assert.Multiple(() => {
-                Assert.That(said,               Does.Contain("no connection to a grid operator"));
-                Assert.That(vtn.TokenRequests,  Is.Zero);
-                Assert.That(lc.GridLimits,      Is.Empty);
+                Assert.That(said,                                         Does.Contain("no connection to a grid operator"));
+                Assert.That(vtn.TokenRequests,                            Is.Zero);
+                Assert.That(lc.GridLimits,                                Is.Empty);
+                Assert.That(state?["transport"]?.Value<String>(),         Is.EqualTo("ws"));
+                Assert.That(state?["binding"]?.Type,                      Is.EqualTo(JTokenType.Null));
+                Assert.That(state?["subscribed"]?.Type,                   Is.EqualTo(JTokenType.Null));
+                Assert.That(state?["notificationsReceived"]?.Value<Int64>(), Is.Zero);
             });
 
         }

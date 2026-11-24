@@ -330,6 +330,14 @@ namespace cloud.charging.open.LocalController.OpenADR
                    ? Messages
                    : REST;
 
+        /// <summary>
+        /// Whether a subscription of the events is held over the connection
+        /// asked over last - in the binding of messages only; the REST binding
+        /// subscribes to nothing.
+        /// </summary>
+        public Boolean          Subscribed
+            => Messages.Subscribed;
+
         public Uri              VTNURL                   { get; } = new (URL);
         public String           ClientID                 => REST.ClientID;
         public Uri?             TokenURL                 => null;

@@ -379,6 +379,41 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+        #region TheState_SaysTheBindingTheSubscriptionAndTheNotifications()
+
+        /// <summary>
+        /// What "state:read" shows of the VTN asked through a connection: the
+        /// scheme of its URL, the binding of messages, that the events are
+        /// subscribed to over it, how many notifications came and when it was
+        /// last asked - and neither the URL nor anything it signs in with.
+        /// </summary>
+        [Test]
+        public async Task TheState_SaysTheBindingTheSubscriptionAndTheNotifications()
+        {
+
+            var lc = await AController();
+
+            await Until(() => vtn.Subscriptions.Count == 1 && lc.OpenADRLastPoll.Read is not null, "the controller subscribing and reading");
+
+            await vtn.Notify("CREATE", vtn.Send(22));
+
+            await Until(() => lc.OpenADRNotificationsReceived == 1, "the notification to be counted");
+
+            var state = lc.StateJSON()["openADR"] as JObject;
+
+            Assert.Multiple(() => {
+                Assert.That(state?["transport"]?.            Value<String>(),   Is.EqualTo("ws"));
+                Assert.That(state?["binding"]?.              Value<String>(),   Is.EqualTo("messages"));
+                Assert.That(state?["subscribed"]?.           Value<Boolean>(),  Is.True);
+                Assert.That(state?["notificationsReceived"]?.Value<Int64>(),    Is.EqualTo(1));
+                Assert.That(state?["lastPoll"]?.             Value<String>(),   Is.Not.Null);
+                Assert.That(state?.ToString(),                                  Does.Not.Contain(vtn.URL), "The state says where the VTN is.");
+            });
+
+        }
+
+        #endregion
+
         #region AnErrorOfTheVTN_IsSaid_WithWhatItSaid()
 
         /// <summary>

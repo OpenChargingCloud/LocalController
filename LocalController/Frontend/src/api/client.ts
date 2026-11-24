@@ -156,6 +156,22 @@ export interface ControllerState {
                   seen: { id: string; connected: boolean; over: 'WebSocket' | 'SSH' | null;
                           connectedSince: string | null; lastSeen: string }[] };
     openADR:    { running: boolean; signedIn: boolean; lastPoll: string | null; lastRead: string | null;
+                  /**
+                   * The scheme of the URL the VTN is asked over, where it is
+                   * asked through a connection to the grid operator; null
+                   * where it is asked over HTTP.
+                   */
+                  transport: 'ws' | 'wss' | 'ssh' | null;
+                  /**
+                   * How OpenADR is spoken over that connection: its JSON
+                   * messages, or its REST API in a tunnel. Null where it is
+                   * asked over HTTP, or no connection of its URL is written down.
+                   */
+                  binding: 'messages' | 'rest' | null;
+                  /** Whether the events are subscribed to over the connection: in the binding of messages only, else null. */
+                  subscribed: boolean | null;
+                  /** How many notifications the VTN sent over the connection since the controller started. */
+                  notificationsReceived: number;
                   importKW: number | null; exportKW: number | null;
                   limits: { eventID: string; name: string | null; kind: string; kW: number;
                             start: string; end: string | null; state: string }[] };

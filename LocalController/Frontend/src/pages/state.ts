@@ -7,7 +7,10 @@ import { html, nothing, render, repeat, type TemplateResult } from '@node/view';
 /**
  * What is going on, apart from how this local controller is configured:
  * whether the line up to the CSMS stands and since when, which charging
- * stations were seen when, and the grid operator's limits in force.
+ * stations were seen when, and the grid operator's limits in force - with,
+ * where its VTN is asked through a connection, the transport and the binding
+ * of OpenADR it is asked in, whether its events are subscribed to, how many
+ * notifications came, and when it was last asked.
  *
  * Read-only, and for "state:read" - which the support has and which reads
  * none of the configuration (white paper "Signed OCPP Messages and Signer
@@ -147,6 +150,31 @@ function stationsCard(state: ControllerState): TemplateResult {
 }
 
 
+/** What the schemes of a connection to the grid operator are called here. */
+const transportNames: Readonly<Record<'ws' | 'wss' | 'ssh', string>> = {
+    ws:   'WebSocket, unencrypted',
+    wss:  'WebSocket over TLS',
+    ssh:  'SSH'
+};
+
+/**
+ * How the VTN is reached where it is asked through a connection to the grid
+ * operator: over which transport, and in which binding of OpenADR - or that
+ * no connection of its URL is written down, which has neither.
+ */
+function bindingSaid(transport: 'ws' | 'wss' | 'ssh', binding: 'messages' | 'rest' | null): TemplateResult {
+
+    const over = transportNames[transport] ?? transport;
+
+    return binding === 'messages'
+               ? html`the connection to the grid operator, ${over}, in the messages of OpenADR`
+               : binding === 'rest'
+                     ? html`the connection to the grid operator, ${over}, as the REST API of OpenADR in a tunnel`
+                     : html`<span class="badge warn">no connection</span> to the grid operator is written down under its URL (${over})`;
+
+}
+
+
 function limitsCard(state: ControllerState): TemplateResult {
 
     const active = state.openADR.limits.filter(limit => limit.state === 'active');
@@ -166,6 +194,30 @@ function limitsCard(state: ControllerState): TemplateResult {
                                 ? html`<span class="badge ok">signed in</span>`
                                 : html`<span class="badge warn">not signed in</span>`}
                 </dd>
+
+                ${state.openADR.transport ? html`
+                    <dt>Reached over</dt>
+                    <dd data-openadr-binding>${bindingSaid(state.openADR.transport, state.openADR.binding)}</dd>
+                ` : nothing}
+
+                ${state.openADR.binding === 'messages' ? html`
+                    <dt>Events</dt>
+                    <dd data-openadr-subscribed>
+                        ${state.openADR.subscribed
+                              ? html`<span class="badge ok">subscribed</span>`
+                              : html`<span class="badge warn">not subscribed</span>`}
+                    </dd>
+                ` : nothing}
+
+                ${state.openADR.transport ? html`
+                    <dt>Notifications</dt>
+                    <dd data-openadr-notifications>${formatNumber(state.openADR.notificationsReceived ?? 0, 0)}</dd>
+                ` : nothing}
+
+                ${state.openADR.running ? html`
+                    <dt>Last asked</dt>
+                    <dd data-openadr-last-poll>${state.openADR.lastPoll ? formatTimestamp(state.openADR.lastPoll) : 'not yet'}</dd>
+                ` : nothing}
 
                 ${state.openADR.lastRead ? html`
                     <dt>Last read</dt>
