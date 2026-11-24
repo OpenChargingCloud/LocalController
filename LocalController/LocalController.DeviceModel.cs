@@ -75,11 +75,20 @@ namespace cloud.charging.open.LocalController
         /// device model of its OCPP node.
         /// </summary>
         private DeviceModelBridge NewDeviceModelBridge()
+        {
 
-            => new (this,
-                    CSMSNames,
-                    ConnectsOCPP2_1: () => csmsSettings.URL is { Length: > 0 },
-                    ConnectsOCPP1_6: () => false);
+            var bridge = new DeviceModelBridge(this,
+                                               CSMSNames,
+                                               ConnectsOCPP2_1: () => csmsSettings.URL is { Length: > 0 },
+                                               ConnectsOCPP1_6: () => false);
+
+            // What a GetLog of the CSMS uploads: the controller's own log, to a
+            // file server of its configuration - over SFTP or HTTP(S).
+            bridge.FileTransfers.FileProvider = NodeLogFiles.Provider(this);
+
+            return bridge;
+
+        }
 
         #endregion
 
