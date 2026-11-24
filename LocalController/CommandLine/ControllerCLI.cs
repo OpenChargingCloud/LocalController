@@ -133,8 +133,9 @@ namespace cloud.charging.open.LocalController.CommandLine
         /// </summary>
         private void RegisterStationCommands()
 
-            => RegisterCommands(new StationKeysCommand(this, LocalControllerAccess.Stations),
-                                new StationPinsCommand(this, LocalControllerAccess.Stations));
+            => RegisterCommands(new StationKeysCommand   (this, LocalControllerAccess.Stations),
+                                new StationPinsCommand   (this, LocalControllerAccess.Stations),
+                                new StationTargetsCommand(this, LocalControllerAccess.Stations));
 
         #endregion
 

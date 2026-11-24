@@ -393,6 +393,27 @@ namespace cloud.charging.open.LocalController.Tests
         #region StationPins_AreGivenListedAndTakenAway_AtTheConsole()
 
         /// <summary>
+        /// Where what the charging stations send up is forwarded to is at the
+        /// console as well: a local controller forwards, as its kind does, and
+        /// with no target every station goes to the back end in charge.
+        /// </summary>
+        [Test]
+        public async Task StationTargets_AreListed_AtTheConsole()
+        {
+
+            var lc        = AController();
+            using var cli = new ControllerCLI(lc);
+
+            var listed    = await cli.Execute("stationTargets");
+
+            Assert.That(listed, Is.EqualTo(new[] {
+                                    "This local controller forwards, as its kind does.",
+                                    "No target: every charging station goes to the back end in charge of this local controller."
+                                }));
+
+        }
+
+        /// <summary>
         /// A key pin given to a station that is not listed yet lists it, is
         /// listed with who gave it, is refused for a second station, and is
         /// taken away in another notation than it was given in.

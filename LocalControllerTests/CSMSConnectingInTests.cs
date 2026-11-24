@@ -708,7 +708,9 @@ namespace cloud.charging.open.LocalController.Tests
 
         /// <summary>
         /// "Connect by itself" is what lets it in: switched off, the CSMS that is in is let go of and
-        /// turned away at the door - and let in again once it is switched on.
+        /// turned away at the door for now - 503, not the 401 of a wrong password, so that it comes
+        /// back by itself (WebSocketSignIns.ASwitchedOffConnectionTriesAgainAfter) - and let in again
+        /// once it is switched on.
         /// </summary>
         [Test]
         public async Task SwitchedOff_ItIsLetGoOf_AndLetInAgainOnceSwitchedOn()
@@ -727,7 +729,7 @@ namespace cloud.charging.open.LocalController.Tests
             Assert.Multiple(async () => {
                 Assert.That(SaidOf(id),                                                               Does.Contain("is not let in"));
                 Assert.That(Controller.CSMSConnected,                                                 Is.False);
-                Assert.That(await turnedAway.Connect(Door(CSMSName), CSMSName, ItsPassword, Overlay),    Is.EqualTo(HttpStatusCode.Unauthorized));
+                Assert.That(await turnedAway.Connect(Door(CSMSName), CSMSName, ItsPassword, Overlay),    Is.EqualTo(HttpStatusCode.ServiceUnavailable));
             });
 
             LetIn(id, true);
