@@ -54,6 +54,14 @@ namespace cloud.charging.open.LocalController
 
         private readonly DeviceModelBridge deviceModelBridge;
 
+        /// <summary>
+        /// The most a file an UpdateFirmware points the controller to may have,
+        /// 1 GiB: the image of a controller carries a whole system and is larger
+        /// than that of a station, and still not so large that a wrong URL fills
+        /// its disk. "maxDownloadSize" of its configuration file goes before it.
+        /// </summary>
+        public const Int64 MaxDownloadSize = 1024L * 1024 * 1024;
+
         #endregion
 
         #region (internal) DeviceModelBridge
@@ -84,7 +92,10 @@ namespace cloud.charging.open.LocalController
 
             // What a GetLog of the CSMS uploads: the controller's own log, to a
             // file server of its configuration - over SFTP or HTTP(S).
-            bridge.FileTransfers.FileProvider = NodeLogFiles.Provider(this);
+            bridge.FileTransfers.FileProvider    = NodeLogFiles.Provider(this);
+
+            // What an UpdateFirmware downloads: at most MaxDownloadSize.
+            bridge.FileTransfers.MaxDownloadSize = MaxDownloadSize;
 
             return bridge;
 
