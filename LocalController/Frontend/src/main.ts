@@ -16,6 +16,7 @@ import { statePage }              from './pages/state';
 
 import { sshKeysSection }         from '@ocpp/sshKeys';
 import { connectionsPage }        from '@ocpp/pages/connections';
+import { ocppLogMenuEntry, ocppLogPage } from '@ocpp/pages/ocppLog';
 import { commissioningPage }      from '@ocpp/pages/commissioning';
 import { setConnectionsResource, setNodeNoun, setNodeTraits } from '@ocpp/settings';
 
@@ -66,6 +67,8 @@ startNode({
             { path: '/configuration/commissioning',             label: 'Commissioning',       icon: 'fa-screwdriver-wrench', permission: [ 'commissioning:read' ] }
         ]),
         { path: '/state', label: 'State', icon: 'fa-heart-pulse', permission: [ 'state:read' ] },
+        // Every OCPP message this node sent and received.
+        ocppLogMenuEntry,
         nodeMenu.logs
     ],
 
@@ -96,6 +99,8 @@ startNode({
     // say, for a desk that may read only those, where the configuration's own
     // page had answered 403 (found by the charging station).
     pages: {
+
+        '/ocpp-log':                                ocppLogPage,
 
         '/configuration':                           configurationPage,
 

@@ -12,6 +12,9 @@
 // as they do there.
 @use '@ocpp/styles/connections';
 
+// Every OCPP message of this node, on its OCPP log page.
+@use '@ocpp/styles/ocppLog';
+
 // The charging station server: certificates, accepted chains, station logins.
 //
 // These pages are lists of things that each have a state worth seeing at a
