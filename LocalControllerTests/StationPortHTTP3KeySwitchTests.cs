@@ -38,9 +38,10 @@ namespace cloud.charging.open.LocalController.Tests
 
     /// <summary>
     /// HTTP/3 of the station port shows the server key the port has switched
-    /// to: QUIC is handed its certificate when it starts, and the port starts
-    /// it again on a switch - seen here by a client that is not Hermod's, the
-    /// HTTP/3 of .NET itself, which says what it was shown.
+    /// to: QUIC asks for the certificate at every new connection, as TCP does
+    /// at every handshake, and is not started again for a switch - seen here
+    /// by a client that is not Hermod's, the HTTP/3 of .NET itself, which says
+    /// what it was shown.
     /// </summary>
     public class StationPortHTTP3KeySwitchTests
     {
@@ -233,9 +234,9 @@ namespace cloud.charging.open.LocalController.Tests
         #region ASwitch_IsShownOverHTTP3_ToAClientOfDotNet()
 
         /// <summary>
-        /// A switch to the next server key starts HTTP/3 again, on the same UDP
-        /// port, and a new connection over HTTP/3 is shown the new key - which
-        /// is what a station that pins it checks.
+        /// After a switch to the next server key a new connection over HTTP/3
+        /// is shown the new key, on the same UDP port, without HTTP/3 being
+        /// started again - which is what a station that pins it checks.
         /// </summary>
         [Test]
         public async Task ASwitch_IsShownOverHTTP3_ToAClientOfDotNet()
@@ -253,14 +254,12 @@ namespace cloud.charging.open.LocalController.Tests
 
             Assert.That(controller.Certificates.TrySwitchToNextKey(StationPortCertificates.Listener, null, out _, out var error), Is.True, error);
 
-            Assert.That(await Until(() => said.Any(message => message.Contains("HTTP/3 of the charging station port was started again"))),
-                        Is.True, "HTTP/3 was not started again after the switch: " + server.WhyNoHTTP3 + Environment.NewLine + String.Join(Environment.NewLine, said));
-
             var shown = await ShownOverHTTP3();
 
             Assert.Multiple(() => {
-                Assert.That(server.HTTP3Port,  Is.EqualTo(port), "HTTP/3 is not taken on its port after the switch: " + server.WhyNoHTTP3);
-                Assert.That(shown,                         Is.EqualTo(nextPin), "what HTTP/3 shows after the switch");
+                Assert.That(server.HTTP3Port,  Is.EqualTo(port),    "HTTP/3 is not taken on its port after the switch: " + server.WhyNoHTTP3);
+                Assert.That(shown,             Is.EqualTo(nextPin), "what HTTP/3 shows after the switch");
+                Assert.That(said,              Has.None.Contains("HTTP/3 of the charging station port was started again"), "HTTP/3 was started again for the switch");
             });
 
         }
