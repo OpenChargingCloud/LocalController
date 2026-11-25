@@ -288,6 +288,16 @@ secret changed or taken away ends the session it opened. A one-time token that
 is not bound to the session is a password to an SSH server, and a password
 lets no charging station in.
 
+Over the same connection a station may resolve names and get its time from
+the controller, where its login group gives it the channels
+`dns@open.charging.cloud` and `ntske/1@open.charging.cloud` and the `ssh`
+section switches them on - `"dns": { "enabled": true }` and `"nts": {
+"enabled": true }`, both off where the file says nothing. The controller
+answers no name itself: it passes every question on to its own name servers.
+The time is its clock, from a time server of its own - NTS keys over SSH, NTP
+with NTS on UDP port 123 - as WWCP_Node's README says under "Names and time
+for the logins of a kind".
+
 The whole way from both ends, step by step - the options of a key, the
 settings and what to look at when a station does not connect - is in
 [Charging stations over SSH: a walk-through](https://github.com/OpenChargingCloud/LocalControllerCLI/blob/master/docs/Charging-stations-over-SSH.md)

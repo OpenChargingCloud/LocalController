@@ -23,8 +23,11 @@ using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
+using org.GraphDefined.Vanaheimr.Hermod;
+using org.GraphDefined.Vanaheimr.Hermod.DNS;
 using org.GraphDefined.Vanaheimr.Hermod.SSH;
 using org.GraphDefined.Vanaheimr.Hermod.SSH.Client;
+using org.GraphDefined.Vanaheimr.Norn.NTS;
 
 using org.GraphDefined.Vanaheimr.Illias;
 
@@ -482,6 +485,117 @@ namespace cloud.charging.open.LocalController.Tests
                 Assert.That(await Refused(noMore, Subsystem),                Is.False, "A station did not get OCPP.");
                 Assert.That(await Refused(noMore, LoginSSHSignIns.NTSKE),  Is.True,  "A station kept NTS-KE its group gives no more.");
                 Assert.That(await Refused(noMore, LoginSSHSignIns.DNS),    Is.True,  "A station kept DNS its group gives no more.");
+            }
+
+        }
+
+        #endregion
+
+        #region AStation_ResolvesNamesAndGetsItsTime_FromTheController_OverItsSSHConnection()
+
+        /// <summary>
+        /// "ssh.dns" and "ssh.nts" switched on: a station whose group gives it the
+        /// channels resolves a name the controller passes on to its own name server,
+        /// and gets NTS keys over SSH for NTP with NTS from the controller's time
+        /// server - over the connection it signed in with. A station whose group
+        /// gives it OCPP alone has neither, and switched off again, nobody has.
+        /// </summary>
+        [Test]
+        public async Task AStation_ResolvesNamesAndGetsItsTime_FromTheController_OverItsSSHConnection()
+        {
+
+            // The name server the controller asks: it knows the CSMS.
+            var nameServer = new DNSServer(
+                                 new AuthoritativeDNSRequestHandler(
+                                     new InMemoryDNSZone().Add(new A(DomainName.Parse("csms.example.test."),
+                                                                     DNSQueryClasses.IN,
+                                                                     TimeSpan.FromMinutes(5),
+                                                                     IPv4Address.Parse("127.0.0.42")))
+                                 ),
+                                 new DNSServerOptions {
+                                     UDPUnicastSocket    = new IPSocket(IPv4Address.Localhost, IPPort.Zero),
+                                     EnableUDPMulticast  = false,
+                                     EnableTCPUnicast    = false
+                                 }
+                             );
+
+            await nameServer.Start();
+
+            try
+            {
+
+                Assert.That(Controller.TryUpdateDNSConfiguration(
+                                JObject.Parse($$"""{ "servers": [ { "address": "127.0.0.1", "port": {{nameServer.ActiveUDPUnicastSocket!.Value.Port}} } ], "useCache": false }"""),
+                                out var dnsError),
+                            Is.True, dnsError);
+
+                IPPort ntpPort;
+
+                using (var probe = new System.Net.Sockets.UdpClient(new IPEndPoint(System.Net.IPAddress.Loopback, 0)))
+                    ntpPort = IPPort.Parse(((IPEndPoint) probe.Client.LocalEndPoint!).Port);
+
+                var on = await Controller.TryUpdateSSHConfiguration(
+                                   JObject.Parse($$"""{ "dns": { "enabled": true }, "nts": { "enabled": true, "ntpPort": {{ntpPort}}, "ntpHost": "127.0.0.1" } }"""));
+
+                Assert.That(on.IsChanged, Is.True, on.Error);
+                Assert.That(on.Notice,    Is.Null, "something was not served as it says");
+
+                Assert.That(Controller.WebSocketLogins.TryAddOrUpdateGroup("with-both", "with-both", true, [ AuthMethod.SSHKey ], [ WebSocketClientAuthentication.HTTPAuthWithoutTLS ], null,
+                                                                           [ LoginSSHSignIns.NTSKE, LoginSSHSignIns.DNS ], out var error, out _), Is.True, error);
+                Assert.That(Controller.WebSocketLogins.TryAddOrUpdateGroup("ocpp-only", "ocpp-only", true, [ AuthMethod.SSHKey ], [ WebSocketClientAuthentication.HTTPAuthWithoutTLS ], null,
+                                                                           [], out error, out _), Is.True, error);
+
+                GiveAKey(User_Id.Parse("cs002"), cs002Key,    "with-both");
+                GiveAKey(User_Id.Parse("cs003"), strangerKey, "ocpp-only");
+
+                await using (var cs002 = await SSHClient.Connect("127.0.0.1", Controller.SSHPort!.Value, SSHAs("cs002", cs002Key)).AsTask().WaitAsync(TimeSpan.FromSeconds(10)))
+                {
+
+                    await using var dns = new DNSSSHClient(_ => ValueTask.FromResult(cs002), QueryTimeout: TimeSpan.FromSeconds(10));
+
+                    var csms    = await dns.Query<A>(DomainName.Parse("csms.example.test."), ForceUpdate: true);
+
+                    var nts     = new NTSClient(DomainName.Localhost, NTP_Port: ntpPort, IPVersionPreference: IPVersionPreference.IPv4Only);
+                    var keys    = await nts.GetNTSKERecordsOverSSH(cs002);
+
+                    Assert.That(keys.Success, Is.True, keys.ErrorMessage);
+
+                    var time    = await nts.QueryTime(NTSKEResponse: keys.Response!, Timeout: TimeSpan.FromSeconds(10));
+
+                    Assert.Multiple(() => {
+                        Assert.That(csms.ResponseCode,                          Is.EqualTo(DNSResponseCodes.NoError));
+                        Assert.That(csms.FilteredAnswers.Single().IPv4Address,  Is.EqualTo(IPv4Address.Parse("127.0.0.42")));
+                        Assert.That(csms.AuthoritativeAnswer,                   Is.False, "the controller answered a name of somebody else's with authority");
+                        Assert.That(time.Success,                               Is.True,  time.ErrorMessage);
+                        Assert.That(keys.Response!.NTPv4Ports,                  Is.EqualTo(new[] { ntpPort }));
+                    });
+
+                }
+
+                // OCPP alone, as its group gives it.
+                await using (var cs003 = await SSHClient.Connect("127.0.0.1", Controller.SSHPort!.Value, SSHAs("cs003", strangerKey)).AsTask().WaitAsync(TimeSpan.FromSeconds(10)))
+                {
+                    Assert.That(await Refused(cs003, LoginSSHSignIns.DNS),    Is.True,  "A station got DNS its group does not give it.");
+                    Assert.That(await Refused(cs003, LoginSSHSignIns.NTSKE),  Is.True,  "A station got NTS-KE its group does not give it.");
+                    Assert.That(await Refused(cs003, Subsystem),              Is.False, "A station did not get OCPP.");
+                }
+
+                // Switched off: served to nobody, whatever a group gives.
+                var off = await Controller.TryUpdateSSHConfiguration(JObject.Parse("""{ "dns": { "enabled": false }, "nts": { "enabled": false } }"""));
+
+                Assert.That(off.IsChanged, Is.True, off.Error);
+
+                await using (var cs002 = await SSHClient.Connect("127.0.0.1", Controller.SSHPort!.Value, SSHAs("cs002", cs002Key)).AsTask().WaitAsync(TimeSpan.FromSeconds(10)))
+                {
+                    Assert.That(await Refused(cs002, LoginSSHSignIns.DNS),    Is.True,  "A station got DNS that is switched off.");
+                    Assert.That(await Refused(cs002, LoginSSHSignIns.NTSKE),  Is.True,  "A station got NTS-KE that is switched off.");
+                    Assert.That(await Refused(cs002, Subsystem),              Is.False, "A station did not get OCPP.");
+                }
+
+            }
+            finally
+            {
+                await nameServer.Stop();
             }
 
         }
