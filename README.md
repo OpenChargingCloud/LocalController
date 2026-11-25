@@ -1,5 +1,7 @@
 # LocalController
 
+![The EV charging test environment, the local controller (LC) highlighted](docs/EVChargingTestEnvironment.svg)
+
 One EV charging local controller, with a web interface in front of it: a C#
 HTTP backend built on [Hermod](https://github.com/Vanaheimr/Hermod), and a
 frontend of HTML, SCSS and TypeScript bundled by webpack and embedded into the
