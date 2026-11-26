@@ -663,6 +663,54 @@ namespace cloud.charging.open.LocalController.Tests
 
         #endregion
 
+
+        #region TheDeviceModelIsReadAsTheOCPPLogIs()
+
+        /// <summary>
+        /// The OCPP Device Model page of the controller, at its JSON API: let
+        /// in where the OCPP log lets in - a CPO, not a viewer -, its
+        /// components of OCPP 2.1 and no configuration keys of OCPP 1.6, which
+        /// it does not speak; the values OCPP keeps WriteOnly shown to a
+        /// systemadmin alone (Achim 2026-11-26).
+        /// </summary>
+        [Test]
+        public async Task TheDeviceModelIsReadAsTheOCPPLogIs()
+        {
+
+            await TestPorts.StartedOnFreshPorts(() => AController());
+
+            using var cpo     = await SignedInAs(User_Id.Parse("cpo1"),    "cpo");
+            using var viewer  = await SignedInAs(User_Id.Parse("viewer1"), "viewer");
+            using var admin   = await SignedInAs(User_Id.Parse("admin1"),  "systemadmin");
+
+            var asCPO         = await cpo.   GetAsync("api/v1/ocpp/deviceModel");
+            var cpoLog        = await cpo.   GetAsync("api/v1/ocpp/messages");
+            var asViewer      = await viewer.GetAsync("api/v1/ocpp/deviceModel");
+            var viewerLog     = await viewer.GetAsync("api/v1/ocpp/messages");
+            var asAdmin       = await admin. GetAsync("api/v1/ocpp/deviceModel");
+
+            var cpoSees       = JObject.Parse(await asCPO.  Content.ReadAsStringAsync());
+            var adminSees     = JObject.Parse(await asAdmin.Content.ReadAsStringAsync());
+
+            Assert.Multiple(() => {
+
+                Assert.That(asCPO.StatusCode,                                   Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(cpoLog.StatusCode,                                  Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(asViewer.StatusCode,                                Is.EqualTo(HttpStatusCode.Forbidden));
+                Assert.That(viewerLog.StatusCode,                               Is.EqualTo(HttpStatusCode.Forbidden));
+
+                Assert.That(cpoSees["writeOnlyShown"]?.Value<Boolean>(),        Is.False);
+                Assert.That(adminSees["writeOnlyShown"]?.Value<Boolean>(),      Is.True);
+
+                Assert.That((cpoSees["deviceModel"]?["ocpp2.1"] as JObject)?.Count ?? 0,  Is.GreaterThan(0), cpoSees.ToString());
+                Assert.That((cpoSees["deviceModel"] as JObject)?.ContainsKey("ocpp1.6"),  Is.False, "A controller that speaks no OCPP 1.6 showed keys of it.");
+
+            });
+
+        }
+
+        #endregion
+
     }
 
 }

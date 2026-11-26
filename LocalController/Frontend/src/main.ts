@@ -17,6 +17,7 @@ import { statePage }              from './pages/state';
 import { sshKeysSection }         from '@ocpp/sshKeys';
 import { connectionsPage }        from '@ocpp/pages/connections';
 import { ocppLogMenuEntry, ocppLogPage } from '@ocpp/pages/ocppLog';
+import { deviceModelMenuEntry, deviceModelPage } from '@ocpp/pages/deviceModel';
 import { commissioningPage }      from '@ocpp/pages/commissioning';
 import { setConnectionsResource, setNodeNoun, setNodeTraits } from '@ocpp/settings';
 
@@ -69,6 +70,8 @@ startNode({
         { path: '/state', label: 'State', icon: 'fa-heart-pulse', permission: [ 'state:read' ] },
         // Every OCPP message this node sent and received.
         ocppLogMenuEntry,
+        // What this node shows OCPP of itself: its Device Model, as it is now.
+        deviceModelMenuEntry,
         nodeMenu.logs
     ],
 
@@ -101,6 +104,7 @@ startNode({
     pages: {
 
         '/ocpp-log':                                ocppLogPage,
+        '/ocpp-device-model':                       deviceModelPage,
 
         '/configuration':                           configurationPage,
 
