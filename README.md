@@ -295,8 +295,10 @@ section switches them on - `"dns": { "enabled": true }` and `"nts": {
 "enabled": true }`, both off where the file says nothing. The controller
 answers no name itself: it passes every question on to its own name servers.
 The time is its clock, from a time server of its own - NTS keys over SSH, NTP
-with NTS on UDP port 123 - as WWCP_Node's README says under "Names and time
-for the logins of a kind".
+with NTS on UDP port 123, and no plain NTP unless `"plainNTP": true` - which
+hands it out as synchronised only where the check of the clock against the
+legal group found it right, one stratum below the time server it rests on; as
+WWCP_Node's README says under "Names and time for the logins of a kind".
 
 The whole way from both ends, step by step - the options of a key, the
 settings and what to look at when a station does not connect - is in
