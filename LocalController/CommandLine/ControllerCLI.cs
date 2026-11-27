@@ -127,15 +127,17 @@ namespace cloud.charging.open.LocalController.CommandLine
         #region (private) RegisterStationCommands()
 
         /// <summary>
-        /// The commands of every node that serves charging stations, asking
-        /// for the controller's "stations" - once, in this class alone, so
+        /// The commands of every node that serves charging stations, those of
+        /// its stations asking for the controller's "stations", serverKeys for
+        /// the key of its charging station port - once, in this class alone, so
         /// that a command line derived from it has them once as well.
         /// </summary>
         private void RegisterStationCommands()
 
             => RegisterCommands(new StationKeysCommand   (this, LocalControllerAccess.Stations),
                                 new StationPinsCommand   (this, LocalControllerAccess.Stations),
-                                new StationTargetsCommand(this, LocalControllerAccess.Stations));
+                                new StationTargetsCommand(this, LocalControllerAccess.Stations),
+                                new ServerKeysCommand    (this));
 
         #endregion
 
